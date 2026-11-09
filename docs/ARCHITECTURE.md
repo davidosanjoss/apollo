@@ -1,0 +1,96 @@
+# Arquitetura do Apollo
+
+## Requisitos
+
+| Requisito | Implicação |
+|---|---|
+| Google e Microsoft funcionando 100% | Motor Chromium, o que descarta Tauri/WebKitGTK |
+| Leve: não carregar tudo, nada inútil em segundo plano | Restauração preguiçosa, hibernação de abas, módulos nativos em vez de extensões |
+| Vídeo e aba ativa sem limitação | Decodificação por hardware, aba tocando mídia nunca hiberna |
+| Workspaces com logins isolados | Uma partição de sessão (`persist:ws-<id>`) por workspace |
+| Streaming com DRM | castLabs ECS (Electron com Widevine) |
+| Bitwarden | Cliente nativo do protocolo Bitwarden (não a extensão) |
+| Bloqueadores desativáveis por aba/site/workspace | Pipeline de rede central com regras em camadas |
+| Grupos de abas e sessão restaurada | SQLite com salvamento contínuo |
+| Privacidade | Zero telemetria, nenhum dado sai sem motivo |
+| Linux e Windows | Electron multiplataforma, builds pelo CI |
+
+## Decisões
+
+### D1: Electron (castLabs ECS) como base
+Alternativas avaliadas:
+- **Tauri:** WebKitGTK quebra apps Google/Microsoft.
+- **Qt WebEngine:** Chromium atrasado e ecossistema menor.
+- **Fork de Chromium/Firefox:** manutenção inviável para uma pessoa.
+
+O ECS é o Electron oficial com Widevine. Custo: atualizar no ritmo do Electron (no mínimo mensalmente) por segurança.
+
+### D2: Processo principal é dono das páginas
+Migração de `<webview>` para `WebContentsView`.
+
+- A UI (sidebar, abas, barra) é uma camada sem privilégios.
+- Páginas rodam em sandbox, sem Node e sem preload.
+- Nenhum site tem caminho até o código que controla o navegador.
+
+```
+Processo principal (confiável)
+ ├─ WorkspaceManager   sessões por workspace
+ ├─ TabManager         WebContentsView por aba, hibernação
+ ├─ NetworkPipeline    um único interceptador por sessão; módulos se plugam
+ ├─ PolicyEngine       permissões, downloads, certificados, popups
+ ├─ Vault              cliente Bitwarden (chaves só em memória)
+ └─ Storage            SQLite (node:sqlite)
+UI (sandbox)  ◄── IPC tipado e validado
+Páginas (sandbox) ── sem IPC
+```
+
+### D3: Pipeline de rede central
+O Electron aceita **um** listener por evento `webRequest` por sessão. Bloqueador, cookies de terceiros, limpeza de URL e GPC são etapas de um único pipeline.
+
+Regras resolvidas em camadas, da menos para a mais específica:
+
+```
+global → workspace → site no workspace → aba (temporária)
+```
+
+Interruptores independentes: anúncios, rastreadores, cookies de terceiros, limpeza de URL. Requisições de service workers (sem aba) usam a regra de site/workspace.
+
+### D4: Hibernação de abas
+- Aba hibernada = WebContents destruído. Ficam url, título, favicon, histórico de navegação (`navigationHistory.restore`) e posição de rolagem.
+- **Nunca hiberna:** fixadas, tocando mídia, em chamada, marcadas "sempre ativo", com `beforeunload`.
+- Gatilhos: tempo por workspace e teto de memória (hiberna as usadas há mais tempo primeiro).
+
+### D5: Sessão e grupos em SQLite
+```
+Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
+```
+- Salvo a cada mudança, então sobrevive a travamento.
+- Na abertura, restaura tudo, mas só carrega a aba ativa.
+- **Cookies de sessão não sobrevivem a reinício no Electron** (fase 0). O Apollo deve persisti-los por conta própria para a restauração manter logins.
+
+### D6: Bitwarden nativo
+- Implementa o protocolo do Bitwarden: login, derivação de chave local, `/sync` e decifra em memória.
+- **Não** usa `bw serve`, que expõe uma API local sem autenticação.
+- Preenchimento só no domínio exato e nunca em iframe de outra origem.
+- Bloqueio automático. Compatível com bitwarden.com e Vaultwarden.
+
+### D7: DNS via Cloudflare Zero Trust Gateway
+- DoH em modo `secure`. O endereço do Gateway fica em `settings.json` local, nunca no repositório.
+- Limitação: o DNS é global do app, não por workspace.
+
+### D8: Privacidade
+- **Padrões:** sem telemetria, permissões negadas por padrão, cookies de terceiros bloqueados (com exceções de SSO Microsoft/Google), EasyPrivacy, GPC, limpeza de URL, workspace temporário opcional.
+- **Fora do alcance:** dados coletados pelos próprios serviços onde você está logado, fingerprinting completo, Safe Browsing (troca consciente).
+
+### D9: Segurança do binário
+- Fuses do Electron: `RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off, `EnableCookieEncryption` on, integridade do ASAR.
+- Windows: assinatura VMP do castLabs para DRM.
+
+## Roadmap
+
+0. ✅ Validação técnica ([phase-0.md](phase-0.md))
+1. Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
+2. Sessão e abas: restauração, grupos, hibernação, monitor de memória
+3. Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL
+4. Bitwarden nativo
+5. Módulos, painéis laterais, paleta de comandos
