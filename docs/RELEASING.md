@@ -68,3 +68,10 @@ Para Netflix/Prime funcionarem no Windows, o build precisa de assinatura VMP do 
 2. Adicionar os secrets `EVS_ACCOUNT_NAME` e `EVS_PASSWD` no repositório do GitHub.
 
 Sem isso, o build sai normalmente, só sem a assinatura.
+
+## Proteções
+
+| Repositório | Proteção |
+|---|---|
+| `apollo-releases` | `main`: sem push direto (só PR), sem force-push, sem apagar, vale para admins. Tags `v*` imutáveis (não podem ser apagadas nem movidas); criar novas continua liberado para o release. |
+| `apollo` (privado) | **Sem proteção no servidor**: o GitHub só oferece proteção de branch/rulesets em repositório privado no plano Pro. Na prática, a `main` só recebe merges de PR com o CI verde, e o workflow de release recusa tags fora da `main`. |
