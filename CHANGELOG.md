@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.2.0] - 2026-11-09
+
 ### Adicionado
 - Página inicial própria (`apollo://home`): relógio, data e pesquisa, sem carregar nada externo.
 - Permissões negadas por padrão: câmera, microfone, localização etc. pedem autorização numa barra, e a decisão é lembrada por site e por workspace.
