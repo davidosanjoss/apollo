@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node scripts/build.mjs && vitest run -c vitest.e2e.config.ts",
-    "check": "scripts/check.sh"
+    "check": "scripts/check.sh",
+    "test:interop": "vitest run -c vitest.interop.config.ts"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
@@ -26,6 +27,7 @@
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "hash-wasm": "^4.13.0",
     "tldts": "^7.4.19",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"

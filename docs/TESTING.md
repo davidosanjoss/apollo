@@ -5,6 +5,7 @@
 | `npm test` | Unitários (`tests/unit`): Node puro, sem abrir o Electron | ~1 s |
 | `npm run test:watch` | Unitários em modo observação | — |
 | `npm run test:e2e` | Integração (`tests/e2e`): compila e abre o Apollo de verdade | ~5 s |
+| `npm run test:interop` | Compatibilidade com o Bitwarden real (`tests/interop`): Vaultwarden em Docker + CLI oficial | ~1 min |
 | `npm run typecheck` | Tipos de `src/` e `tests/` | — |
 
 O CI roda tipos + unitários em todo push na `dev` e em PRs (Linux e Windows), e os de integração no Linux com tela virtual e chaveiro do sistema (`scripts/ci-e2e.sh`: xvfb + gnome-keyring, necessário para os cookies de sessão). O release também roda os unitários antes de gerar os instaladores.
@@ -19,6 +20,16 @@ Ao encontrar um bug:
 4. Registrar a correção no `CHANGELOG.md` em "Corrigido".
 
 Teste unitário quando a lógica dá para isolar; integração quando o bug depende do app real (cliques, foco, sessões, reinício).
+
+## Compatibilidade com o Bitwarden (`tests/interop`)
+
+Testar a criptografia só contra ela mesma seria circular (um erro consistente passaria). Por isso:
+
+1. Sobe um **Vaultwarden** descartável (Docker, com HTTPS autoassinado — o CLI oficial recusa http).
+2. Cria a conta com a **criptografia do Apollo** e confere que o **CLI oficial do Bitwarden** (`@bitwarden/cli`, versão fixa, instalado em `.cache/bw-cli`) consegue entrar e desbloquear.
+3. O CLI oficial cria itens (inclusive de **organização**, que passam por RSA) e o Apollo entra pela **chave de API**, sincroniza e decifra.
+
+Cobre PBKDF2 e Argon2id. Precisa de `docker` e `openssl`; roda no CI (Linux).
 
 ## Unitários (`tests/unit`)
 

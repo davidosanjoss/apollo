@@ -84,6 +84,10 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - **Não** usa `bw serve`, que expõe uma API local sem autenticação.
 - Preenchimento só no domínio exato e nunca em iframe de outra origem.
 - Bloqueio automático. Compatível com bitwarden.com e Vaultwarden.
+- Conexão pela **chave de API pessoal** (client_credentials, como `bw login --apikey`) + senha mestra só local. E-mail/senha também é suportado (servidores próprios), mas o bitwarden.com pode exigir captcha/verificação de dispositivo novo para clientes que não conhece.
+- Cofre em memória continua **cifrado**: só nome, usuário e URLs são decifrados; senha/TOTP na hora do uso. Chaves em `Buffer` zeradas ao bloquear.
+- KDF: PBKDF2 (Node) e Argon2id (`hash-wasm`: o Electron, com BoringSSL, não implementa Argon2). Parâmetros mínimos recusam KDF fraco vindo do servidor.
+- Compatibilidade provada contra Vaultwarden + CLI oficial (`tests/interop`).
 
 ### D7: DNS via Cloudflare Zero Trust Gateway
 - DoH em modo `secure`. O endereço do Gateway fica em `settings.json` local, nunca no repositório.
