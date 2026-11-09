@@ -14,7 +14,7 @@ async function go(app: Apollo, url: string) {
 async function bodyOf(app: Apollo, url: string) {
   const page = await app.page(url);
   await waitFor(async () => (await page.eval<string>('document.readyState')) === 'complete', 'página carregada');
-  const text = await page.eval<string>('document.body.textContent');
+  const text = await waitFor(() => page.eval<string | null>('document.body?.textContent ?? null'), 'corpo da página');
   page.close();
   return text;
 }
@@ -34,6 +34,31 @@ describe('restauração da sessão', () => {
         await app.send({ type: 'tab:reload' });
         await app.until((s) => app.activeTab(s).url === `${site.url}/cookie`, 'aba restaurada');
         await waitFor(async () => (await bodyOf(app, `${site.url}/cookie`)).includes('sessao=logado'), 'cookie de sessão restaurado', 5000);
+      } finally {
+        await app.quit();
+      }
+    } finally {
+      profile.cleanup();
+    }
+  });
+
+  // Regressão: navegar enquanto os cookies de sessão ainda eram restaurados era
+  // desfeito — a restauração do histórico terminava depois e voltava à página antiga.
+  it('navegar logo ao abrir (antes de restaurar a sessão) não é desfeito', async () => {
+    const profile = tempProfile();
+    try {
+      let app = await Apollo.launch(profile.dir);
+      await go(app, `${site.url}/page?title=Antiga`);
+      await app.quit();
+
+      app = await Apollo.launch(profile.dir, { APOLLO_TEST_SESSION_RESTORE_DELAY_MS: '1500' });
+      try {
+        await app.send({ type: 'tab:navigate', url: `${site.url}/page?title=Nova` });
+        await app.until((s) => app.activeTab(s).title === 'Nova' && !app.activeTab(s).loading, 'página nova carregada', 8000);
+        await new Promise((r) => setTimeout(r, 1000));
+        const s = await app.state();
+        expect(app.activeTab(s).url).toBe(`${site.url}/page?title=Nova`);
+        expect(app.activeTab(s).canGoBack).toBe(true); // a antiga continua no histórico
       } finally {
         await app.quit();
       }

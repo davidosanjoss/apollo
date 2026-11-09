@@ -35,6 +35,8 @@ export class Browser {
   private readonly historyTimers = new Map<string, NodeJS.Timeout>();
   /** Abas com histórico sendo restaurado: não sobrescrever o salvo com um parcial. */
   private readonly restoring = new Set<string>();
+  /** Abas com view criada esperando os cookies de sessão para carregar. */
+  private readonly awaitingLoad = new Set<string>();
   private closedTabs: ClosedTab[] = [];
   private readonly permissions: PermissionManager;
 
@@ -96,6 +98,9 @@ export class Browser {
   }
 
   private async restoreCookies(ses: Session, workspaceId: string): Promise<void> {
+    // Só para testes: simula um chaveiro lento (ver tests/e2e/session.test.ts).
+    const delay = Number(process.env.APOLLO_TEST_SESSION_RESTORE_DELAY_MS);
+    if (delay > 0) await new Promise((r) => setTimeout(r, delay));
     const data = this.cipher && this.store.loadSessionCookies(workspaceId);
     if (!data || !this.cipher) return;
     const n = await restoreSessionCookies(ses, data, this.cipher).catch(() => 0);
@@ -168,7 +173,12 @@ export class Browser {
 
   /** Carrega a aba: espera os cookies de sessão e restaura o histórico (voltar/avançar). */
   private async loadTab(tab: Tab, wc: WebContents): Promise<void> {
-    await this.sessionsReady.get(tab.workspaceId);
+    this.awaitingLoad.add(tab.id);
+    try {
+      await this.sessionsReady.get(tab.workspaceId);
+    } finally {
+      this.awaitingLoad.delete(tab.id);
+    }
     if (wc.isDestroyed()) return;
     const history = this.store.getTab(tab.id)?.history ?? null;
     if (history) {
@@ -385,7 +395,11 @@ export class Browser {
     if (!tab) return;
     this.store.updateTab(tab.id, { url });
     const view = this.views.get(tab.id);
-    if (view) view.webContents.loadURL(url).catch(() => {});
+    if (view && this.awaitingLoad.has(tab.id)) {
+      // Ainda esperando os cookies: a navegação entra no histórico que loadTab vai restaurar.
+      // (Carregar agora seria desfeito pela restauração logo depois.)
+      this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
+    } else if (view) view.webContents.loadURL(url).catch(() => {});
     else {
       // Aba dormindo: a navegação entra no histórico salvo, e a view nasce com ele.
       this.store.setTabHistory(tab.id, withNavigation(tab.history, url));

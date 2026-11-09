@@ -10,6 +10,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Ctrl+Shift+T reabre a última aba fechada, no mesmo lugar e com o histórico.
 - Tamanho, posição e estado maximizado da janela são lembrados (se o monitor sumiu, a janela abre centralizada).
 
+### Corrigido
+- Navegar logo ao abrir o Apollo, antes de a sessão terminar de ser restaurada, era desfeito (a aba voltava para a página anterior).
+
 ## [0.2.0] - 2026-11-09
 
 ### Adicionado

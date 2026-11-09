@@ -146,10 +146,10 @@ export class Apollo {
   private constructor(private proc: ChildProcess, private port: number, readonly userData: string) {}
 
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
-  static async launch(userData: string): Promise<Apollo> {
+  static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
     const port = await freePort();
     const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`], {
-      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0' },
+      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });
     const app = new Apollo(proc, port, userData);
