@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { app, BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
@@ -196,6 +197,8 @@ export class Browser {
         nodeIntegration: false,
         webSecurity: true,
         spellcheck: true,
+        // Filtros cosméticos/scriptlets do bloqueador (nada exposto à página).
+        preload: path.join(__dirname, 'tab-preload.js'),
       },
     });
     view.setBackgroundColor('#ffffff');
@@ -398,6 +401,12 @@ export class Browser {
     }
     const tab: Overrides = tabId && this.pausedTabs.has(tabId) ? { ads: false, trackers: false } : {};
     return resolvePrivacy({ ...layers, tab });
+  }
+
+  /** Interruptores da aba (para os filtros cosméticos). null = não é aba. */
+  privacyForTab(tabId: string, url: string) {
+    const tab = this.store.getTab(tabId);
+    return tab ? this.privacyFor(tab.workspaceId, siteOf(url), tabId).toggles : null;
   }
 
   /** Interruptores para uma requisição (chamado pelo bloqueador). */

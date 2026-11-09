@@ -4,6 +4,7 @@ import { FiltersEngine, Request } from '@ghostery/adblocker';
 import type { OnBeforeRequestListenerDetails } from 'electron';
 import type { PrivacyToggles } from '../../shared/types';
 import type { NetworkModule, RequestContext } from '../network';
+import { cosmeticsFor, type CosmeticResult, type DomFeatures } from './cosmetics';
 
 export type BlockKind = 'ads' | 'trackers';
 
@@ -42,6 +43,11 @@ export class Blocker {
 
   setEngines(engines: Engines): void {
     this.engines = engines;
+  }
+
+  /** Filtros cosméticos/scriptlets: vêm das listas de anúncios. */
+  cosmetics(url: string, features?: DomFeatures): CosmeticResult | null {
+    return cosmeticsFor(this.engines.ads, url, features);
   }
 
   check(url: string, electronType: string, sourceUrl: string | null, toggles: PrivacyToggles): BlockDecision | null {

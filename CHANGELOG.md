@@ -7,6 +7,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Bloqueador de anúncios e rastreadores (motor do Ghostery; listas EasyList, EasyPrivacy e uBlock), com interruptores separados.
 - Regras em camadas: padrão global → workspace → site (dentro do workspace) → aba. Ex.: liberar rastreadores do Outlook só no workspace do Trabalho. Ajuste no painel ⚙ do site (com contador de bloqueados) e no diálogo do workspace; "Pausar proteção nesta aba" vale até a aba fechar.
+- Filtros cosméticos (escondem os espaços de anúncio, inclusive os que aparecem depois) e scriptlets do uBlock (ex.: anúncios do YouTube), seguindo o mesmo interruptor "anúncios".
 - Listas embutidas no app e atualizadas semanalmente em segundo plano (thread separada), direto das listas públicas — sem conta e sem telemetria.
 
 ## [0.3.0] - 2026-11-09

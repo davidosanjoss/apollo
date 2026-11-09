@@ -6,6 +6,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+
+const RESOURCES_URL = 'https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json';
 import type { UiCommand, UiState } from '../../src/shared/types';
 
 const electronBin = createRequire(import.meta.url)('electron') as unknown as string;
@@ -54,6 +57,12 @@ export async function startSite(): Promise<TestSite> {
         // Página em 127.0.0.1 que carrega um "anúncio" e um "rastreador" de localhost (terceiros).
         return html(`<script src="http://localhost:${port}/ads/banner.js"></script>
           <img src="http://localhost:${port}/track/pixel.gif">`, u.searchParams.get('title') ?? 'Bloqueio');
+      case '/cosmetic':
+        return html(`<div class="anuncio">ANUNCIO</div><div id="conteudo">conteudo</div>
+          <script>document.title = window.adsEnabled === false ? 'scriptlet-ok' : 'scriptlet-nao';
+          try { window.prunado = JSON.stringify(JSON.parse('{"anuncioA":1,"anuncioB":2,"video":3}')); } catch (e) { window.prunado = 'erro: ' + e.message; }
+          setTimeout(() => { const d = document.createElement('div'); d.className = 'ad-slot-generico'; d.textContent = 'TARDIO';
+            document.body.appendChild(d); }, 300);</script>`, 'cosmetic');
       case '/ads/banner.js':
         res.writeHead(200, { 'content-type': 'text/javascript' });
         return res.end('window.anuncioCarregou = true;');
@@ -176,9 +185,20 @@ async function freePort(): Promise<number> {
 export function testFilters(dir: string): Record<string, string> {
   const ads = path.join(dir, 'test-ads.txt');
   const tracking = path.join(dir, 'test-tracking.txt');
-  fs.writeFileSync(ads, '/ads/banner.js$third-party\n');
+  fs.writeFileSync(ads, [
+    '/ads/banner.js$third-party',
+    '127.0.0.1##.anuncio',                       // cosmético do site
+    '##.ad-slot-generico',                       // cosmético genérico (via DOM)
+    '127.0.0.1##+js(set-constant, adsEnabled, false)', // scriptlet
+    '127.0.0.1##+js(json-prune, anuncioA)',            // dois json-prune juntos (como no YouTube)
+    '127.0.0.1##+js(json-prune, anuncioB)',
+  ].join('\n') + '\n');
   fs.writeFileSync(tracking, '/track/pixel.gif$third-party\n');
-  return { APOLLO_TEST_FILTERS_ADS: ads, APOLLO_TEST_FILTERS_TRACKING: tracking };
+  // Recursos do uBlock (scriptlets) baixados pelo build (scripts/build-filters.mjs).
+  const resources = path.join(ROOT, '.cache/filters',
+    createHash('sha256').update(RESOURCES_URL).digest('hex').slice(0, 16) + '.txt');
+  if (!fs.existsSync(resources)) throw new Error('rode `npm run build` antes (recursos do uBlock em .cache/filters)');
+  return { APOLLO_TEST_FILTERS_ADS: ads, APOLLO_TEST_FILTERS_TRACKING: tracking, APOLLO_TEST_FILTERS_RESOURCES: resources };
 }
 
 export function tempProfile(): { dir: string; cleanup: () => void } {

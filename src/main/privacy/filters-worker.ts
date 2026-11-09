@@ -5,16 +5,22 @@ import { parentPort } from 'node:worker_threads';
 
 const CONFIG = { loadCosmeticFilters: true, loadNetworkFilters: true, enableCompression: true };
 const trackingLists = adsAndTrackingLists.filter((u) => !adsLists.includes(u));
+const RESOURCES_URL = 'https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json';
 
-async function build(urls: string[]): Promise<Uint8Array> {
-  const texts = await Promise.all(urls.map(async (u) => {
-    const res = await fetch(u, { signal: AbortSignal.timeout(60_000) });
-    if (!res.ok) throw new Error(`${u}: HTTP ${res.status}`);
-    return res.text();
-  }));
-  return FiltersEngine.parse(texts.join('\n'), CONFIG).serialize();
+async function get(url: string): Promise<string> {
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return res.text();
 }
 
-Promise.all([build(adsLists), build(trackingLists)])
+async function build(urls: string[], resources: string): Promise<Uint8Array> {
+  const texts = await Promise.all(urls.map(get));
+  const engine = FiltersEngine.parse(texts.join('\n'), CONFIG);
+  engine.updateResources(resources, String(resources.length));
+  return engine.serialize();
+}
+
+get(RESOURCES_URL)
+  .then((resources) => Promise.all([build(adsLists, resources), build(trackingLists, resources)]))
   .then(([ads, tracking]) => parentPort!.postMessage({ ok: true, ads, tracking }, [ads.buffer, tracking.buffer] as ArrayBuffer[]))
   .catch((err: Error) => parentPort!.postMessage({ ok: false, error: err.message }));

@@ -30,7 +30,12 @@ export function testFiltersEnabled(): boolean {
 /** Motor mais novo entre o baixado e o embutido. Nunca falha: no pior caso, vazio. */
 export function loadEngines(userData: string): Engines {
   if (testFiltersEnabled()) {
-    const parse = (f: string | undefined) => (f ? FiltersEngine.parse(fs.readFileSync(f, 'utf8'), ENGINE_CONFIG) : emptyEngine());
+    const resources = process.env.APOLLO_TEST_FILTERS_RESOURCES;
+    const parse = (f: string | undefined) => {
+      const engine = f ? FiltersEngine.parse(fs.readFileSync(f, 'utf8'), ENGINE_CONFIG) : emptyEngine();
+      if (resources) { const r = fs.readFileSync(resources, 'utf8'); engine.updateResources(r, String(r.length)); }
+      return engine;
+    };
     return { ads: parse(process.env.APOLLO_TEST_FILTERS_ADS), tracking: parse(process.env.APOLLO_TEST_FILTERS_TRACKING) };
   }
   const pick = (name: string) => {

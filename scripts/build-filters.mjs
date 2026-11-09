@@ -14,6 +14,8 @@ const OUT = 'build/filters';
 const MAX_AGE_MS = 7 * 24 * 3600 * 1000;
 
 export const trackingLists = adsAndTrackingLists.filter((u) => !adsLists.includes(u));
+// Recursos do uBlock (scriptlets e recursos "neutros" de redirect). Sem eles, nada de +js().
+export const RESOURCES_URL = 'https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json';
 export const ENGINE_CONFIG = { loadCosmeticFilters: true, loadNetworkFilters: true, enableCompression: true };
 
 async function getList(url) {
@@ -32,15 +34,18 @@ async function getList(url) {
   }
 }
 
-async function buildEngine(urls) {
+async function buildEngine(urls, resources) {
   const texts = await Promise.all(urls.map(getList));
-  return FiltersEngine.parse(texts.join('\n'), ENGINE_CONFIG);
+  const engine = FiltersEngine.parse(texts.join('\n'), ENGINE_CONFIG);
+  if (resources) engine.updateResources(resources, String(resources.length));
+  return engine;
 }
 
 export async function buildFilters() {
   mkdirSync(CACHE, { recursive: true });
   mkdirSync(OUT, { recursive: true });
-  const [ads, tracking] = await Promise.all([buildEngine(adsLists), buildEngine(trackingLists)]);
+  const resources = await getList(RESOURCES_URL);
+  const [ads, tracking] = await Promise.all([buildEngine(adsLists, resources), buildEngine(trackingLists, resources)]);
   writeFileSync(path.join(OUT, 'ads.bin'), ads.serialize());
   writeFileSync(path.join(OUT, 'tracking.bin'), tracking.serialize());
   const size = (f) => (statSync(path.join(OUT, f)).size / 1024 / 1024).toFixed(1);

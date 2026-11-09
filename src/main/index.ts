@@ -6,6 +6,7 @@ import { Browser } from './browser';
 import { shortcutFor } from './shortcuts';
 import { NetworkPipeline, gpcModule } from './network';
 import { Blocker, blockerModule } from './privacy/blocker';
+import { parseFeatures } from './privacy/cosmetics';
 import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
@@ -129,6 +130,29 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
     event.preventDefault();
     b.runShortcut(action);
   });
+
+  // Filtros cosméticos pedidos pelo preload das abas. Só aceita o frame principal de
+  // uma aba; a URL vem do próprio frame (não do que a página diz).
+  const cosmeticsFor = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, features?: unknown) => {
+    const tabId = b.tabIdOf(event.sender);
+    const frame = event.senderFrame;
+    if (!tabId || !frame || frame !== event.sender.mainFrame) return null;
+    if (!b.privacyForTab(tabId, frame.url)?.ads) return null;
+    const parsed = features === undefined ? undefined : parseFeatures(features);
+    if (parsed === null) return null;
+    const result = blocker.cosmetics(frame.url, parsed);
+    if (result?.styles) void event.sender.insertCSS(result.styles, { cssOrigin: 'user' }).catch(() => {});
+    return result;
+  };
+  ipcMain.on('apollo:cosmetics-start', (event) => {
+    try {
+      const r = cosmeticsFor(event);
+      event.returnValue = r ? { scripts: r.scripts } : null;
+    } catch {
+      event.returnValue = null; // nunca travar a página
+    }
+  });
+  ipcMain.handle('apollo:cosmetics-dom', (event, features) => { cosmeticsFor(event, features); });
 
   win.once('ready-to-show', () => {
     if (state.maximized) win.maximize();

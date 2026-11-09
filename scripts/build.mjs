@@ -19,6 +19,16 @@ await Promise.all([
     target: 'node24',
     external: ['electron', 'electron-updater'],
   }),
+  // Preload das abas (filtros cosméticos e scriptlets). Sandbox: só o módulo electron.
+  build({
+    ...common,
+    entryPoints: ['src/preload/tab.ts'],
+    outfile: 'build/tab-preload.js',
+    platform: 'node',
+    format: 'cjs',
+    target: 'node24',
+    external: ['electron'],
+  }),
   // Atualização das listas de bloqueio (thread separada)
   build({
     ...common,
