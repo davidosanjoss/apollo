@@ -30,7 +30,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - A validação de comandos da interface aceitava tipos de permissão inválidos (ex.: `toString`).
 
 ### Interno
-- Testes unitários (Vitest) e de integração com o app real, rodando no CI.
+- Testes unitários (Vitest) e de integração com o app real, rodando no CI e obrigatórios no release.
 
 ## [0.1.0] - 2026-11-09
 

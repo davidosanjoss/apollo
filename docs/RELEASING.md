@@ -36,7 +36,7 @@ O CI roda em todo push na `dev` (só Linux, para poupar a cota de minutos do rep
    git checkout main && git pull
    git tag v0.2.0 && git push origin v0.2.0
    ```
-4. O workflow `Release` valida (tag na main e igual ao `package.json`), gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** no `apollo-releases` e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
+4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** no `apollo-releases` e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
 5. Sincronizar: `git checkout dev && git merge main`.
 
 ## Atualização automática
