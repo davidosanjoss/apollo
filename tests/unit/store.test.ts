@@ -284,3 +284,16 @@ describe('fase 2b: ordem, fixadas e grupos', () => {
     expect(store.getTab('t1')!.keepAwake).toBe(false);
   });
 });
+
+describe('fase 2c: tempo de hibernação por workspace', () => {
+  it('padrão 30 min; criar com valor; atualizar sem informar mantém', () => {
+    expect(ws('a').hibernateAfterMin).toBe(30);
+    expect(store.getWorkspace('a')!.hibernateAfterMin).toBe(30);
+    store.createWorkspace({ id: 'b', name: 'B', color: '#000000', home: '', hibernateAfterMin: 0 });
+    expect(store.getWorkspace('b')!.hibernateAfterMin).toBe(0);
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hibernateAfterMin: 120 });
+    expect(store.getWorkspace('a')!.hibernateAfterMin).toBe(120);
+    store.updateWorkspace('a', { name: 'A2', color: '#000000', home: '' });
+    expect(store.getWorkspace('a')).toMatchObject({ name: 'A2', hibernateAfterMin: 120 });
+  });
+});

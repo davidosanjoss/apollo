@@ -12,6 +12,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Arrastar abas para reordenar.
 - Abas fixadas: ficam no começo, compactas (só o ícone).
 - Grupos de abas com nome e cor: recolher/expandir clicando no chip, arrastar abas para dentro/fora, desagrupar, fechar grupo. Abas abertas a partir de uma aba do grupo entram no grupo.
+- Hibernação: abas paradas além do tempo do workspace (padrão 30 min; ajustável ou "Nunca" no diálogo do workspace) liberam a memória e recarregam ao clicar, com histórico e rolagem. Nunca hibernam: a aba na tela, as marcadas como "sempre ativa", as tocando áudio/vídeo e as com formulário não enviado. Fixadas hibernam normalmente.
+- "Hibernar agora" e "Hibernar outras abas" no menu da aba.
 - Menu do botão direito na aba: nova aba à direita, recarregar, duplicar (com histórico), fixar, manter sempre ativa, grupos, fechar outras / à direita, reabrir aba fechada.
 
 ### Corrigido

@@ -6,7 +6,12 @@ export interface WorkspaceInfo {
   name: string;
   color: string;
   home: string;
+  /** Minutos sem uso para hibernar abas (0 = nunca). */
+  hibernateAfterMin: number;
 }
+
+/** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
+export const HIBERNATE_OPTIONS_MIN = [0, 5, 15, 30, 60, 120, 240] as const;
 
 export interface TabInfo {
   id: string;
@@ -92,6 +97,8 @@ export type UiCommand =
   | { type: 'tab:pin'; tabId: string; pinned: boolean }
   | { type: 'tab:keep-awake'; tabId: string; keepAwake: boolean }
   | { type: 'tab:duplicate'; tabId: string }
+  | { type: 'tab:hibernate'; tabId: string }
+  | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }
   | { type: 'tab:close-right'; tabId: string }
   /** Abre o menu de contexto nativo da aba em (x, y) da janela. */
@@ -104,8 +111,8 @@ export type UiCommand =
   | { type: 'group:close'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }

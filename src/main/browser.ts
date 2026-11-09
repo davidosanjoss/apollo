@@ -1,6 +1,7 @@
-import { BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
+import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
@@ -14,6 +15,10 @@ import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
 
 const MAX_CLOSED_TABS = 25;
+
+// Só para testes: acelerar o relógio da hibernação (ver tests/e2e/hibernation.test.ts).
+const minuteMs = () => Number(process.env.APOLLO_TEST_MINUTE_MS) || 60_000;
+const hibernationTickMs = () => Number(process.env.APOLLO_TEST_HIBERNATION_TICK_MS) || 60_000;
 
 interface ClosedTab {
   workspaceId: string;
@@ -41,6 +46,15 @@ export class Browser {
   /** Abas com view criada esperando os cookies de sessão para carregar. */
   private readonly awaitingLoad = new Set<string>();
   private closedTabs: ClosedTab[] = [];
+
+  // Hibernação
+  /** Quando cada aba saiu da tela pela última vez. */
+  private readonly lastSeen = new Map<string, number>();
+  /** Abas tocando áudio/vídeo. */
+  private readonly playing = new Set<string>();
+  /** Abas cuja página recusou sair (beforeunload) — não tentar de novo até serem vistas. */
+  private readonly unloadBlocked = new Set<string>();
+  private hibernationTimer: NodeJS.Timeout | null = null;
   private readonly permissions: PermissionManager;
 
   private activeWorkspaceId: string;
@@ -233,10 +247,13 @@ export class Browser {
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
       if (!url.startsWith('apollo://error')) update({ url });
+      this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) update({ url }); });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
+    wc.on('media-started-playing', () => { this.playing.add(tabId); });
+    wc.on('media-paused', () => { this.playing.delete(tabId); });
     wc.on('did-stop-loading', () => { this.loading.delete(tabId); this.push(); });
 
     // Sem isso, um erro de rede deixa a aba em branco.
@@ -284,19 +301,104 @@ export class Browser {
     });
   }
 
-  private destroyView(tabId: string): void {
+  /**
+   * Fecha a página da aba (libera a memória). `graceful` (hibernação) respeita o
+   * beforeunload: se a página recusar sair (formulário não enviado), ela continua viva.
+   */
+  private destroyView(tabId: string, graceful = false): void {
     const view = this.views.get(tabId);
     if (!view) return;
     this.captureHistory(tabId);
-    if (this.attachedTabId === tabId) {
-      this.win.contentView.removeChildView(view);
-      this.attachedTabId = null;
+    const wc = view.webContents;
+    const wcId = wc.id;
+    const forget = () => {
+      if (this.views.get(tabId) !== view) return;
+      if (this.attachedTabId === tabId) {
+        this.win.contentView.removeChildView(view);
+        this.attachedTabId = null;
+      }
+      this.tabByWebContents.delete(wcId);
+      this.views.delete(tabId);
+      this.loading.delete(tabId);
+      this.playing.delete(tabId);
+      this.push();
+    };
+    if (wc.isDestroyed()) return forget();
+    if (!graceful) {
+      forget();
+      // WebContentsView não libera a página sozinho: fechar explicitamente devolve a RAM.
+      wc.close();
+      return;
     }
-    this.tabByWebContents.delete(view.webContents.id);
-    this.views.delete(tabId);
-    this.loading.delete(tabId);
-    // WebContentsView não libera a página sozinho: fechar explicitamente devolve a RAM.
-    if (!view.webContents.isDestroyed()) view.webContents.close();
+    wc.once('destroyed', forget);
+    wc.once('will-prevent-unload', () => {
+      // Sem preventDefault: a saída é cancelada e a página continua como estava.
+      this.unloadBlocked.add(tabId);
+      this.push();
+    });
+    wc.close({ waitForBeforeUnload: true });
+  }
+
+  // ------------------------------------------------------------ hibernação
+
+  /** Hiberna a aba (manual ignora tempo/sempre ativa/mídia, mas nunca a aba na tela). */
+  hibernateTab(tabId: string, manual = false): void {
+    const tab = this.store.getTab(tabId);
+    if (!tab || !this.views.has(tabId) || tabId === this.attachedTabId) return;
+    if (!manual && (tab.keepAwake || this.playing.has(tabId) || this.unloadBlocked.has(tabId))) return;
+    this.permissions.cancelForTab(tabId);
+    this.destroyView(tabId, true);
+  }
+
+  private memoryInfo(): { usedMb: number; perTab: Map<string, number> } {
+    const metrics = app.getAppMetrics();
+    const byPid = new Map(metrics.map((m) => [m.pid, m.memory.workingSetSize / 1024]));
+    const usedMb = [...byPid.values()].reduce((a, b) => a + b, 0);
+    // Abas do mesmo site podem dividir um processo: divide a memória entre elas.
+    const tabsByPid = new Map<number, string[]>();
+    for (const [tabId, view] of this.views) {
+      if (view.webContents.isDestroyed()) continue;
+      const pid = view.webContents.getOSProcessId();
+      tabsByPid.set(pid, [...(tabsByPid.get(pid) ?? []), tabId]);
+    }
+    const perTab = new Map<string, number>();
+    for (const [pid, ids] of tabsByPid) for (const id of ids) perTab.set(id, (byPid.get(pid) ?? 0) / ids.length);
+    return { usedMb, perTab };
+  }
+
+  private hibernationCandidates(perTab: Map<string, number>, now: number): HibernationCandidate[] {
+    const out: HibernationCandidate[] = [];
+    for (const [tabId, view] of this.views) {
+      const tab = this.store.getTab(tabId);
+      const wc = view.webContents;
+      if (!tab || wc.isDestroyed()) continue;
+      out.push({
+        id: tabId,
+        workspaceId: tab.workspaceId,
+        alive: true,
+        visible: tabId === this.attachedTabId,
+        keepAwake: tab.keepAwake,
+        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible(),
+        unloadBlocked: this.unloadBlocked.has(tabId),
+        lastSeenAt: this.lastSeen.get(tabId) ?? now,
+        memoryMb: perTab.get(tabId) ?? null,
+      });
+    }
+    return out;
+  }
+
+  /** Uma rodada: decide e hiberna. Barata quando não há abas em segundo plano. */
+  hibernationTick(now = Date.now()): string[] {
+    if (this.views.size <= 1) return [];
+    const limit = Number(this.store.getKv('memoryLimitMb')) || null;
+    const { usedMb, perTab } = limit ? this.memoryInfo() : { usedMb: 0, perTab: new Map<string, number>() };
+    const ids = pickTabsToHibernate(this.hibernationCandidates(perTab, now), {
+      timeoutMin: (wsId) => this.store.getWorkspace(wsId)?.hibernateAfterMin ?? 0,
+      memoryLimitMb: limit,
+      memoryUsedMb: usedMb,
+    }, now, minuteMs());
+    for (const id of ids) this.hibernateTab(id);
+    return ids;
   }
 
   /** Mostra a aba ativa do workspace ativo (criando a view se preciso). */
@@ -305,6 +407,7 @@ export class Browser {
     if (this.attachedTabId && this.attachedTabId !== tab?.id) {
       const old = this.views.get(this.attachedTabId);
       if (old) this.win.contentView.removeChildView(old);
+      this.lastSeen.set(this.attachedTabId, Date.now());
       this.attachedTabId = null;
     }
     if (tab) {
@@ -312,7 +415,9 @@ export class Browser {
       if (this.attachedTabId !== tab.id) {
         this.win.contentView.addChildView(view);
         this.attachedTabId = tab.id;
+        this.unloadBlocked.delete(tab.id); // o usuário viu a aba: pode tentar de novo depois
       }
+      this.lastSeen.set(tab.id, Date.now());
       this.layout();
       if (isHomeUrl(tab.url)) this.focusAddress();
       else view.webContents.focus();
@@ -342,6 +447,8 @@ export class Browser {
 
     this.permissions.cancelForTab(tabId);
     this.destroyView(tabId); // grava o histórico antes
+    this.lastSeen.delete(tabId);
+    this.unloadBlocked.delete(tabId);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
       this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
@@ -540,6 +647,9 @@ export class Browser {
       { label: tab.pinned ? 'Desafixar' : 'Fixar', click: this.run({ type: 'tab:pin', tabId, pinned: !tab.pinned }) },
       { label: 'Manter sempre ativa (não hibernar)', type: 'checkbox', checked: tab.keepAwake,
         click: this.run({ type: 'tab:keep-awake', tabId, keepAwake: !tab.keepAwake }) },
+      { label: 'Hibernar agora', enabled: this.views.has(tabId) && tabId !== this.attachedTabId,
+        click: this.run({ type: 'tab:hibernate', tabId }) },
+      { label: 'Hibernar outras abas', click: this.run({ type: 'tab:hibernate-others', tabId }) },
       { type: 'separator' },
       { label: 'Adicionar a um novo grupo', click: this.run({ type: 'group:create', tabId }) },
       ...(groups.length ? [{ label: 'Mover para o grupo', submenu: groups.map((g) => ({
@@ -582,14 +692,14 @@ export class Browser {
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string): void {
-    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME });
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number): void {
+    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin });
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
 
-  updateWorkspace(workspaceId: string, name: string, color: string, home: string): void {
-    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME });
+  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number): void {
+    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin });
     this.push();
   }
 
@@ -649,6 +759,10 @@ export class Browser {
       case 'tab:pin': this.pinTab(cmd.tabId, cmd.pinned); break;
       case 'tab:keep-awake': if (this.tabInActiveWorkspace(cmd.tabId)) this.store.setKeepAwake(cmd.tabId, cmd.keepAwake); break;
       case 'tab:duplicate': this.duplicateTab(cmd.tabId); break;
+      case 'tab:hibernate': if (this.tabInActiveWorkspace(cmd.tabId)) this.hibernateTab(cmd.tabId, true); break;
+      case 'tab:hibernate-others':
+        for (const t of this.store.listTabs(this.activeWorkspaceId)) if (t.id !== cmd.tabId) this.hibernateTab(t.id, true);
+        break;
       case 'tab:close-others': this.closeOtherTabs(cmd.tabId, false); break;
       case 'tab:close-right': this.closeOtherTabs(cmd.tabId, true); break;
       case 'tab:menu': this.showTabMenu(cmd.tabId, cmd.x, cmd.y); break;
@@ -662,8 +776,8 @@ export class Browser {
       case 'group:close': this.closeGroup(cmd.groupId); break;
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home); break;
-      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
+      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
       case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
@@ -686,6 +800,10 @@ export class Browser {
   /** Primeira exibição, depois que a UI carregou. */
   start(): void {
     this.showActive();
+    if (!this.hibernationTimer) {
+      this.hibernationTimer = setInterval(() => this.hibernationTick(), hibernationTickMs());
+      this.hibernationTimer.unref();
+    }
   }
 
   private emit(event: UiEvent): void {
@@ -722,7 +840,7 @@ export class Browser {
     });
     const active = this.activeTab();
     return {
-      workspaces: this.store.listWorkspaces().map(({ id, name, color, home }) => ({ id, name, color, home })),
+      workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => ({ id, name, color, home, hibernateAfterMin })),
       activeWorkspaceId: ws.id,
       tabs,
       groups: this.store.listGroups(ws.id).map(({ id, name, color, collapsed }) => ({ id, name, color, collapsed })),

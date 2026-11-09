@@ -10,6 +10,7 @@ export interface Workspace {
   name: string;
   color: string;
   home: string;
+  hibernateAfterMin: number;
   activeTabId: string | null;
 }
 
@@ -45,6 +46,7 @@ const toWorkspace = (r: Row): Workspace => ({
   name: r.name as string,
   color: r.color as string,
   home: r.home as string,
+  hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
 
@@ -108,16 +110,17 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId'>): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin'> & { hibernateAfterMin?: number }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now());
-    return { ...ws, activeTabId: null };
+    const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin);
+    return { ...ws, hibernateAfterMin, activeTabId: null };
   }
 
-  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'>): void {
-    this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ? WHERE id = ?')
-      .run(patch.name, patch.color, patch.home, id);
+  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {
+    this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ?, hibernate_after_min = COALESCE(?, hibernate_after_min) WHERE id = ?')
+      .run(patch.name, patch.color, patch.home, patch.hibernateAfterMin ?? null, id);
   }
 
   deleteWorkspace(id: string): void {

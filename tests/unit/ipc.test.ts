@@ -26,6 +26,10 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'tab:pin', tabId: 't', pinned: true },
       { type: 'tab:keep-awake', tabId: 't', keepAwake: false },
       { type: 'tab:duplicate', tabId: 't' },
+      { type: 'tab:hibernate', tabId: 't' },
+      { type: 'tab:hibernate-others', tabId: 't' },
+      { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 0 },
+      { type: 'workspace:update', workspaceId: 'w', name: 'X', color: '#000000', home: '', hibernateAfterMin: 240 },
       { type: 'tab:close-others', tabId: 't' },
       { type: 'tab:close-right', tabId: 't' },
       { type: 'tab:menu', tabId: 't', x: 10, y: 20 },
@@ -75,6 +79,9 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'group:update', groupId: 'g', name: 'x'.repeat(41), color: '#4c8bf5' },
       { type: 'group:update', groupId: 'g', name: 'ok', color: '#123456' },
       { type: 'group:collapse', groupId: 'g' },
+      { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 7 },
+      { type: 'workspace:update', workspaceId: 'w', name: 'X', color: '#000000', home: '', hibernateAfterMin: '30' },
+      { type: 'tab:hibernate' },
     ];
     for (const cmd of invalid) expect(parseCommand(cmd), JSON.stringify(cmd)).toBeNull();
   });

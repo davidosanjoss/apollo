@@ -51,6 +51,18 @@ export async function startSite(): Promise<TestSite> {
         });
         return res.end('<title>cookie</title>ok');
       case '/cookie': return html(req.headers.cookie ?? '', 'cookie');
+      case '/form':
+        // Formulário "não enviado": pede confirmação ao sair (precisa de um clique antes).
+        return html(`<input id="campo"><script>
+          addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; });
+        </script>`, 'Formulário');
+      case '/video':
+        // Vídeo tocando (gerado no próprio navegador, sem arquivo nem som).
+        return html(`<canvas width="64" height="64"></canvas><video muted autoplay></video><script>
+          const c = document.querySelector('canvas'); const ctx = c.getContext('2d');
+          setInterval(() => { ctx.fillStyle = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'); ctx.fillRect(0, 0, 64, 64); }, 50);
+          document.querySelector('video').srcObject = c.captureStream(20);
+        </script>`, 'Video');
       case '/set-session-cookie':
         res.writeHead(200, {
           'content-type': 'text/html',

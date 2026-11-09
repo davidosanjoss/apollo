@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -241,12 +241,16 @@ window.addEventListener('resize', sendBounds);
 const dialog = $<HTMLDialogElement>('#ws-dialog');
 let editing: WorkspaceInfo | null = null;
 
+const hibernateLabel = (m: number) => (m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
+$('#ws-hibernate').replaceChildren(...HIBERNATE_OPTIONS_MIN.map((m) => el('option', { value: String(m), textContent: hibernateLabel(m) })));
+
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
   $('#ws-dialog-title').textContent = ws ? 'Editar workspace' : 'Novo workspace';
   $<HTMLInputElement>('#ws-name').value = ws?.name ?? '';
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
+  $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
   send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
@@ -259,9 +263,10 @@ $('#ws-form').addEventListener('submit', () => {
   const name = $<HTMLInputElement>('#ws-name').value.trim();
   const color = $<HTMLInputElement>('#ws-color').value;
   const home = normalizeUrl($<HTMLInputElement>('#ws-home').value) ?? '';
+  const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home });
-  else send({ type: 'workspace:create', name, color, home });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
