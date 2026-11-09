@@ -18,6 +18,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Menu do botão direito na aba: nova aba à direita, recarregar, duplicar (com histórico), fixar, manter sempre ativa, grupos, fechar outras / à direita, reabrir aba fechada.
 
 ### Corrigido
+- Com um grupo recolhido, a aba nova (inclusive a criada ao recolher o grupo quando não havia outras abas) nascia dentro do grupo. Agora nasce fora, depois dele; "Nova aba no grupo" expande o grupo e cria dentro.
 - Ao ir para uma aba vazia, a barra de endereço continuava mostrando a URL da aba anterior.
 - Navegar logo ao abrir o Apollo, antes de a sessão terminar de ser restaurada, era desfeito (a aba voltava para a página anterior).
 

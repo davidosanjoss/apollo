@@ -43,6 +43,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'group:collapse', groupId: 'g', collapsed: true },
       { type: 'group:ungroup', groupId: 'g' },
       { type: 'group:close', groupId: 'g' },
+      { type: 'group:new-tab', groupId: 'g' },
       { type: 'group:menu', groupId: 'g', x: 0, y: 0 },
     ];
     for (const cmd of valid) expect(parseCommand(cmd), JSON.stringify(cmd)).not.toBeNull();

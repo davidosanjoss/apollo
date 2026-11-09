@@ -139,6 +139,7 @@ export type UiCommand =
   | { type: 'group:collapse'; groupId: string; collapsed: boolean }
   | { type: 'group:ungroup'; groupId: string }
   | { type: 'group:close'; groupId: string }
+  | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
   | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number }

@@ -64,6 +64,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return id(c.groupId) && str(c.name, 40) && groupColor(c.color) ? (c as UiCommand) : null;
     case 'group:collapse': return id(c.groupId) && typeof c.collapsed === 'boolean' ? (c as UiCommand) : null;
     case 'group:ungroup':
+    case 'group:new-tab':
     case 'group:close': return id(c.groupId) ? (c as UiCommand) : null;
     case 'group:menu': return id(c.groupId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;

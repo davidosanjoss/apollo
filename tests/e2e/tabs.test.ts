@@ -169,6 +169,64 @@ describe('organização das abas', () => {
   });
 });
 
+describe('grupo como única coisa aberta', () => {
+  let app2: Apollo;
+  let profile2: ReturnType<typeof tempProfile>;
+  beforeAll(async () => { profile2 = tempProfile(); app2 = await Apollo.launch(profile2.dir); });
+  afterAll(async () => { await app2?.quit(); profile2?.cleanup(); });
+
+  async function onlyGroup(): Promise<UiState> {
+    let s = await app2.state();
+    for (const [i, n] of ['G1', 'G2'].entries()) {
+      if (i) await app2.send({ type: 'tab:new' });
+      await app2.send({ type: 'tab:navigate', url: `${site.url}/page?title=${n}` });
+      s = await app2.until((x) => app2.activeTab(x).title === n, n);
+    }
+    await app2.send({ type: 'group:create', tabId: s.tabs[0].id });
+    s = await app2.until((x) => x.groups.length === 1, 'grupo');
+    await waitFor(() => app2.ui.eval<boolean>(`document.getElementById('group-dialog').open`), 'diálogo');
+    await app2.ui.eval(`document.getElementById('group-dialog').close(); true`);
+    await app2.send({ type: 'group:add', tabId: s.tabs[1].id, groupId: s.groups[0].id });
+    return app2.until((x) => x.tabs.every((t) => t.groupId === x.groups[0].id), 'todas no grupo');
+  }
+
+  // Regressão: recolher o grupo sem outras abas criava a aba nova DENTRO do grupo
+  // recolhido (herdava o grupo da aba de origem).
+  it('recolher: a aba nova nasce fora do grupo, e "+" também', async () => {
+    let s = await onlyGroup();
+    const g = s.groups[0].id;
+    await app2.send({ type: 'group:collapse', groupId: g, collapsed: true });
+    s = await app2.until((x) => x.groups[0]?.collapsed && x.tabs.length === 3, 'aba nova criada ao recolher');
+    expect(app2.activeTab(s).groupId).toBeNull();
+    expect(s.tabs.map((t) => t.groupId)).toEqual([g, g, null]); // depois do bloco do grupo
+
+    await app2.send({ type: 'tab:new' });
+    s = await app2.until((x) => x.tabs.length === 4, '+ outra aba');
+    expect(app2.activeTab(s).groupId).toBeNull();
+    expect(s.groups[0].collapsed).toBe(true); // continua recolhido
+  });
+
+  it('"Nova aba no grupo" num grupo recolhido expande e cria dentro', async () => {
+    let s = await app2.state();
+    const g = s.groups[0].id;
+    await app2.send({ type: 'group:new-tab', groupId: g });
+    s = await app2.until((x) => app2.activeTab(x).groupId === g, 'aba no grupo');
+    expect(s.groups[0].collapsed).toBe(false);
+  });
+
+  it('fechar o grupo (todas as abas): a aba nova nasce sem grupo', async () => {
+    let s = await app2.state();
+    for (const t of s.tabs.filter((x) => !x.groupId)) await app2.send({ type: 'tab:close', tabId: t.id });
+    s = await app2.until((x) => x.tabs.every((t) => t.groupId), 'só o grupo');
+    await app2.send({ type: 'group:close', groupId: s.groups[0].id });
+    s = await app2.until((x) => x.groups.length === 0 && x.tabs.length === 1, 'grupo fechado');
+    expect(s.tabs[0].groupId).toBeNull();
+    await app2.send({ type: 'tab:new' });
+    s = await app2.until((x) => x.tabs.length === 2, 'nova');
+    expect(s.tabs.every((t) => t.groupId === null)).toBe(true);
+  });
+});
+
 describe('aparência', () => {
   it('grupo recolhido sem nome mostra só a quantidade: "(n)"', async () => {
     const s = await app.state();

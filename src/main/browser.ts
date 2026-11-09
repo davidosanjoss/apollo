@@ -160,9 +160,11 @@ export class Browser {
     const ws = this.store.getWorkspace(workspaceId)!;
     const afterId = opts.afterTabId ?? ws.activeTabId;
     const tab = this.store.insertTab({ id: newId(), workspaceId, url: url || ws.home || APOLLO_HOME, title: 'Nova aba' }, afterId);
-    // Aberta a partir de uma aba de grupo: entra no grupo. Ao lado de fixada: vai para depois delas.
+    // Aberta a partir de uma aba de grupo EXPANDIDO: entra no grupo. Grupo recolhido: nasce
+    // fora, depois do bloco dele (normalize). Ao lado de fixada: vai para depois delas.
     const after = afterId ? this.store.getTab(afterId) : null;
-    this.reorder(workspaceId, (tabs) => (after?.groupId && !after.pinned ? joinGroupInPlace(tabs, tab.id, after.groupId) : normalize(tabs)));
+    const joinGroup = after?.groupId && !after.pinned && !this.store.getGroup(after.groupId)?.collapsed ? after.groupId : null;
+    this.reorder(workspaceId, (tabs) => (joinGroup ? joinGroupInPlace(tabs, tab.id, joinGroup) : normalize(tabs)));
     if (opts.activate) {
       this.store.setActiveTab(workspaceId, tab.id);
       if (workspaceId === this.activeWorkspaceId) this.showActive();
@@ -623,6 +625,15 @@ export class Browser {
     this.showActive();
   }
 
+  /** "Nova aba no grupo": pedido explícito — expande o grupo se estiver recolhido. */
+  newTabInGroup(groupId: string): void {
+    const g = this.groupInActiveWorkspace(groupId);
+    if (!g) return;
+    if (g.collapsed) this.store.updateGroup(groupId, { collapsed: false });
+    const last = this.store.listTabs(g.workspaceId).filter((t) => t.groupId === groupId).pop();
+    if (last) this.createTab(g.workspaceId, null, { activate: true, afterTabId: last.id });
+  }
+
   createGroup(tabId: string): void {
     const tab = this.tabInActiveWorkspace(tabId);
     if (!tab) return;
@@ -718,8 +729,7 @@ export class Browser {
       { label: 'Renomear / mudar cor…', click: () => this.emit({ type: 'edit-group', groupId }) },
       { label: g.collapsed ? 'Expandir' : 'Recolher', click: this.run({ type: 'group:collapse', groupId, collapsed: !g.collapsed }) },
       { label: 'Nova aba no grupo', click: () => {
-        const last = this.store.listTabs(g.workspaceId).filter((t) => t.groupId === groupId).pop();
-        if (last) this.createTab(g.workspaceId, null, { activate: true, afterTabId: last.id });
+        this.handleCommand({ type: 'group:new-tab', groupId });
       } },
       { type: 'separator' },
       { label: 'Desagrupar', click: this.run({ type: 'group:ungroup', groupId }) },
@@ -828,6 +838,7 @@ export class Browser {
       case 'group:ungroup': this.ungroup(cmd.groupId); break;
       case 'group:close': this.closeGroup(cmd.groupId); break;
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
+      case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
       case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
