@@ -40,6 +40,12 @@ export async function startSite(): Promise<TestSite> {
     };
     switch (u.pathname) {
       case '/page': return html('ok', u.searchParams.get('title') ?? 'Teste');
+      case '/slow': {
+        // Página lenta: responde depois de ?ms (simula rede/CI lentos).
+        const ms = Number(u.searchParams.get('ms') ?? 1500);
+        setTimeout(() => html('ok', u.searchParams.get('title') ?? 'Lenta'), ms);
+        return;
+      }
       case '/headers':
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(req.headers));
@@ -206,12 +212,21 @@ export class Apollo {
 
   /** Espera o estado satisfazer `pred` (síncrono: para esperar a UI/página use waitFor). */
   async until(pred: (s: UiState) => boolean | undefined | null | '' | 0, what: string, timeout?: number): Promise<UiState> {
-    return waitFor(async () => {
-      const s = await this.state();
-      const ok = pred(s) as unknown;
-      if (ok instanceof Promise) throw new Error('until() recebeu predicado assíncrono; use waitFor');
-      return ok ? s : null;
-    }, what, timeout);
+    let last: UiState | null = null;
+    try {
+      return await waitFor(async () => {
+        const s = await this.state();
+        last = s;
+        const ok = pred(s) as unknown;
+        if (ok instanceof Promise) throw new Error('until() recebeu predicado assíncrono; use waitFor');
+        return ok ? s : null;
+      }, what, timeout);
+    } catch (err) {
+      // Diagnóstico: onde a aba ativa estava quando o tempo acabou.
+      const s = last as UiState | null;
+      const t = s?.tabs.find((x) => x.id === s.activeTabId);
+      throw new Error(`${(err as Error).message} | aba ativa: ${t ? JSON.stringify({ url: t.url, title: t.title, loading: t.loading, canGoBack: t.canGoBack, dormant: t.dormant }) : '—'}`);
+    }
   }
 
   activeTab(s: UiState) { return s.tabs.find((t) => t.id === s.activeTabId)!; }

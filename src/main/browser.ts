@@ -205,11 +205,13 @@ export class Browser {
         await wc.navigationHistory.restore({ index: history.index, entries: history.entries });
         return;
       } catch {
-        // histórico inválido para o Chromium: carrega só a URL
+        // Interrompida porque o usuário já navegou (ex.: voltar enquanto carregava):
+        // a página atual é a escolha dele, não recarregar a antiga por cima.
+        if (wc.isDestroyed() || wc.navigationHistory.length() > 0) return;
+        // Histórico inválido para o Chromium: carrega só a URL.
       } finally {
         this.restoring.delete(tab.id);
       }
-      if (wc.isDestroyed()) return;
     }
     wc.loadURL(this.store.getTab(tab.id)?.url ?? tab.url).catch(() => {}); // erros tratados em did-fail-load
   }

@@ -33,9 +33,27 @@ describe('hibernação manual', () => {
     expect((await app.targets()).some((t) => t.url.endsWith('title=A2'))).toBe(false); // página não existe mais
 
     await app.send({ type: 'tab:activate', tabId: a.id });
-    s = await app.until((x) => !byTitle(x, 'A2').dormant && app.activeTab(x).canGoBack, 'A2 de volta, com histórico');
+    s = await app.until((x) => !byTitle(x, 'A2').dormant && app.activeTab(x).canGoBack && !app.activeTab(x).loading, 'A2 de volta, com histórico');
     await app.send({ type: 'tab:back' });
     await app.until((x) => app.activeTab(x).url.endsWith('title=A1'), 'voltar para A1');
+  });
+
+  // "Voltar" logo ao acordar, com a página ainda carregando, não pode ser desfeito
+  // pela restauração do histórico (falha vista no CI; ver loadTab).
+  it('voltar logo ao acordar a aba (ainda carregando) funciona', async () => {
+    await open(app, '/page?title=L1', 'L1');
+    let s = await open(app, '/slow?ms=2000&title=L2', 'L2', false);
+    const l = s.activeTabId!;
+    s = await open(app, '/page?title=Outra', 'Outra');
+    await app.send({ type: 'tab:hibernate', tabId: l });
+    await app.until((x) => x.tabs.find((t) => t.id === l)!.dormant, 'L hibernada');
+
+    await app.send({ type: 'tab:activate', tabId: l });
+    await app.until((x) => app.activeTab(x).canGoBack, 'histórico restaurado (L2 ainda carregando)');
+    await app.send({ type: 'tab:back' });
+    await app.until((x) => app.activeTab(x).url.endsWith('title=L1') && !app.activeTab(x).loading, 'voltou para L1');
+    await sleep(2500); // depois de a L2 lenta "terminar"
+    expect(app.activeTab(await app.state()).url).toMatch(/title=L1$/);
   });
 
   it('a aba na tela nunca hiberna', async () => {
@@ -67,7 +85,7 @@ describe('hibernação manual', () => {
     let s = await app.state();
     await app.send({ type: 'tab:activate', tabId: byTitle(s, 'B').id });
     await app.send({ type: 'tab:hibernate-others', tabId: byTitle(s, 'B').id });
-    s = await app.until((x) => byTitle(x, 'A1').dormant, 'outras hibernadas');
+    s = await app.until((x) => x.tabs.filter((t) => t.title !== 'B' && t.title !== 'Formulário').every((t) => t.dormant), 'outras hibernadas');
     expect(byTitle(s, 'B').dormant).toBe(false);
   });
 });
