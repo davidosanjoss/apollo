@@ -54,7 +54,10 @@ jobs:
       - name: Build e upload para apollo-releases
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: npx electron-builder ${{ matrix.args }} --publish always
+        run: |
+          npm run typecheck
+          node scripts/build.mjs --prod
+          npx electron-builder ${{ matrix.args }} --publish always
 
   publish:
     needs: build

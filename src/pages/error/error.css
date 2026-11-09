@@ -1,0 +1,11 @@
+:root { --bg: #16161a; --text: #e6e6ea; --muted: #9a9aa5; --accent: #7c5cff; color-scheme: dark; }
+@media (prefers-color-scheme: light) {
+  :root { --bg: #f6f6f8; --text: #1d1d22; --muted: #6b6b76; color-scheme: light; }
+}
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; }
+body { display: grid; place-items: center; padding: 0 16px; }
+main { max-width: 520px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 8px; }
+#host { margin: 0 0 4px; font-weight: 600; word-break: break-all; }
+#detail { margin: 0 0 24px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 13px; }
+button { border: 0; border-radius: 8px; padding: 9px 16px; background: var(--accent); color: #fff; font: inherit; cursor: pointer; }

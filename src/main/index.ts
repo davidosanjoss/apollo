@@ -1,0 +1,149 @@
+import { app, BrowserWindow, components, ipcMain, session } from 'electron';
+import path from 'node:path';
+import { openDatabase } from './db';
+import { Store } from './store';
+import { Browser, shortcutFor } from './browser';
+import { NetworkPipeline, gpcModule } from './network';
+import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
+import { isTrustedSender, parseCommand } from './ipc';
+import { loadSettings, applyDns } from './settings';
+import { setupUpdater } from './updater';
+import { runDiagnose } from './diagnose';
+
+// ------------------------------------------------------------ perfil
+// App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
+// para o código em desenvolvimento nunca mexer nos logins/sessão do uso real.
+if (process.env.APOLLO_USER_DATA) {
+  app.setPath('userData', process.env.APOLLO_USER_DATA);
+} else if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'apollo-dev'));
+}
+
+const diagnoseArg = process.argv.find((a) => a.startsWith('--diagnose='));
+
+// Duas instâncias no mesmo perfil corromperiam sessão e banco: a segunda só foca a primeira.
+if (!diagnoseArg && !app.requestSingleInstanceLock()) {
+  app.exit(0);
+}
+
+// ------------------------------------------------------------ Chromium
+
+// Decodificação de vídeo por hardware (VA-API) no Linux. No Windows já vem ligada (D3D11).
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', [
+    'AcceleratedVideoDecodeLinuxGL',
+    'AcceleratedVideoDecodeLinuxZeroCopyGL',
+    'AcceleratedVideoEncoder',
+  ].join(','));
+}
+
+// Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
+// tratam UA de Electron como navegador desconhecido/inseguro.
+const cleanUA = app.userAgentFallback.replace(/\sElectron\/\S+/i, '').replace(/\sapollo\/\S+/i, '');
+app.userAgentFallback = cleanUA;
+
+registerApolloScheme();
+
+app.on('session-created', (ses) => {
+  ses.setUserAgent(cleanUA);
+  serveApolloScheme(ses);
+});
+
+// Nenhuma página pode embutir <webview> (só existiria se algo habilitasse webviewTag).
+app.on('web-contents-created', (_e, wc) => {
+  wc.on('will-attach-webview', (event) => event.preventDefault());
+});
+
+// ------------------------------------------------------------ janela
+
+function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
+  const win = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 700,
+    minHeight: 400,
+    title: 'Apollo',
+    backgroundColor: '#16161a',
+    autoHideMenuBar: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  // A UI nunca navega para outro lugar nem abre janelas.
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
+  let browser: Browser | null = null;
+  const pipeline = new NetworkPipeline([gpcModule], (id) => browser?.tabIdOfWebContentsId(id) ?? null);
+  browser = new Browser(win, store, pipeline);
+  const b = browser;
+
+  // Atalhos com foco na própria UI (barra de endereço, sidebar).
+  win.webContents.on('before-input-event', (event, input) => {
+    const action = shortcutFor(input);
+    if (!action) return;
+    event.preventDefault();
+    b.runShortcut(action);
+  });
+
+  win.once('ready-to-show', () => win.show());
+  win.webContents.on('did-finish-load', () => b.start());
+  win.loadURL(UI_URL);
+  return { win, browser: b };
+}
+
+// ------------------------------------------------------------ boot
+
+app.whenReady().then(async () => {
+  serveApolloScheme(session.defaultSession);
+  const dnsInfo = applyDns(loadSettings());
+
+  if (diagnoseArg) return runDiagnose(diagnoseArg.split('=')[1], dnsInfo);
+
+  // Widevine (DRM: Netflix, Prime, Spotify…). Não bloqueia a abertura da janela.
+  components.whenReady()
+    .then(() => console.log('[apollo] componentes:', JSON.stringify(components.status())))
+    .catch((err: Error) => console.warn('[apollo] Widevine indisponível:', err.message));
+
+  const userData = app.getPath('userData');
+  const db = openDatabase(path.join(userData, 'apollo.db'));
+  const store = new Store(db);
+  if (store.importLegacyState(path.join(userData, 'state.json'))) {
+    console.log('[apollo] estado da v0.1 migrado para o banco (backup: state.json.migrated)');
+  }
+
+  const { win, browser } = createWindow(store);
+
+  const updater = setupUpdater(
+    (status) => browser.setUpdate(status),
+    () => db.exec('PRAGMA wal_checkpoint(TRUNCATE)'),
+  );
+
+  ipcMain.on('ui:command', (event, raw) => {
+    if (!isTrustedSender(event, win.webContents)) return;
+    const cmd = parseCommand(raw);
+    if (!cmd) return console.warn('[apollo] comando inválido da UI ignorado');
+    if (cmd.type === 'update:download') return updater.download();
+    if (cmd.type === 'update:install') return updater.install();
+    browser.handleCommand(cmd);
+  });
+
+  app.on('second-instance', () => {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  });
+
+  app.on('will-quit', () => {
+    try { db.close(); } catch { /* já fechado */ }
+  });
+});
+
+app.on('window-all-closed', () => {
+  // No diagnóstico as janelas são temporárias; quem encerra é o próprio diagnóstico.
+  if (!diagnoseArg) app.quit();
+});

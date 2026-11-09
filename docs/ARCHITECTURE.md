@@ -26,23 +26,27 @@ Alternativas avaliadas:
 O ECS é o Electron oficial com Widevine. Custo: atualizar no ritmo do Electron (no mínimo mensalmente) por segurança.
 
 ### D2: Processo principal é dono das páginas
-Migração de `<webview>` para `WebContentsView`.
+Implementado na fase 1 com `WebContentsView` (antes: `<webview>`).
 
 - A UI (sidebar, abas, barra) é uma camada sem privilégios.
 - Páginas rodam em sandbox, sem Node e sem preload.
 - Nenhum site tem caminho até o código que controla o navegador.
 
 ```
-Processo principal (confiável)
- ├─ WorkspaceManager   sessões por workspace
- ├─ TabManager         WebContentsView por aba, hibernação
- ├─ NetworkPipeline    um único interceptador por sessão; módulos se plugam
- ├─ PolicyEngine       permissões, downloads, certificados, popups
- ├─ Vault              cliente Bitwarden (chaves só em memória)
- └─ Storage            SQLite (node:sqlite)
-UI (sandbox)  ◄── IPC tipado e validado
-Páginas (sandbox) ── sem IPC
+Processo principal (confiável)                       src/main/
+ ├─ Browser            workspaces, abas (WebContentsView), layout, atalhos   browser.ts
+ ├─ PermissionManager  negado por padrão, decisão por workspace + origem      permissions.ts
+ ├─ NetworkPipeline    um único interceptador por sessão; módulos se plugam  network.ts
+ ├─ Store              SQLite (node:sqlite), migrações versionadas           store.ts, db.ts
+ ├─ protocolo apollo:// páginas internas (ui, home, error)                   protocol.ts
+ ├─ IPC                remetente e formato validados                          ipc.ts
+ └─ Vault              cliente Bitwarden (fase 4)
+UI (sandbox, apollo://ui) ◄── comandos tipados / estado ──►  src/renderer/, src/preload/
+Páginas (sandbox) ── sem IPC, sem Node, sem acesso à UI
 ```
+
+A UI não guarda estado: recebe snapshots (`UiState`) e envia comandos (`UiCommand`), definidos em `src/shared/types.ts`.
+A página nativa da aba ativa é desenhada por cima da área `#views` da UI; diálogos da UI escondem a página enquanto estão abertos.
 
 ### D3: Pipeline de rede central
 O Electron aceita **um** listener por evento `webRequest` por sessão. Bloqueador, cookies de terceiros, limpeza de URL e GPC são etapas de um único pipeline.
@@ -83,13 +87,26 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - **Fora do alcance:** dados coletados pelos próprios serviços onde você está logado, fingerprinting completo, Safe Browsing (troca consciente).
 
 ### D9: Segurança do binário
-- Fuses do Electron: `RunAsNode` off, `EnableNodeOptionsEnvironmentVariable` off, `EnableCookieEncryption` on, integridade do ASAR.
-- Windows: assinatura VMP do castLabs para DRM.
+- Fuses (aplicados em `scripts/after-pack.cjs`): `RunAsNode`, `NODE_OPTIONS` e `--inspect` desligados; `EnableCookieEncryption` e `OnlyLoadAppFromAsar` ligados; `file://` sem privilégios extras (a UI é servida por `apollo://`).
+- Cookies já existentes (não cifrados) continuam válidos após ligar a criptografia (testado).
+- Pendente: validação de integridade do ASAR no Windows (exige suporte do electron-builder; não testável sem Windows).
+- Windows: assinatura VMP do castLabs para DRM, aplicada depois dos fuses.
+
+### D10: Permissões
+- Liberadas: tela cheia, escrita na área de transferência, DRM, pointer/keyboard lock.
+- Perguntam (barra na UI, decisão salva por workspace + origem): câmera, microfone, localização, leitura da área de transferência, MIDI, abrir apps externos, acesso a cookies entre sites.
+- Notificações: bloqueadas até o usuário liberar no painel do site (⚙). O Electron não tem o estado "perguntar" para verificações síncronas, e um site que vê "permitido" mostraria notificações sem pedir.
+- Negadas: compartilhamento de tela (até existir um seletor de telas), detecção de ociosidade, gerenciamento de janelas, sistema de arquivos e o resto.
+
+### D11: Perfis
+- App instalado: `~/.config/apollo` (Windows: `%APPDATA%\apollo`).
+- Desenvolvimento (`npm start`): `~/.config/apollo-dev`, para nunca mexer nos dados reais.
+- Uma instância por perfil (a segunda só foca a primeira).
 
 ## Roadmap
 
 0. ✅ Validação técnica ([phase-0.md](phase-0.md))
-1. Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
+1. ✅ Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
 2. Sessão e abas: restauração, grupos, hibernação, monitor de memória
 3. Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL
 4. Bitwarden nativo

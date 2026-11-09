@@ -129,17 +129,18 @@ body { display: flex; }
 }
 #address:focus { border-color: var(--ws-color, var(--accent)); }
 
-#update-bar {
+.bar {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
   background: var(--bg);
   border-bottom: 1px solid var(--panel-2);
+  flex-wrap: wrap;
 }
-#update-bar[hidden] { display: none; }
-#update-bar .spacer { flex: 1; }
-#update-bar button {
+.bar[hidden] { display: none; }
+.bar .spacer { flex: 1; }
+.bar button, .bar select {
   border: 0;
   border-radius: 6px;
   padding: 5px 10px;
@@ -148,19 +149,21 @@ body { display: flex; }
   cursor: pointer;
   font: inherit;
 }
-#update-bar button.primary { background: var(--accent); color: #fff; }
-#update-bar button:disabled { opacity: .6; cursor: default; }
+.bar button.primary { background: var(--accent); color: #fff; }
+.bar button:disabled { opacity: .6; cursor: default; }
+.bar .remember { display: flex; align-items: center; gap: 4px; color: var(--muted); }
+#site-entries { display: flex; flex-wrap: wrap; gap: 10px; }
+#site-entries label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
 
-#views { flex: 1; position: relative; background: #fff; }
+.tab.dormant .title { opacity: .6; }
+.tab.loading img, .tab.loading::before { animation: pulse 1s ease-in-out infinite alternate; }
+@keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
 
-#views webview {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-/* display:none quebra webviews; escondemos sem desmontar */
-#views webview.hidden { visibility: hidden; pointer-events: none; z-index: -1; }
+#site-btn[hidden] { display: none; }
+
+/* A página real é desenhada pelo processo principal por cima desta área. */
+#views { flex: 1; position: relative; background: var(--panel); }
+
 
 /* ---------- diálogo ---------- */
 dialog {

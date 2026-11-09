@@ -6,10 +6,19 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ### Adicionado
 - Página inicial própria (`apollo://home`): relógio, data e pesquisa, sem carregar nada externo.
+- Permissões negadas por padrão: câmera, microfone, localização etc. pedem autorização numa barra, e a decisão é lembrada por site e por workspace.
+- Painel de permissões do site (⚙ ao lado da barra de endereço), incluindo liberar notificações.
+- Página de erro quando um site não carrega (antes a aba ficava em branco).
+- Cabeçalho Global Privacy Control (`Sec-GPC: 1`) em todas as requisições.
+- Proteções do binário (fuses): cookies cifrados no disco, sem execução como Node, sem injeção via `NODE_OPTIONS`/`--inspect`.
 
 ### Alterado
 - Primeira execução começa com um único workspace ("Principal") na página inicial, em vez de três workspaces abrindo o Outlook. Workspaces existentes são mantidos.
 - Desenvolvimento (`npm start`) usa um perfil separado (`apollo-dev`), sem tocar nos logins do app instalado.
+- Nova base em TypeScript: o processo principal controla as abas (`WebContentsView`); a interface não tem mais nenhum privilégio.
+- Workspaces, abas e permissões agora ficam num banco SQLite. O `state.json` da v0.1.0 é migrado automaticamente na primeira abertura, mantendo workspaces e logins (backup em `state.json.migrated`).
+- Abas só carregam ao serem abertas: iniciar o navegador carrega apenas a aba ativa.
+- Apenas uma janela do Apollo por perfil; abrir de novo foca a existente.
 
 ## [0.1.0] - 2026-11-09
 
