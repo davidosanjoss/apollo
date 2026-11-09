@@ -15,6 +15,9 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 const send = (cmd: UiCommand) => window.apollo.send(cmd);
 
 let state: UiState | null = null;
+/** Aba cuja URL está na barra de endereço, e se o usuário editou o texto. */
+let addressTabId: string | null = null;
+let addressEdited = false;
 let siteBarOpen = false;
 let updateDismissed = false;
 
@@ -62,8 +65,15 @@ function render(): void {
   ($('#back') as HTMLButtonElement).disabled = !tab?.canGoBack;
   ($('#forward') as HTMLButtonElement).disabled = !tab?.canGoForward;
 
+  // Só preserva o texto da barra se o usuário o editou e continua na mesma aba;
+  // senão mostra a URL da aba atual (aba vazia = barra vazia).
   const address = $<HTMLInputElement>('#address');
-  if (document.activeElement !== address) address.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+  const keepTyped = addressEdited && document.activeElement === address && addressTabId === (tab?.id ?? null);
+  if (!keepTyped) {
+    address.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+    addressEdited = false;
+  }
+  addressTabId = tab?.id ?? null;
 
   renderPermissionPrompt(s);
   renderSiteBar(s);
@@ -181,7 +191,8 @@ function updateGroupChip(chip: HTMLElement, i: Extract<StripItem, { kind: 'group
   chip.style.setProperty('--group-color', g.color);
   chip.classList.toggle('collapsed', g.collapsed);
   chip.classList.toggle('unnamed', !g.name);
-  chip.textContent = g.collapsed ? `${g.name || ''} ${i.count}`.trim() : g.name;
+  // Recolhido mostra quantas abas tem: "Faculdade (3)", ou "(3)" sem nome.
+  chip.textContent = g.collapsed ? `${g.name ? `${g.name} ` : ''}(${i.count})` : g.name;
   chip.title = `${g.name || 'Grupo'} — clique para ${g.collapsed ? 'expandir' : 'recolher'}; botão direito para opções`;
 }
 
@@ -399,16 +410,19 @@ $('#update-primary').onclick = () => {
 };
 $('#update-later').onclick = () => { updateDismissed = true; $('#update-bar').hidden = true; };
 
+$<HTMLInputElement>('#address').addEventListener('input', () => { addressEdited = true; });
 $<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement;
   if (e.key === 'Enter') {
     const url = normalizeUrl(input.value);
     if (!url) return;
+    addressEdited = false;
     input.blur();
     send({ type: 'tab:navigate', url });
   } else if (e.key === 'Escape') {
     const tab = state?.tabs.find((t) => t.id === state?.activeTabId);
     input.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+    addressEdited = false;
     input.blur();
     send({ type: 'tab:focus' });
   }

@@ -89,7 +89,7 @@ describe('organização das abas', () => {
     s = await app.until((x) => x.groups[0].collapsed, 'recolhido');
     const hidden = await app.ui.eval<number>(`document.querySelectorAll('#tabs .tab[hidden]').length`);
     expect(hidden).toBe(2);
-    expect(await app.ui.eval(`document.querySelector('.group-chip').textContent`)).toBe('Faculdade 2');
+    expect(await app.ui.eval(`document.querySelector('.group-chip').textContent`)).toBe('Faculdade (2)');
 
     await app.send({ type: 'tab:activate', tabId: byTitle(s, 'A').id });
     await app.until((x) => !x.groups[0].collapsed, 'expandido ao ativar');
@@ -170,6 +170,17 @@ describe('organização das abas', () => {
 });
 
 describe('aparência', () => {
+  it('grupo recolhido sem nome mostra só a quantidade: "(n)"', async () => {
+    const s = await app.state();
+    const g = s.groups[0];
+    await app.send({ type: 'group:update', groupId: g.id, name: '', color: g.color });
+    await app.send({ type: 'group:collapse', groupId: g.id, collapsed: true });
+    await app.until((x) => x.groups[0].collapsed && x.groups[0].name === '', 'recolhido sem nome');
+    const n = s.tabs.filter((t) => t.groupId === g.id).length;
+    expect(await app.ui.eval(`document.querySelector('.group-chip').textContent`)).toBe(`(${n})`);
+    await app.send({ type: 'group:collapse', groupId: g.id, collapsed: false });
+  });
+
   // Regressão: fixada sem ícone (favicon inexistente/404) aparecia como um espaço vazio.
   it('aba fixada sem ícone mostra a inicial do título', async () => {
     const s = await app.state();
