@@ -1,12 +1,16 @@
 name: Release
 
-# Versões estáveis: tag vX.Y.Z criada na main gera instaladores e uma GitHub Release.
+# Tag vX.Y.Z na main → builds Linux/Windows publicados em davidosanjoss/apollo-releases (público).
+# Requer o secret RELEASES_TOKEN: token fine-grained com "Contents: read and write" só no apollo-releases.
 on:
   push:
     tags: ['v*.*.*']
 
 permissions:
-  contents: write
+  contents: read
+
+env:
+  RELEASES_REPO: davidosanjoss/apollo-releases
 
 jobs:
   validate:
@@ -46,28 +50,23 @@ jobs:
         run: |
           pip install --upgrade castlabs-evs
           python -m castlabs_evs.account reauth -A "$env:EVS_ACCOUNT_NAME" -P "$env:EVS_PASSWD"
-      - run: npx electron-builder ${{ matrix.args }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: release-${{ matrix.os }}
-          path: |
-            dist/*.AppImage
-            dist/*.tar.gz
-            dist/*.exe
-            dist/*.zip
+      # Publica como RASCUNHO; só vira pública no job seguinte, com tudo pronto.
+      - name: Build e upload para apollo-releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: npx electron-builder ${{ matrix.args }} --publish always
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          path: out
-          merge-multiple: true
-      - name: Criar GitHub Release
+      - name: Publicar release com notas do CHANGELOG
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
-          notes=$(awk "/^## \[${GITHUB_REF_NAME#v}\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md)
-          gh release create "$GITHUB_REF_NAME" out/* --title "Apollo $GITHUB_REF_NAME" --notes "${notes:-Veja o CHANGELOG.md}"
+          version="${GITHUB_REF_NAME#v}"
+          awk "/^## \[${version//./\\.}\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Veja o histórico de mudanças." > notes.md
+          gh release edit "$GITHUB_REF_NAME" -R "$RELEASES_REPO" \
+            --title "Apollo $GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest

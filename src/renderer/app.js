@@ -307,6 +307,49 @@ window.apollo.onOpenTab(({ fromWebContentsId, url, background }) => {
   newTab(ws, url, { background });
 });
 
+// ---------------------------------------------------------------- atualizações
+
+(() => {
+  const bar = $('#update-bar');
+  const text = $('#update-text');
+  const primary = $('#update-primary');
+  let stage = null;
+
+  const show = (msg, button) => {
+    text.textContent = msg;
+    primary.hidden = !button;
+    primary.disabled = false;
+    if (button) primary.textContent = button;
+    bar.hidden = false;
+  };
+
+  window.apollo.updates.onEvent(({ event, version, percent }) => {
+    if (event === 'available') {
+      stage = 'available';
+      show(`Apollo ${version} disponível.`, 'Baixar e reiniciar');
+    } else if (event === 'progress') {
+      show(`Baixando atualização… ${percent}%`, null);
+    } else if (event === 'downloaded') {
+      stage = 'downloaded';
+      show(`Apollo ${version} pronto. Suas abas serão restauradas.`, 'Reiniciar agora');
+    } else if (event === 'error' && stage) {
+      stage = null;
+      show('Não foi possível atualizar agora. Tentaremos de novo mais tarde.', null);
+    }
+  });
+
+  primary.onclick = async () => {
+    primary.disabled = true;
+    if (stage === 'available') {
+      await window.apollo.updates.download();
+    } else if (stage === 'downloaded') {
+      await window.apollo.saveState(state); // garante a sessão salva antes de fechar
+      window.apollo.updates.install();
+    }
+  };
+  $('#update-later').onclick = () => { bar.hidden = true; };
+})();
+
 // ---------------------------------------------------------------- boot
 
 (async () => {

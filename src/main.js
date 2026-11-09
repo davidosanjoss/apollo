@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, session, components } = require('electron')
 const path = require('node:path');
 const fs = require('node:fs');
 const { loadSettings, applyDns } = require('./settings');
+const { setupUpdater } = require('./updater');
+
+let mainWindow = null;
 
 // Perfil alternativo (testes/diagnóstico) sem tocar no perfil real.
 if (process.env.APOLLO_USER_DATA) app.setPath('userData', process.env.APOLLO_USER_DATA);
@@ -124,6 +127,8 @@ function createWindow() {
   });
 
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWindow = win;
+  win.on('closed', () => { if (mainWindow === win) mainWindow = null; });
 }
 
 app.whenReady().then(async () => {
@@ -140,6 +145,7 @@ app.whenReady().then(async () => {
     .catch((err) => console.warn('[apollo] Widevine indisponível:', err.message));
 
   createWindow();
+  setupUpdater(() => mainWindow);
 });
 app.on('window-all-closed', () => {
   // No diagnóstico as janelas são temporárias; quem encerra é o próprio diagnóstico.

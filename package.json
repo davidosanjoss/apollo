@@ -7,15 +7,15 @@
   "scripts": {
     "start": "electron .",
     "diagnose": "node scripts/diagnose.mjs",
-    "dist:linux": "electron-builder --linux",
-    "dist:win": "electron-builder --win"
+    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win --publish never"
   },
   "devDependencies": {
     "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
     "electron-builder": "^26.18.0"
   },
   "license": "UNLICENSED",
-  "homepage": "https://github.com/davidosanjoss/apollo",
+  "homepage": "https://github.com/davidosanjoss/apollo-releases",
   "repository": {
     "type": "git",
     "url": "https://github.com/davidosanjoss/apollo.git"
@@ -53,6 +53,16 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
     },
-    "publish": null
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "davidosanjoss",
+        "repo": "apollo-releases",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

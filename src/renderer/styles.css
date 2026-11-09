@@ -129,6 +129,28 @@ body { display: flex; }
 }
 #address:focus { border-color: var(--ws-color, var(--accent)); }
 
+#update-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--panel-2);
+}
+#update-bar[hidden] { display: none; }
+#update-bar .spacer { flex: 1; }
+#update-bar button {
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+}
+#update-bar button.primary { background: var(--accent); color: #fff; }
+#update-bar button:disabled { opacity: .6; cursor: default; }
+
 #views { flex: 1; position: relative; background: #fff; }
 
 #views webview {

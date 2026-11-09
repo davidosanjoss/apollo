@@ -12,4 +12,5 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Decodificação de vídeo por hardware no Linux (VA-API).
 - DNS sobre HTTPS (Cloudflare Zero Trust Gateway configurável em `settings.json`).
 - `npm run diagnose`: validação técnica da máquina.
+- Atualização automática com confirmação do usuário (AppImage e instalador do Windows).
 - Builds para Linux (AppImage, tar.gz) e Windows (NSIS, zip), com CI e release automáticos.
