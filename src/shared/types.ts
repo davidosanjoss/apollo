@@ -18,7 +18,21 @@ export interface TabInfo {
   canGoForward: boolean;
   /** Ainda sem página carregada (será carregada ao ativar). */
   dormant: boolean;
+  pinned: boolean;
+  /** Nunca hiberna. */
+  keepAwake: boolean;
+  groupId: string | null;
 }
+
+export interface GroupInfo {
+  id: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+}
+
+/** Cores de grupo (as mesmas ideias de Chrome/Opera). */
+export const GROUP_COLORS = ['#8a8f98', '#4c8bf5', '#e5534b', '#e3b341', '#3fb950', '#db61a2', '#a371f7', '#39c5cf', '#f0883e'] as const;
 
 export type PermissionKind =
   | 'media-video'
@@ -55,6 +69,7 @@ export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
   tabs: TabInfo[];
+  groups: GroupInfo[];
   activeTabId: string | null;
   permissionPrompt: PermissionPrompt | null;
   /** Permissões do site da aba ativa (para o painel ao lado da barra de endereço). */
@@ -72,6 +87,22 @@ export type UiCommand =
   | { type: 'tab:forward' }
   | { type: 'tab:reload' }
   | { type: 'tab:focus' }
+  /** Arrastar: índice final e grupo de destino (null = sem grupo; ausente = mantém). */
+  | { type: 'tab:move'; tabId: string; index: number; groupId?: string | null }
+  | { type: 'tab:pin'; tabId: string; pinned: boolean }
+  | { type: 'tab:keep-awake'; tabId: string; keepAwake: boolean }
+  | { type: 'tab:duplicate'; tabId: string }
+  | { type: 'tab:close-others'; tabId: string }
+  | { type: 'tab:close-right'; tabId: string }
+  /** Abre o menu de contexto nativo da aba em (x, y) da janela. */
+  | { type: 'tab:menu'; tabId: string; x: number; y: number }
+  | { type: 'group:create'; tabId: string }
+  | { type: 'group:add'; tabId: string; groupId: string | null }
+  | { type: 'group:update'; groupId: string; name: string; color: string }
+  | { type: 'group:collapse'; groupId: string; collapsed: boolean }
+  | { type: 'group:ungroup'; groupId: string }
+  | { type: 'group:close'; groupId: string }
+  | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
   | { type: 'workspace:create'; name: string; color: string; home: string }
   | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string }
@@ -84,7 +115,10 @@ export type UiCommand =
   | { type: 'update:install' };
 
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
-export type UiEvent = { type: 'focus-address' };
+export type UiEvent =
+  | { type: 'focus-address' }
+  /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
+  | { type: 'edit-group'; groupId: string };
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

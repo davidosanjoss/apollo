@@ -1,10 +1,11 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import { GROUP_COLORS, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
+import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -23,7 +24,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 
 // ------------------------------------------------------------ render
 
-const tabEls = new Map<string, HTMLElement>();
+const stripEls = new Map<string, HTMLElement>();
 const workspaceEls = new Map<string, HTMLElement>();
 
 function render(): void {
@@ -53,29 +54,10 @@ function render(): void {
     b.style.background = w.color;
   });
 
-  // abas
-  reconcile($('#tabs'), tabEls, s.tabs, (t) => t.id, (t) => {
-    const item = el('div');
-    const img = el('img', { alt: '' });
-    img.onerror = () => { img.hidden = true; };
-    const close = el('button', { className: 'close', textContent: '×', title: 'Fechar (Ctrl+W)' });
-    close.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:close', tabId: t.id }); };
-    item.append(img, el('span', { className: 'title' }), close);
-    item.onclick = () => send({ type: 'tab:activate', tabId: t.id });
-    item.onauxclick = (e) => { if (e.button === 1) send({ type: 'tab:close', tabId: t.id }); };
-    return item;
-  }, (item, t) => {
-    item.className = ['tab', t.id === s.activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading'].filter(Boolean).join(' ');
-    item.title = t.title || t.url;
-    const img = item.querySelector('img')!;
-    if (t.favicon) {
-      if (img.getAttribute('src') !== t.favicon) { img.hidden = false; img.src = t.favicon; }
-    } else {
-      img.hidden = true;
-      img.removeAttribute('src');
-    }
-    item.querySelector('.title')!.textContent = t.title || t.url;
-  });
+  // abas (com chips de grupo)
+  reconcile($('#tabs'), stripEls, buildStrip(s.tabs, s.groups, s.activeTabId), (i) => i.key,
+    (i) => (i.kind === 'group' ? createGroupChip(i.group.id) : createTabEl(i.tab.id)),
+    (node, i) => (i.kind === 'group' ? updateGroupChip(node, i) : updateTabEl(node, i, s.activeTabId)));
 
   ($('#back') as HTMLButtonElement).disabled = !tab?.canGoBack;
   ($('#forward') as HTMLButtonElement).disabled = !tab?.canGoForward;
@@ -87,6 +69,105 @@ function render(): void {
   renderSiteBar(s);
   renderUpdate(s);
 }
+
+// ------------------------------------------------------------ barra de abas
+
+function createTabEl(tabId: string): HTMLElement {
+  const item = el('div', { draggable: true });
+  item.dataset.tabId = tabId;
+  const img = el('img', { alt: '' });
+  const letter = el('span', { className: 'letter', hidden: true });
+  img.onerror = () => { img.hidden = true; letter.hidden = !item.classList.contains('pinned'); };
+  const close = el('button', { className: 'close', textContent: '×', title: 'Fechar (Ctrl+W)' });
+  close.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:close', tabId }); };
+  item.append(img, letter, el('span', { className: 'title' }), close);
+  item.onclick = () => send({ type: 'tab:activate', tabId });
+  item.onauxclick = (e) => { if (e.button === 1) send({ type: 'tab:close', tabId }); };
+  item.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'tab:menu', tabId, x: e.clientX, y: e.clientY }); };
+  item.ondragstart = (e) => {
+    dragging = tabId;
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', '');
+  };
+  item.ondragend = () => { dragging = null; clearDropMarks(); };
+  return item;
+}
+
+function updateTabEl(item: HTMLElement, i: Extract<StripItem, { kind: 'tab' }>, activeTabId: string | null): void {
+  const t = i.tab;
+  item.className = ['tab', t.id === activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading',
+    t.pinned && 'pinned', i.group && 'grouped'].filter(Boolean).join(' ');
+  item.hidden = i.hidden;
+  item.style.setProperty('--group-color', i.group?.color ?? 'transparent');
+  item.title = `${t.title || t.url}${t.keepAwake ? '\n(sempre ativa)' : ''}`;
+  const img = item.querySelector('img')!;
+  if (t.favicon) {
+    if (img.getAttribute('src') !== t.favicon) { img.hidden = false; img.src = t.favicon; }
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+  }
+  item.querySelector('.title')!.textContent = t.title || t.url;
+  // Sem ícone, a aba fixada (que só mostra o ícone) ficaria vazia: usa a inicial.
+  const letter = item.querySelector<HTMLElement>('.letter')!;
+  letter.textContent = (t.title || t.url).trim().charAt(0).toUpperCase();
+  letter.hidden = !t.pinned || !img.hidden;
+}
+
+function createGroupChip(groupId: string): HTMLElement {
+  const chip = el('div', { className: 'group-chip' });
+  chip.dataset.groupId = groupId;
+  chip.onclick = () => {
+    const g = state?.groups.find((x) => x.id === groupId);
+    if (g) send({ type: 'group:collapse', groupId, collapsed: !g.collapsed });
+  };
+  chip.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'group:menu', groupId, x: e.clientX, y: e.clientY }); };
+  return chip;
+}
+
+function updateGroupChip(chip: HTMLElement, i: Extract<StripItem, { kind: 'group' }>): void {
+  const g = i.group;
+  chip.style.setProperty('--group-color', g.color);
+  chip.classList.toggle('collapsed', g.collapsed);
+  chip.classList.toggle('unnamed', !g.name);
+  chip.textContent = g.collapsed ? `${g.name || ''} ${i.count}`.trim() : g.name;
+  chip.title = `${g.name || 'Grupo'} — clique para ${g.collapsed ? 'expandir' : 'recolher'}; botão direito para opções`;
+}
+
+// Arrastar e soltar abas.
+let dragging: string | null = null;
+
+function clearDropMarks(): void {
+  document.querySelectorAll('.drop-before, .drop-after').forEach((n) => n.classList.remove('drop-before', 'drop-after'));
+}
+
+function dropTargetAt(e: DragEvent): { target: DropTarget; node: HTMLElement | null } {
+  const node = (e.target as HTMLElement).closest<HTMLElement>('.tab, .group-chip');
+  if (node?.dataset.groupId) return { target: { kind: 'group', id: node.dataset.groupId }, node };
+  if (node?.dataset.tabId) {
+    const r = node.getBoundingClientRect();
+    return { target: { kind: 'tab', id: node.dataset.tabId, after: e.clientX > r.left + r.width / 2 }, node };
+  }
+  return { target: { kind: 'end' }, node: null };
+}
+
+const tabsBar = $('#tabs');
+tabsBar.addEventListener('dragover', (e) => {
+  if (!dragging) return;
+  e.preventDefault();
+  clearDropMarks();
+  const { target, node } = dropTargetAt(e);
+  if (node) node.classList.add(target.kind === 'tab' && target.after ? 'drop-after' : 'drop-before');
+});
+tabsBar.addEventListener('dragleave', (e) => { if (e.target === tabsBar) clearDropMarks(); });
+tabsBar.addEventListener('drop', (e) => {
+  e.preventDefault();
+  clearDropMarks();
+  if (!dragging || !state) return;
+  const drop = computeDrop(state.tabs, dragging, dropTargetAt(e).target);
+  if (drop) send({ type: 'tab:move', tabId: dragging, index: drop.index, ...(drop.groupId !== undefined ? { groupId: drop.groupId } : {}) });
+  dragging = null;
+});
 
 function renderPermissionPrompt(s: UiState): void {
   const bar = $('#permission-bar');
@@ -201,6 +282,42 @@ $('#ws-delete').onclick = () => {
   dialog.close();
 };
 
+// ------------------------------------------------------------ diálogo de grupo
+
+const groupDialog = $<HTMLDialogElement>('#group-dialog');
+let editingGroup: GroupInfo | null = null;
+
+$('#group-colors').replaceChildren(...GROUP_COLORS.map((c) => {
+  const label = el('label', { className: 'swatch', title: c });
+  label.style.background = c;
+  label.appendChild(el('input', { type: 'radio', name: 'group-color', value: c }));
+  return label;
+}));
+
+// O evento "editar grupo" pode chegar antes do estado que já tem o grupo novo:
+// guarda o pedido e abre quando o grupo aparecer.
+let pendingGroupEdit: string | null = null;
+
+function openGroupDialog(groupId: string): void {
+  const g = state?.groups.find((x) => x.id === groupId);
+  if (!g) { pendingGroupEdit = groupId; return; }
+  pendingGroupEdit = null;
+  editingGroup = g;
+  $<HTMLInputElement>('#group-name').value = g.name;
+  for (const r of document.querySelectorAll<HTMLInputElement>('input[name="group-color"]')) r.checked = r.value === g.color;
+  send({ type: 'layout:overlay', open: true });
+  groupDialog.showModal();
+  $('#group-name').focus();
+}
+
+groupDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
+$('#group-cancel').onclick = () => groupDialog.close();
+$('#group-form').addEventListener('submit', () => {
+  if (!editingGroup) return;
+  const color = document.querySelector<HTMLInputElement>('input[name="group-color"]:checked')?.value ?? editingGroup.color;
+  send({ type: 'group:update', groupId: editingGroup.id, name: $<HTMLInputElement>('#group-name').value.trim(), color });
+});
+
 // ------------------------------------------------------------ eventos
 
 $('#add-workspace').onclick = () => openWorkspaceDialog();
@@ -247,10 +364,13 @@ window.apollo.onState((next) => {
   if (state && next.sitePermissions?.origin !== state.sitePermissions?.origin) siteBarOpen = false;
   state = next;
   render();
+  if (pendingGroupEdit) openGroupDialog(pendingGroupEdit);
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'focus-address') {
+  if (event.type === 'edit-group') {
+    openGroupDialog(event.groupId);
+  } else if (event.type === 'focus-address') {
     const input = $<HTMLInputElement>('#address');
     input.focus();
     input.select();

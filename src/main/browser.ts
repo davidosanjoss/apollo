@@ -1,12 +1,14 @@
-import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from 'electron';
+import { BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
+import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
 import type { TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
+import { GROUP_COLORS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
@@ -19,6 +21,7 @@ interface ClosedTab {
   url: string;
   title: string;
   history: TabHistory | null;
+  groupId: string | null;
 }
 
 /**
@@ -136,10 +139,11 @@ export class Browser {
 
   createTab(workspaceId: string, url: string | null, opts: { activate: boolean; afterTabId?: string | null }): Tab {
     const ws = this.store.getWorkspace(workspaceId)!;
-    const tab = this.store.insertTab(
-      { id: newId(), workspaceId, url: url || ws.home || APOLLO_HOME, title: 'Nova aba' },
-      opts.afterTabId ?? ws.activeTabId,
-    );
+    const afterId = opts.afterTabId ?? ws.activeTabId;
+    const tab = this.store.insertTab({ id: newId(), workspaceId, url: url || ws.home || APOLLO_HOME, title: 'Nova aba' }, afterId);
+    // Aberta a partir de uma aba de grupo: entra no grupo. Ao lado de fixada: vai para depois delas.
+    const after = afterId ? this.store.getTab(afterId) : null;
+    this.reorder(workspaceId, (tabs) => (after?.groupId && !after.pinned ? joinGroupInPlace(tabs, tab.id, after.groupId) : normalize(tabs)));
     if (opts.activate) {
       this.store.setActiveTab(workspaceId, tab.id);
       if (workspaceId === this.activeWorkspaceId) this.showActive();
@@ -340,7 +344,7 @@ export class Browser {
     this.destroyView(tabId); // grava o histórico antes
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
-      this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history });
+      this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
       if (this.closedTabs.length > MAX_CLOSED_TABS) this.closedTabs.shift();
     }
     this.store.deleteTab(tabId);
@@ -365,6 +369,8 @@ export class Browser {
       { id: newId(), workspaceId: closed.workspaceId, url: closed.url, title: closed.title, history: closed.history },
       closed.index,
     );
+    const group = closed.groupId && this.store.getGroup(closed.groupId);
+    this.reorder(tab.workspaceId, (tabs) => (group ? joinGroupInPlace(tabs, tab.id, group.id) : normalize(tabs)));
     this.store.setActiveTab(tab.workspaceId, tab.id);
     this.showActive();
   }
@@ -372,6 +378,8 @@ export class Browser {
   activateTab(tabId: string): void {
     const tab = this.store.getTab(tabId);
     if (!tab || tab.workspaceId !== this.activeWorkspaceId) return;
+    // Aba de grupo recolhido: expande o grupo para ela aparecer.
+    if (tab.groupId && this.store.getGroup(tab.groupId)?.collapsed) this.store.updateGroup(tab.groupId, { collapsed: false });
     this.store.setActiveTab(tab.workspaceId, tabId);
     this.showActive();
   }
@@ -407,6 +415,161 @@ export class Browser {
     }
     this.withActiveView((wc) => wc.focus());
     this.push();
+  }
+
+  // ------------------------------------------------------------ organização (ordem, fixar, grupos)
+
+  /** Aplica uma regra de ordem (tab-order.ts) às abas do workspace e grava. */
+  private reorder(workspaceId: string, fn: (tabs: OrderTab[]) => OrderTab[]): void {
+    const tabs = this.store.listTabs(workspaceId).map(({ id, pinned, groupId }) => ({ id, pinned, groupId }));
+    this.store.applyOrder(workspaceId, fn(tabs));
+  }
+
+  private tabInActiveWorkspace(tabId: string): Tab | null {
+    const tab = this.store.getTab(tabId);
+    return tab && tab.workspaceId === this.activeWorkspaceId ? tab : null;
+  }
+
+  private groupInActiveWorkspace(groupId: string) {
+    const g = this.store.getGroup(groupId);
+    return g && g.workspaceId === this.activeWorkspaceId ? g : null;
+  }
+
+  moveTabTo(tabId: string, index: number, groupId?: string | null): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab) return;
+    if (groupId && !this.groupInActiveWorkspace(groupId)) return;
+    this.reorder(tab.workspaceId, (tabs) => moveTab(tabs, tabId, index, groupId));
+  }
+
+  pinTab(tabId: string, pinned: boolean): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (tab) this.reorder(tab.workspaceId, (tabs) => setPinned(tabs, tabId, pinned));
+  }
+
+  duplicateTab(tabId: string): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab) return;
+    if (this.views.has(tabId)) this.captureHistory(tabId);
+    const fresh = this.store.getTab(tabId)!;
+    const copy = this.store.insertTab({ id: newId(), workspaceId: tab.workspaceId, url: fresh.url, title: fresh.title, history: fresh.history }, tabId);
+    this.reorder(tab.workspaceId, (tabs) => (fresh.groupId ? joinGroupInPlace(tabs, copy.id, fresh.groupId) : normalize(tabs)));
+    this.store.setActiveTab(tab.workspaceId, copy.id);
+    this.showActive();
+  }
+
+  /** Fecha outras abas (ou só as à direita). Fixadas ficam. */
+  closeOtherTabs(tabId: string, onlyRight: boolean): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab) return;
+    const tabs = this.store.listTabs(tab.workspaceId);
+    const idx = tabs.findIndex((t) => t.id === tabId);
+    this.store.setActiveTab(tab.workspaceId, tabId);
+    for (const t of tabs.slice(onlyRight ? idx + 1 : 0)) {
+      if (t.id !== tabId && !t.pinned) this.closeTab(t.id);
+    }
+    this.showActive();
+  }
+
+  createGroup(tabId: string): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab) return;
+    const used = new Set(this.store.listGroups(tab.workspaceId).map((g) => g.color));
+    const color = GROUP_COLORS.find((c) => !used.has(c)) ?? GROUP_COLORS[0];
+    const group = this.store.createGroup({ id: newId(), workspaceId: tab.workspaceId, name: '', color });
+    this.reorder(tab.workspaceId, (tabs) => setGroup(tabs, tabId, group.id));
+    this.emit({ type: 'edit-group', groupId: group.id });
+  }
+
+  addToGroup(tabId: string, groupId: string | null): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab || (groupId && !this.groupInActiveWorkspace(groupId))) return;
+    this.reorder(tab.workspaceId, (tabs) => setGroup(tabs, tabId, groupId));
+  }
+
+  ungroup(groupId: string): void {
+    const g = this.groupInActiveWorkspace(groupId);
+    if (!g) return;
+    this.reorder(g.workspaceId, (tabs) => tabs.map((t) => (t.groupId === groupId ? { ...t, groupId: null } : t)));
+    this.store.deleteGroup(groupId);
+  }
+
+  closeGroup(groupId: string): void {
+    const g = this.groupInActiveWorkspace(groupId);
+    if (!g) return;
+    for (const t of this.store.listTabs(g.workspaceId)) if (t.groupId === groupId) this.closeTab(t.id);
+  }
+
+  collapseGroup(groupId: string, collapsed: boolean): void {
+    const g = this.groupInActiveWorkspace(groupId);
+    if (!g) return;
+    this.store.updateGroup(groupId, { collapsed });
+    // Recolheu o grupo da aba ativa: ativa a primeira aba visível fora dele.
+    const active = this.activeTab();
+    if (collapsed && active?.groupId === groupId) {
+      const tabs = this.store.listTabs(g.workspaceId);
+      const idx = tabs.findIndex((t) => t.id === active.id);
+      const visible = (t: Tab) => t.groupId !== groupId;
+      const next = tabs.slice(idx).find(visible) ?? [...tabs.slice(0, idx)].reverse().find(visible);
+      if (next) this.activateTab(next.id);
+      else this.createTab(g.workspaceId, null, { activate: true, afterTabId: tabs[tabs.length - 1].id });
+    }
+  }
+
+  // ------------------------------------------------------------ menus de contexto (nativos: ficam acima da página)
+
+  private popup(items: MenuItemConstructorOptions[], x: number, y: number): void {
+    Menu.buildFromTemplate(items).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
+  }
+
+  private run(cmd: UiCommand): () => void {
+    return () => this.handleCommand(cmd);
+  }
+
+  showTabMenu(tabId: string, x: number, y: number): void {
+    const tab = this.tabInActiveWorkspace(tabId);
+    if (!tab) return;
+    const groups = this.store.listGroups(tab.workspaceId).filter((g) => g.id !== tab.groupId);
+    const tabs = this.store.listTabs(tab.workspaceId);
+    const isLast = tabs[tabs.length - 1]?.id === tabId;
+    this.popup([
+      { label: 'Nova aba à direita', click: () => { this.createTab(tab.workspaceId, null, { activate: true, afterTabId: tabId }); } },
+      { type: 'separator' },
+      { label: 'Recarregar', click: () => { this.views.get(tabId)?.webContents.reload(); } },
+      { label: 'Duplicar', click: this.run({ type: 'tab:duplicate', tabId }) },
+      { label: tab.pinned ? 'Desafixar' : 'Fixar', click: this.run({ type: 'tab:pin', tabId, pinned: !tab.pinned }) },
+      { label: 'Manter sempre ativa (não hibernar)', type: 'checkbox', checked: tab.keepAwake,
+        click: this.run({ type: 'tab:keep-awake', tabId, keepAwake: !tab.keepAwake }) },
+      { type: 'separator' },
+      { label: 'Adicionar a um novo grupo', click: this.run({ type: 'group:create', tabId }) },
+      ...(groups.length ? [{ label: 'Mover para o grupo', submenu: groups.map((g) => ({
+        label: g.name || 'Grupo sem nome', click: this.run({ type: 'group:add', tabId, groupId: g.id }),
+      })) }] : []),
+      ...(tab.groupId ? [{ label: 'Remover do grupo', click: this.run({ type: 'group:add', tabId, groupId: null }) }] : []),
+      { type: 'separator' },
+      { label: 'Fechar', accelerator: 'CmdOrCtrl+W', click: this.run({ type: 'tab:close', tabId }) },
+      { label: 'Fechar outras abas', enabled: tabs.length > 1, click: this.run({ type: 'tab:close-others', tabId }) },
+      { label: 'Fechar abas à direita', enabled: !isLast, click: this.run({ type: 'tab:close-right', tabId }) },
+      { type: 'separator' },
+      { label: 'Reabrir aba fechada', accelerator: 'CmdOrCtrl+Shift+T',
+        enabled: this.closedTabs.some((c) => c.workspaceId === tab.workspaceId), click: this.run({ type: 'tab:reopen' }) },
+    ], x, y);
+  }
+
+  showGroupMenu(groupId: string, x: number, y: number): void {
+    const g = this.groupInActiveWorkspace(groupId);
+    if (!g) return;
+    this.popup([
+      { label: 'Renomear / mudar cor…', click: () => this.emit({ type: 'edit-group', groupId }) },
+      { label: g.collapsed ? 'Expandir' : 'Recolher', click: this.run({ type: 'group:collapse', groupId, collapsed: !g.collapsed }) },
+      { label: 'Nova aba no grupo', click: () => {
+        const last = this.store.listTabs(g.workspaceId).filter((t) => t.groupId === groupId).pop();
+        if (last) this.createTab(g.workspaceId, null, { activate: true, afterTabId: last.id });
+      } },
+      { type: 'separator' },
+      { label: 'Desagrupar', click: this.run({ type: 'group:ungroup', groupId }) },
+      { label: 'Fechar grupo', click: this.run({ type: 'group:close', groupId }) },
+    ], x, y);
   }
 
   // ------------------------------------------------------------ workspaces
@@ -482,6 +645,22 @@ export class Browser {
       case 'tab:forward': this.runShortcut('forward'); break;
       case 'tab:reload': this.runShortcut('reload'); break;
       case 'tab:focus': this.withActiveView((wc) => wc.focus()); break;
+      case 'tab:move': this.moveTabTo(cmd.tabId, cmd.index, cmd.groupId); break;
+      case 'tab:pin': this.pinTab(cmd.tabId, cmd.pinned); break;
+      case 'tab:keep-awake': if (this.tabInActiveWorkspace(cmd.tabId)) this.store.setKeepAwake(cmd.tabId, cmd.keepAwake); break;
+      case 'tab:duplicate': this.duplicateTab(cmd.tabId); break;
+      case 'tab:close-others': this.closeOtherTabs(cmd.tabId, false); break;
+      case 'tab:close-right': this.closeOtherTabs(cmd.tabId, true); break;
+      case 'tab:menu': this.showTabMenu(cmd.tabId, cmd.x, cmd.y); break;
+      case 'group:create': this.createGroup(cmd.tabId); break;
+      case 'group:add': this.addToGroup(cmd.tabId, cmd.groupId); break;
+      case 'group:update':
+        if (this.groupInActiveWorkspace(cmd.groupId)) this.store.updateGroup(cmd.groupId, { name: cmd.name.trim(), color: cmd.color });
+        break;
+      case 'group:collapse': this.collapseGroup(cmd.groupId, cmd.collapsed); break;
+      case 'group:ungroup': this.ungroup(cmd.groupId); break;
+      case 'group:close': this.closeGroup(cmd.groupId); break;
+      case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
       case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home); break;
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home); break;
@@ -536,6 +715,9 @@ export class Browser {
         canGoBack: alive ? wc.navigationHistory.canGoBack() : false,
         canGoForward: alive ? wc.navigationHistory.canGoForward() : false,
         dormant: !alive,
+        pinned: t.pinned,
+        keepAwake: t.keepAwake,
+        groupId: t.groupId,
       };
     });
     const active = this.activeTab();
@@ -543,6 +725,7 @@ export class Browser {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home }) => ({ id, name, color, home })),
       activeWorkspaceId: ws.id,
       tabs,
+      groups: this.store.listGroups(ws.id).map(({ id, name, color, collapsed }) => ({ id, name, color, collapsed })),
       activeTabId: ws.activeTabId,
       permissionPrompt: this.permissions.promptFor(ws.activeTabId),
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),

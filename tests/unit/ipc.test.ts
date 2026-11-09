@@ -20,6 +20,22 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'permission:answer', promptId: 'p', decision: 'allow', remember: false },
       { type: 'permission:set', origin: 'https://a.com', kind: 'notifications', decision: null },
       { type: 'permission:set', origin: 'https://a.com', kind: 'geolocation', decision: 'deny' },
+      { type: 'tab:move', tabId: 't', index: 0 },
+      { type: 'tab:move', tabId: 't', index: 3, groupId: null },
+      { type: 'tab:move', tabId: 't', index: 3, groupId: 'g' },
+      { type: 'tab:pin', tabId: 't', pinned: true },
+      { type: 'tab:keep-awake', tabId: 't', keepAwake: false },
+      { type: 'tab:duplicate', tabId: 't' },
+      { type: 'tab:close-others', tabId: 't' },
+      { type: 'tab:close-right', tabId: 't' },
+      { type: 'tab:menu', tabId: 't', x: 10, y: 20 },
+      { type: 'group:create', tabId: 't' },
+      { type: 'group:add', tabId: 't', groupId: null },
+      { type: 'group:update', groupId: 'g', name: '', color: '#4c8bf5' },
+      { type: 'group:collapse', groupId: 'g', collapsed: true },
+      { type: 'group:ungroup', groupId: 'g' },
+      { type: 'group:close', groupId: 'g' },
+      { type: 'group:menu', groupId: 'g', x: 0, y: 0 },
     ];
     for (const cmd of valid) expect(parseCommand(cmd), JSON.stringify(cmd)).not.toBeNull();
   });
@@ -50,6 +66,15 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'permission:answer', promptId: 'p', decision: 'allow' },
       { type: 'permission:set', origin: 'https://a.com', kind: 'camera', decision: 'allow' },
       { type: 'permission:set', origin: 'https://a.com', kind: 'toString', decision: 'allow' },
+      { type: 'tab:move', tabId: 't', index: 1.5 },
+      { type: 'tab:move', tabId: 't', index: -1 },
+      { type: 'tab:move', tabId: '', index: 0 },
+      { type: 'tab:pin', tabId: 't', pinned: 'sim' },
+      { type: 'tab:menu', tabId: 't', x: 10 },
+      { type: 'group:add', tabId: 't' },
+      { type: 'group:update', groupId: 'g', name: 'x'.repeat(41), color: '#4c8bf5' },
+      { type: 'group:update', groupId: 'g', name: 'ok', color: '#123456' },
+      { type: 'group:collapse', groupId: 'g' },
     ];
     for (const cmd of invalid) expect(parseCommand(cmd), JSON.stringify(cmd)).toBeNull();
   });

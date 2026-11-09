@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { PermissionDecision, PermissionKind } from '../shared/types';
 import { parseHistory, sanitizeHistory, type TabHistory } from './history';
+import type { OrderTab } from './tab-order';
 
 export interface Workspace {
   id: string;
@@ -21,7 +22,16 @@ export interface Tab {
   title: string;
   favicon: string | null;
   pinned: boolean;
+  keepAwake: boolean;
   history: TabHistory | null;
+}
+
+export interface TabGroup {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
 }
 
 export type NewTab = Pick<Tab, 'id' | 'workspaceId' | 'url' | 'title'> & { history?: TabHistory | null };
@@ -47,7 +57,16 @@ const toTab = (r: Row): Tab => ({
   title: r.title as string,
   favicon: (r.favicon as string | null) ?? null,
   pinned: r.pinned === 1,
+  keepAwake: r.keep_awake === 1,
   history: parseHistory(r.history as string | null),
+});
+
+const toGroup = (r: Row): TabGroup => ({
+  id: r.id as string,
+  workspaceId: r.workspace_id as string,
+  name: r.name as string,
+  color: r.color as string,
+  collapsed: r.collapsed === 1,
 });
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
@@ -160,6 +179,56 @@ export class Store {
       .get(tab.workspaceId, tab.position) as { n: number }).n;
   }
 
+  setKeepAwake(id: string, keepAwake: boolean): void {
+    this.db.prepare('UPDATE tabs SET keep_awake = ? WHERE id = ?').run(keepAwake ? 1 : 0, id);
+  }
+
+  /** Grava ordem, fixação e grupo de todas as abas de um workspace (ver tab-order.ts). */
+  applyOrder(workspaceId: string, tabs: OrderTab[]): void {
+    this.tx(() => {
+      const stmt = this.db.prepare('UPDATE tabs SET position = ?, pinned = ?, group_id = ? WHERE id = ? AND workspace_id = ?');
+      tabs.forEach((t, i) => stmt.run(i, t.pinned ? 1 : 0, t.groupId, t.id, workspaceId));
+      this.deleteEmptyGroups(workspaceId);
+    });
+  }
+
+  // ------------------------------------------------------------ grupos de abas
+
+  listGroups(workspaceId: string): TabGroup[] {
+    return (this.db.prepare('SELECT * FROM tab_groups WHERE workspace_id = ? ORDER BY position').all(workspaceId) as Row[]).map(toGroup);
+  }
+
+  getGroup(id: string): TabGroup | null {
+    const row = this.db.prepare('SELECT * FROM tab_groups WHERE id = ?').get(id) as Row | undefined;
+    return row ? toGroup(row) : null;
+  }
+
+  createGroup(group: Omit<TabGroup, 'collapsed'>): TabGroup {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tab_groups WHERE workspace_id = ?')
+      .get(group.workspaceId) as { next: number };
+    this.db.prepare('INSERT INTO tab_groups(id, workspace_id, name, color, collapsed, position) VALUES (?, ?, ?, ?, 0, ?)')
+      .run(group.id, group.workspaceId, group.name, group.color, next);
+    return { ...group, collapsed: false };
+  }
+
+  updateGroup(id: string, patch: Partial<Pick<TabGroup, 'name' | 'color' | 'collapsed'>>): void {
+    const g = this.getGroup(id);
+    if (!g) return;
+    const next = { ...g, ...patch };
+    this.db.prepare('UPDATE tab_groups SET name = ?, color = ?, collapsed = ? WHERE id = ?')
+      .run(next.name, next.color, next.collapsed ? 1 : 0, id);
+  }
+
+  /** Remove o grupo; as abas continuam, sem grupo. */
+  deleteGroup(id: string): void {
+    this.db.prepare('DELETE FROM tab_groups WHERE id = ?').run(id);
+  }
+
+  deleteEmptyGroups(workspaceId: string): void {
+    this.db.prepare(`DELETE FROM tab_groups WHERE workspace_id = ?
+      AND id NOT IN (SELECT group_id FROM tabs WHERE group_id IS NOT NULL)`).run(workspaceId);
+  }
+
   setTabHistory(id: string, history: TabHistory | null): void {
     const clean = sanitizeHistory(history);
     this.db.prepare('UPDATE tabs SET history = ? WHERE id = ?').run(clean ? JSON.stringify(clean) : null, id);
@@ -173,7 +242,9 @@ export class Store {
   }
 
   deleteTab(id: string): void {
+    const tab = this.getTab(id);
     this.db.prepare('DELETE FROM tabs WHERE id = ?').run(id);
+    if (tab?.groupId) this.deleteEmptyGroups(tab.workspaceId);
   }
 
   // ------------------------------------------------------------ permissões

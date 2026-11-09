@@ -9,6 +9,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Voltar/avançar e a posição de rolagem de cada aba são restaurados ao reabrir.
 - Ctrl+Shift+T reabre a última aba fechada, no mesmo lugar e com o histórico.
 - Tamanho, posição e estado maximizado da janela são lembrados (se o monitor sumiu, a janela abre centralizada).
+- Arrastar abas para reordenar.
+- Abas fixadas: ficam no começo, compactas (só o ícone).
+- Grupos de abas com nome e cor: recolher/expandir clicando no chip, arrastar abas para dentro/fora, desagrupar, fechar grupo. Abas abertas a partir de uma aba do grupo entram no grupo.
+- Menu do botão direito na aba: nova aba à direita, recarregar, duplicar (com histórico), fixar, manter sempre ativa, grupos, fechar outras / à direita, reabrir aba fechada.
 
 ### Corrigido
 - Navegar logo ao abrir o Apollo, antes de a sessão terminar de ser restaurada, era desfeito (a aba voltava para a página anterior).

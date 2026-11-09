@@ -237,3 +237,50 @@ describe('fase 2: posição, histórico e cookies de sessão', () => {
     expect([...store.loadSessionCookies('b')!]).toEqual([9]);
   });
 });
+
+describe('fase 2b: ordem, fixadas e grupos', () => {
+  beforeEach(() => { ws('a'); ws('b'); tab('t1', 'a'); tab('t2', 'a'); tab('t3', 'a'); });
+
+  it('applyOrder grava posição, fixação e grupo', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'G', color: '#4c8bf5' });
+    store.applyOrder('a', [
+      { id: 't3', pinned: true, groupId: null },
+      { id: 't1', pinned: false, groupId: 'g' },
+      { id: 't2', pinned: false, groupId: null },
+    ]);
+    expect(store.listTabs('a').map((t) => [t.id, t.pinned, t.groupId])).toEqual([['t3', true, null], ['t1', false, 'g'], ['t2', false, null]]);
+  });
+
+  it('applyOrder ignora abas de outro workspace', () => {
+    tab('x', 'b');
+    store.applyOrder('a', [{ id: 'x', pinned: true, groupId: null }]);
+    expect(store.getTab('x')!.pinned).toBe(false);
+  });
+
+  it('grupo vazio some ao aplicar ordem ou fechar a última aba dele', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'G', color: '#4c8bf5' });
+    store.createGroup({ id: 'h', workspaceId: 'a', name: 'H', color: '#e5534b' });
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: 'g' }, { id: 't2', pinned: false, groupId: 'h' }, { id: 't3', pinned: false, groupId: null }]);
+    expect(store.listGroups('a').map((g) => g.id)).toEqual(['g', 'h']);
+    store.deleteTab('t2');
+    expect(store.listGroups('a').map((g) => g.id)).toEqual(['g']);
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: null }, { id: 't3', pinned: false, groupId: null }]);
+    expect(store.listGroups('a')).toEqual([]);
+  });
+
+  it('atualizar e excluir grupo (abas ficam sem grupo)', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: '', color: '#4c8bf5' });
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: 'g' }, { id: 't2', pinned: false, groupId: null }, { id: 't3', pinned: false, groupId: null }]);
+    store.updateGroup('g', { name: 'Faculdade', collapsed: true });
+    expect(store.getGroup('g')).toMatchObject({ name: 'Faculdade', color: '#4c8bf5', collapsed: true });
+    store.deleteGroup('g');
+    expect(store.getTab('t1')!.groupId).toBeNull();
+  });
+
+  it('manter sempre ativa', () => {
+    store.setKeepAwake('t1', true);
+    expect(store.getTab('t1')!.keepAwake).toBe(true);
+    store.setKeepAwake('t1', false);
+    expect(store.getTab('t1')!.keepAwake).toBe(false);
+  });
+});

@@ -192,8 +192,14 @@ export class Apollo {
     return this.ui.eval<UiState>('window.__s');
   }
 
-  async until(pred: (s: UiState) => unknown, what: string, timeout?: number): Promise<UiState> {
-    return waitFor(async () => { const s = await this.state(); return pred(s) ? s : null; }, what, timeout);
+  /** Espera o estado satisfazer `pred` (síncrono: para esperar a UI/página use waitFor). */
+  async until(pred: (s: UiState) => boolean | undefined | null | '' | 0, what: string, timeout?: number): Promise<UiState> {
+    return waitFor(async () => {
+      const s = await this.state();
+      const ok = pred(s) as unknown;
+      if (ok instanceof Promise) throw new Error('until() recebeu predicado assíncrono; use waitFor');
+      return ok ? s : null;
+    }, what, timeout);
   }
 
   activeTab(s: UiState) { return s.tabs.find((t) => t.id === s.activeTabId)!; }
