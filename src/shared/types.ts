@@ -172,6 +172,10 @@ export type UiCommand =
   | { type: 'privacy:set'; scope: 'global' | 'workspace' | 'site'; feature: PrivacyFeature; enabled: boolean | null; workspaceId?: string }
   /** Pausa toda a proteção só na aba ativa, até ela fechar. */
   | { type: 'privacy:pause-tab'; paused: boolean }
+  /** Volta o site da aba ativa ao padrão (remove as regras dele: anúncios e rastreadores). */
+  | { type: 'privacy:reset-site' }
+  /** Menu nativo do escudo da barra de endereço em (x, y). */
+  | { type: 'privacy:menu'; x: number; y: number }
   | { type: 'settings:dns'; mode: DnsMode; dohUrl: string | null }
   | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }

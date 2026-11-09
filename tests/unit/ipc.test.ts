@@ -34,6 +34,8 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'privacy:set', scope: 'workspace', feature: 'trackers', enabled: null, workspaceId: 'w' },
       { type: 'privacy:set', scope: 'global', feature: 'ads', enabled: true },
       { type: 'privacy:pause-tab', paused: true },
+      { type: 'privacy:reset-site' },
+      { type: 'privacy:menu', x: 10, y: 40 },
       { type: 'settings:memory-limit', mb: 0 },
       { type: 'settings:memory-limit', mb: 4096 },
       { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 0 },
@@ -96,6 +98,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'privacy:set', scope: 'site', feature: 'toString', enabled: false },
       { type: 'privacy:set', scope: 'site', feature: 'ads', enabled: 'nao' },
       { type: 'privacy:pause-tab' },
+      { type: 'privacy:menu', x: -1, y: 0 },
       { type: 'settings:memory-limit', mb: 5 },
       { type: 'settings:memory-limit', mb: '4096' },
     ];

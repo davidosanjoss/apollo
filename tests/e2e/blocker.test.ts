@@ -104,3 +104,48 @@ describe('bloqueador', () => {
     expect(hit).toEqual({ ad: false, tracker: true }); // regra do site (rastreadores liberados) continua
   });
 });
+
+describe('escudo na barra de endereço', () => {
+  const shield = () => app.ui.eval<{ hidden: boolean; cls: string; count: string | null }>(`(() => {
+    const b = document.getElementById('shield-btn'); const c = document.getElementById('blocked-count');
+    return { hidden: b.hidden, cls: b.className, count: c.hidden ? null : c.textContent };
+  })()`);
+
+  it('aparece no site com o estado e o contador; some na página inicial', async () => {
+    await app.send({ type: 'tab:new' });
+    await app.until((s) => s.sitePrivacy === null, 'página inicial');
+    expect((await shield()).hidden).toBe(true);
+    await loadBlocktest('S1');
+    await waitFor(async () => { const s = await shield(); return !s.hidden && s.count !== null; }, 'escudo com contador');
+    // Neste perfil o site tem regras dos testes anteriores: confere o estado que o modelo diz.
+    const st = await app.state();
+    const expected = st.sitePrivacy!.toggles.ads && st.sitePrivacy!.toggles.trackers ? 'on'
+      : !st.sitePrivacy!.toggles.ads && !st.sitePrivacy!.toggles.trackers ? 'off' : 'partial';
+    expect((await shield()).cls).toContain(expected);
+  });
+
+  it('sobrescrever no domínio muda o escudo; "usar o padrão" desfaz', async () => {
+    await app.send({ type: 'privacy:reset-site' });
+    await app.until((s) => s.sitePrivacy!.siteRules.ads === null && s.sitePrivacy!.siteRules.trackers === null && !app.activeTab(s).loading, 'padrão');
+    const base = await app.state();
+    const wsAds = base.sitePrivacy!.toggles.ads;
+
+    await app.send({ type: 'privacy:set', scope: 'site', feature: 'trackers', enabled: false });
+    await waitFor(async () => (await shield()).cls.includes(wsAds ? 'partial' : 'off'), 'rastreadores liberados no site');
+    await app.send({ type: 'privacy:set', scope: 'site', feature: 'ads', enabled: false });
+    await waitFor(async () => (await shield()).cls.includes('off'), 'tudo liberado no site');
+    let s = await app.state();
+    expect(s.sitePrivacy!.siteRules).toMatchObject({ ads: false, trackers: false });
+
+    await app.send({ type: 'privacy:reset-site' });
+    s = await app.until((x) => x.sitePrivacy!.siteRules.ads === null && x.sitePrivacy!.siteRules.trackers === null, 'de volta ao padrão');
+    expect(s.sitePrivacy!.toggles.trackers).toBe(true);
+  });
+
+  it('clicar no escudo abre o menu sem travar o navegador', async () => {
+    await app.ui.mouseClick('#shield-btn');
+    await new Promise((r) => setTimeout(r, 300));
+    await app.send({ type: 'tab:reload' }); // continua respondendo
+    await app.until((s) => !app.activeTab(s).loading, 'responde');
+  });
+});

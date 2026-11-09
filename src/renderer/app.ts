@@ -4,6 +4,7 @@ import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, PrivacyLevel, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
+import { shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 
@@ -260,6 +261,14 @@ function renderSiteBar(s: UiState): void {
   const info = s.sitePermissions;
   const p = s.sitePrivacy;
   $('#site-btn').hidden = !info;
+  // Escudo na barra de endereço: estado da proteção no domínio + contador.
+  const shield = $('#shield-btn');
+  shield.hidden = !p;
+  if (p) {
+    shield.className = `icon-btn ${shieldState(p)}`;
+    shield.title = `Proteção em ${p.site}: ${p.tabPaused ? 'pausada nesta aba'
+      : `anúncios ${p.toggles.ads ? 'bloqueados' : 'liberados'}, rastreadores ${p.toggles.trackers ? 'bloqueados' : 'liberados'}`}`;
+  }
   const total = p ? p.blocked.ads + p.blocked.trackers : 0;
   const badge = $('#blocked-count');
   badge.hidden = !p || total === 0 || p.tabPaused;
@@ -490,6 +499,10 @@ $('#forward').onclick = () => send({ type: 'tab:forward' });
 $('#reload').onclick = () => send({ type: 'tab:reload' });
 
 $('#site-btn').onclick = () => { siteBarOpen = !siteBarOpen; render(); };
+$('#shield-btn').onclick = () => {
+  const r = $('#shield-btn').getBoundingClientRect();
+  send({ type: 'privacy:menu', x: Math.round(r.left), y: Math.round(r.bottom) });
+};
 $<HTMLInputElement>('#site-pause').onchange = (e) =>
   send({ type: 'privacy:pause-tab', paused: (e.target as HTMLInputElement).checked });
 $('#site-close').onclick = () => { siteBarOpen = false; render(); };

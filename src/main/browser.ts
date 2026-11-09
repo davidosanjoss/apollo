@@ -6,6 +6,7 @@ import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
+import { privacyMenu } from './privacy/menu';
 import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
@@ -450,6 +451,28 @@ export class Browser {
     this.store.setPrivacyRule(scope === 'global' ? null : ws, site, feature, enabled);
     this.privacyCache.clear();
     this.withActiveView((wc) => wc.reload()); // aplica na página atual
+  }
+
+  /** Remove as regras de anúncios/rastreadores do site da aba ativa (volta ao padrão). */
+  resetSitePrivacy(): void {
+    const site = siteOf(this.activeTab()?.url);
+    if (!site) return;
+    for (const f of ['ads', 'trackers'] as const) this.store.setPrivacyRule(this.activeWorkspaceId, site, f, null);
+    this.privacyCache.clear();
+    this.withActiveView((wc) => wc.reload());
+  }
+
+  showPrivacyMenu(x: number, y: number): void {
+    const info = this.sitePrivacy(this.activeTab());
+    if (!info) return;
+    this.popup(privacyMenu(info).map((item): MenuItemConstructorOptions => {
+      switch (item.kind) {
+        case 'info': return { label: item.label, enabled: false };
+        case 'separator': return { type: 'separator' };
+        case 'check': return { label: item.label, type: 'checkbox', checked: item.checked, enabled: item.enabled, click: this.run(item.command) };
+        case 'action': return { label: item.label, enabled: item.enabled, click: this.run(item.command) };
+      }
+    }), x, y);
   }
 
   pauseTab(paused: boolean): void {
@@ -932,6 +955,8 @@ export class Browser {
       case 'memory:toggle': this.toggleMemoryMonitor(cmd.open); break;
       case 'privacy:set': this.setPrivacy(cmd.scope, cmd.feature, cmd.enabled, cmd.workspaceId); break;
       case 'privacy:pause-tab': this.pauseTab(cmd.paused); break;
+      case 'privacy:reset-site': this.resetSitePrivacy(); break;
+      case 'privacy:menu': this.showPrivacyMenu(cmd.x, cmd.y); break;
       case 'settings:memory-limit':
         this.store.setKv('memoryLimitMb', String(cmd.mb));
         if (this.memoryReport) this.memoryReport = { ...this.memoryReport, limitMb: cmd.mb };

@@ -209,7 +209,14 @@ body { display: flex; }
 @keyframes pulse { from { opacity: 1; } to { opacity: .3; } }
 
 #site-btn[hidden] { display: none; }
-#site-btn { position: relative; }
+#shield-btn[hidden] { display: none; }
+#shield-btn { position: relative; display: inline-grid; place-items: center; }
+#shield-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#shield-btn.on { color: #3fb950; }
+#shield-btn.on svg { fill: #3fb95033; }
+#shield-btn.partial { color: #e3b341; }
+#shield-btn.off { color: var(--muted); }
+#shield-btn.off svg { stroke-dasharray: 3 2; }
 #blocked-count { position: absolute; right: -2px; top: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
   background: var(--accent); color: #fff; font-size: 9px; font-weight: 700; line-height: 15px; }
 #blocked-count[hidden] { display: none; }
