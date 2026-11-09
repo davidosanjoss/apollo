@@ -1,0 +1,32 @@
+name: CI
+
+# Repo privado tem cota de minutos (Windows conta em dobro):
+# push na dev → só Linux; PR para main → Linux + Windows.
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Checagem de sintaxe
+        shell: bash
+        run: for f in $(git ls-files 'src/*.js' 'src/**/*.js' 'scripts/*.cjs' 'scripts/*.mjs'); do node --check "$f"; done
+      - name: Build (sem instalador)
+        run: npx electron-builder --dir --publish never

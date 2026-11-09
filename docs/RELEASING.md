@@ -1,5 +1,12 @@
 # Versões e branches
 
+## Repositórios
+
+| Repositório | Visibilidade | Conteúdo |
+|---|---|---|
+| `davidosanjoss/apollo` | privado | Código, branches, CI |
+| `davidosanjoss/apollo-releases` | público | Só as Releases (instaladores e manifestos de atualização) |
+
 ## Branches
 
 | Branch | Papel |
@@ -7,7 +14,7 @@
 | `main` | Só versões **estáveis**. Cada commit na `main` corresponde a uma versão com tag. |
 | `dev` | Desenvolvimento. Todo trabalho entra aqui (direto ou via branches `feat/*`, `fix/*`). |
 
-O CI roda em todo push na `dev` e em PRs, gerando builds de Linux e Windows como artefatos (7 dias).
+O CI roda em todo push na `dev` (só Linux, para poupar a cota de minutos do repo privado) e em PRs para a `main` (Linux e Windows).
 
 ## Versionamento
 
@@ -29,8 +36,29 @@ O CI roda em todo push na `dev` e em PRs, gerando builds de Linux e Windows como
    git checkout main && git pull
    git tag v0.2.0 && git push origin v0.2.0
    ```
-4. O workflow `Release` valida (tag na main e igual ao `package.json`), gera AppImage, tar.gz, instalador `.exe` e zip, e publica a GitHub Release com as notas do CHANGELOG.
+4. O workflow `Release` valida (tag na main e igual ao `package.json`), gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** no `apollo-releases` e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
 5. Sincronizar: `git checkout dev && git merge main`.
+
+## Atualização automática
+
+O app consulta o `apollo-releases` 15 s depois de abrir e a cada 6 h. Se houver versão nova, mostra uma barra com **Baixar e reiniciar** / **Depois**. Nada é baixado nem instalado sem aceitar. O download é conferido pelo hash SHA-512 do manifesto (`latest.yml` / `latest-linux.yml`).
+
+- Atualiza sozinho: instalador `.exe` (Windows) e **AppImage** (Linux).
+- `zip` e `tar.gz`: atualização manual.
+- Em desenvolvimento (`npm start`) o atualizador fica desligado.
+
+## Configuração única: token de publicação
+
+O repo privado publica no público usando o secret `RELEASES_TOKEN`:
+
+1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
+   - Repository access: **Only select repositories** → `apollo-releases`
+   - Permissions: **Contents: Read and write** (o resto fica sem acesso)
+   - Expiração: a que preferir (anote para renovar)
+2. Salvar como secret no repo privado (o valor é pedido no terminal):
+   ```bash
+   gh secret set RELEASES_TOKEN -R davidosanjoss/apollo
+   ```
 
 ## DRM no Windows (opcional)
 

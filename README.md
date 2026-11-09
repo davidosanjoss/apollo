@@ -11,7 +11,11 @@ Navegador pessoal, leve e focado em privacidade, construído sobre Chromium (Ele
 - **Privacidade como padrão.** Zero telemetria, bloqueio de anúncios e rastreadores (configurável por workspace, site e aba), DNS criptografado.
 - **Compatível.** Google e Microsoft funcionam como no Chrome. Streaming com DRM via Widevine.
 
-## Rodando
+## Download
+
+Versões estáveis: [davidosanjoss/apollo-releases](https://github.com/davidosanjoss/apollo-releases/releases). O app avisa quando há atualização (AppImage no Linux, instalador `.exe` no Windows).
+
+## Rodando a partir do código
 
 Requer Node.js 22+.
 

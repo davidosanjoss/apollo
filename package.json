@@ -1,0 +1,68 @@
+{
+  "name": "apollo",
+  "version": "0.1.0",
+  "description": "Navegador pessoal com workspaces de sessão isolada",
+  "main": "src/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "diagnose": "node scripts/diagnose.mjs",
+    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
+    "electron-builder": "^26.18.0"
+  },
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/davidosanjoss/apollo-releases",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davidosanjoss/apollo.git"
+  },
+  "build": {
+    "appId": "io.github.davidosanjoss.apollo",
+    "productName": "Apollo",
+    "electronDownload": {
+      "mirror": "https://github.com/castlabs/electron-releases/releases/download/"
+    },
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "afterPack": "scripts/vmp-sign.cjs",
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Network",
+      "executableName": "apollo"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "davidosanjoss",
+        "repo": "apollo-releases",
+        "releaseType": "draft"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}
