@@ -1,0 +1,54 @@
+# Apollo
+
+Navegador pessoal, leve e focado em privacidade, construído sobre Chromium (Electron/castLabs ECS).
+
+> **Status:** protótipo (fase 0). Ainda não é recomendado para uso diário.
+
+## Por que existe
+
+- **Workspaces com sessão isolada.** Cada workspace (ex.: Pessoal, Trabalho, Faculdade) tem cookies, logins e storage próprios. Você fica logado em três contas Outlook ao mesmo tempo, sem uma derrubar a outra.
+- **Leve onde importa.** Só carrega o que você está usando. Abas paradas hibernam (RAM ≈ 0) e recarregam ao clicar. Vídeo e aba ativa usam o que precisarem.
+- **Privacidade como padrão.** Zero telemetria, bloqueio de anúncios e rastreadores (configurável por workspace, site e aba), DNS criptografado.
+- **Compatível.** Google e Microsoft funcionam como no Chrome. Streaming com DRM via Widevine.
+
+## Rodando
+
+Requer Node.js 22+.
+
+```bash
+npm install
+npm start          # abre o navegador
+npm run diagnose   # valida Widevine, vídeo por GPU, DNS, cookies nesta máquina
+```
+
+Builds:
+
+```bash
+npm run dist:linux   # AppImage + tar.gz
+npm run dist:win     # instalador NSIS + zip (funciona a partir do Linux)
+```
+
+## Configuração local
+
+Configurações pessoais ficam **fora do repositório**, na pasta de dados do app:
+
+- Linux: `~/.config/apollo/settings.json`
+- Windows: `%APPDATA%\apollo\settings.json`
+
+```json
+{
+  "dns": {
+    "mode": "secure",
+    "dohUrl": "https://SEU-ID.cloudflare-gateway.com/dns-query"
+  }
+}
+```
+
+`mode`: `secure` (só DoH), `automatic` (DoH com fallback) ou `off`. Sem `dohUrl`, usa o DoH público da Cloudflare.
+
+## Documentação
+
+- [Arquitetura e decisões](docs/ARCHITECTURE.md)
+- [Fase 0: validação técnica](docs/phase-0.md)
+- [Versões e branches](docs/RELEASING.md)
+- [Changelog](CHANGELOG.md)

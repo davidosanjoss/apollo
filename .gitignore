@@ -1,0 +1,19 @@
+# dependências e builds
+node_modules/
+dist/
+out/
+
+# dados locais — NUNCA versionar (logins, endereços pessoais, segredos)
+.env
+.env.*
+*.local.json
+settings.json
+state.json
+Partitions/
+*.log
+
+# editores/SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
