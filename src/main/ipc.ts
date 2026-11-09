@@ -90,6 +90,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:lock':
     case 'vault:sync':
     case 'vault:disconnect': return { type: c.type } as UiCommand;
+    case 'vault:menu': return num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'vault:fill': return id(c.itemId) ? (c as UiCommand) : null;
+    case 'vault:copy': return id(c.itemId) && ['username', 'password', 'totp'].includes(c.what as string) ? (c as UiCommand) : null;
+    case 'vault:open': return { type: c.type } as UiCommand;
     case 'vault:lock-after': return (LOCK_OPTIONS_MIN as readonly unknown[]).includes(c.minutes) ? (c as UiCommand) : null;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'settings:memory-limit': return (MEMORY_LIMIT_OPTIONS_MB as readonly unknown[]).includes(c.mb) ? (c as UiCommand) : null;

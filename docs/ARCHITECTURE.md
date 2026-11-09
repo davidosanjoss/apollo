@@ -88,6 +88,8 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - Cofre em memória continua **cifrado**: só nome, usuário e URLs são decifrados; senha/TOTP na hora do uso. Chaves em `Buffer` zeradas ao bloquear.
 - KDF: PBKDF2 (Node) e Argon2id (`hash-wasm`: o Electron, com BoringSSL, não implementa Argon2). Parâmetros mínimos recusam KDF fraco vindo do servidor.
 - Compatibilidade provada contra Vaultwarden + CLI oficial (`tests/interop`).
+- Preenchimento: o main confere `mainFrame.url` contra as URIs do login no momento do pedido e envia só para o frame principal (`mainFrame.send`); o preload da aba preenche (`src/preload/fill.ts`). Regras de correspondência do Bitwarden (`vault/match.ts`), mais: login https nunca em página http.
+- TOTP (RFC 6238) gerado localmente; área de transferência limpa em 30 s.
 
 ### D7: DNS via Cloudflare Zero Trust Gateway
 - DoH em modo `secure`. O endereço do Gateway fica em `settings.json` local, nunca no repositório.

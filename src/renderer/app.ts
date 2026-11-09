@@ -265,6 +265,19 @@ function renderSiteBar(s: UiState): void {
     gear.title = `Permissões em ${new URL(info.origin).host}`;
   }
 
+  // Chave do Bitwarden: logins para este site.
+  const key = $('#key-btn');
+  const vs = s.vaultSite;
+  key.hidden = !vs;
+  if (vs) {
+    key.className = `icon-btn ${vs.status}${vs.count ? ' has-logins' : ''}`;
+    key.title = vs.status === 'locked' ? 'Bitwarden bloqueado — clique para desbloquear'
+      : vs.count ? `${vs.count} login(s) para este site (Ctrl+Shift+L preenche)` : 'Nenhum login salvo para este site';
+    const kc = $('#key-count');
+    kc.hidden = vs.status !== 'unlocked' || vs.count === 0;
+    kc.textContent = String(vs.count);
+  }
+
   // Escudo na barra de endereço: estado da proteção no domínio + contador.
   const shield = $('#shield-btn');
   shield.hidden = !p;
@@ -560,6 +573,7 @@ const menuAt = (sel: string) => {
 };
 $('#site-btn').onclick = () => send({ type: 'permission:menu', ...menuAt('#site-btn') });
 $('#shield-btn').onclick = () => send({ type: 'privacy:menu', ...menuAt('#shield-btn') });
+$('#key-btn').onclick = () => send({ type: 'vault:menu', ...menuAt('#key-btn') });
 
 const answerPermission = (decision: PermissionDecision) => {
   const promptId = $('#permission-bar').dataset.promptId;
@@ -602,7 +616,9 @@ window.apollo.onState((next) => {
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'edit-group') {
+  if (event.type === 'open-vault') {
+    if (!vaultDialog.open) openVault();
+  } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);
   } else if (event.type === 'focus-address') {
     const input = $<HTMLInputElement>('#address');

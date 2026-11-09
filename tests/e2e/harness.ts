@@ -61,6 +61,9 @@ export async function startSite(): Promise<TestSite> {
         // Página em 127.0.0.1 que carrega um "anúncio" e um "rastreador" de localhost (terceiros).
         return html(`<script src="http://localhost:${port}/ads/banner.js"></script>
           <img src="http://localhost:${port}/track/pixel.gif">`, u.searchParams.get('title') ?? 'Bloqueio');
+      case '/login':
+        return html(`<form><input id="busca" type="search" name="q">
+          <input id="email" type="email" name="email"><input id="senha" type="password" name="senha"></form>`, 'Entrar');
       case '/cosmetic':
         return html(`<div class="anuncio">ANUNCIO</div><div id="conteudo">conteudo</div>
           <script>document.title = window.adsEnabled === false ? 'scriptlet-ok' : 'scriptlet-nao';

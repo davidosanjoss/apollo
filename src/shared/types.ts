@@ -162,6 +162,8 @@ export interface UiState {
   memory: MemoryReport | null;
   settings: SettingsInfo;
   vault: VaultStatusInfo;
+  /** Logins do Bitwarden para o site da aba ativa (null = página não é web ou cofre desconectado). */
+  vaultSite: { status: 'locked' | 'unlocked'; count: number } | null;
 }
 
 export type UiCommand =
@@ -199,6 +201,11 @@ export type UiCommand =
   | { type: 'vault:sync' }
   | { type: 'vault:disconnect' }
   | { type: 'vault:lock-after'; minutes: number }
+  /** Menu da chave na barra de endereço (logins do site da aba ativa). */
+  | { type: 'vault:menu'; x: number; y: number }
+  | { type: 'vault:fill'; itemId: string }
+  | { type: 'vault:copy'; itemId: string; what: 'username' | 'password' | 'totp' }
+  | { type: 'vault:open' }
   | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
@@ -230,6 +237,8 @@ export type UiCommand =
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
 export type UiEvent =
   | { type: 'focus-address' }
+  /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
+  | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
   | { type: 'edit-group'; groupId: string };
 

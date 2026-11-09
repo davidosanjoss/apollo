@@ -2,6 +2,15 @@
 // nada a ela: só pede ao processo principal os filtros cosméticos e scriptlets.
 import { ipcRenderer, webFrame } from 'electron';
 import { DOMMonitor } from '@ghostery/adblocker-content';
+import { fillLogin } from './fill';
+
+// Preenchimento do Bitwarden: só o processo principal envia (mainFrame.send), e só
+// depois de conferir que a URL desta página casa com o login.
+if (window === window.top) {
+  ipcRenderer.on('apollo:fill', (_e, data: { username: string | null; password: string | null }) => {
+    fillLogin(document, data?.username ?? null, data?.password ?? null);
+  });
+}
 
 /**
  * Um único script com todos os scriptlets, como o uBlock faz: as funções nativas

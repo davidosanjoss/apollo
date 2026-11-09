@@ -202,6 +202,7 @@ app.whenReady().then(async () => {
     () => randomUUID(),
   );
   browser.setVault(vault.info());
+  browser.setVaultProvider({ status: () => vault.status(), vault: () => vault.unlocked });
   // Bloqueio automático: tela bloqueada, suspensão e tempo ocioso do sistema.
   powerMonitor.on('lock-screen', () => vault.lock());
   powerMonitor.on('suspend', () => vault.lock());

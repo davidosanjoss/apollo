@@ -59,6 +59,10 @@ export class VaultService {
     return this.vault;
   }
 
+  status(): 'disconnected' | 'locked' | 'unlocked' {
+    return this.vault ? 'unlocked' : this.account ? 'locked' : 'disconnected';
+  }
+
   info(): VaultStatusInfo {
     const a = this.account;
     return {

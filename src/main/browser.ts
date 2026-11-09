@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
@@ -9,6 +9,18 @@ import type { BlockKind } from './privacy/blocker';
 import { privacyMenu } from './privacy/menu';
 import { permissionsMenu } from './permissions-menu';
 import type { MenuModelItem } from './menu-model';
+import { vaultMenu } from './vault/menu';
+import { loginsFor, uriMatches } from './vault/match';
+import { parseTotp, totp } from './vault/totp';
+import type { UnlockedVault } from './vault/vault';
+
+/** O que o Browser precisa do cofre (o VaultService implementa). */
+export interface VaultProvider {
+  status(): 'disconnected' | 'locked' | 'unlocked';
+  vault(): UnlockedVault | null;
+}
+
+const CLIPBOARD_CLEAR_MS = 30_000;
 import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
@@ -941,6 +953,7 @@ export class Browser {
       case 'next-tab': this.cycleTab(1); break;
       case 'prev-tab': this.cycleTab(-1); break;
       case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
+      case 'autofill': this.autofill(); break;
       default: {
         const ws = this.store.listWorkspaces()[Number(action.split('-')[1]) - 1];
         if (ws) this.switchWorkspace(ws.id);
@@ -971,6 +984,10 @@ export class Browser {
       case 'privacy:pause-tab': this.pauseTab(cmd.paused); break;
       case 'privacy:reset-site': this.resetSitePrivacy(); break;
       case 'privacy:menu': this.showPrivacyMenu(cmd.x, cmd.y); break;
+      case 'vault:menu': this.showVaultMenu(cmd.x, cmd.y); break;
+      case 'vault:fill': this.fillLogin(cmd.itemId); break;
+      case 'vault:copy': this.copyFromVault(cmd.itemId, cmd.what); break;
+      case 'vault:open': this.emit({ type: 'open-vault' }); break;
       case 'permission:menu': this.showPermissionsMenu(cmd.x, cmd.y); break;
       case 'settings:memory-limit':
         this.store.setKv('memoryLimitMb', String(cmd.mb));
@@ -1012,6 +1029,78 @@ export class Browser {
   private vaultInfo: VaultStatusInfo = {
     status: 'disconnected', email: null, server: null, count: 0, lastSync: null, lockAfterMin: 15, busy: false, error: null, canRemember: false,
   };
+
+  private vaultProvider: VaultProvider | null = null;
+  private clipboardTimer: NodeJS.Timeout | null = null;
+
+  setVaultProvider(p: VaultProvider): void {
+    this.vaultProvider = p;
+  }
+
+  /** URL atual REAL do frame principal (não a salva: a página pode ter navegado). */
+  private liveUrl(): string | null {
+    const tab = this.activeTab();
+    const wc = tab && this.views.get(tab.id)?.webContents;
+    return wc && !wc.isDestroyed() ? wc.mainFrame.url : null;
+  }
+
+  private vaultSite(url: string | null | undefined): UiState['vaultSite'] {
+    const status = this.vaultProvider?.status() ?? 'disconnected';
+    if (status === 'disconnected' || !url || !/^https?:/.test(url)) return null;
+    const v = this.vaultProvider!.vault();
+    return { status: status as 'locked' | 'unlocked', count: v ? loginsFor(v.logins, url).length : 0 };
+  }
+
+  showVaultMenu(x: number, y: number): void {
+    const url = this.liveUrl() ?? this.activeTab()?.url ?? '';
+    const v = this.vaultProvider?.vault();
+    const site = siteOf(url) ?? url;
+    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url) : [], site)), x, y);
+  }
+
+  /** Preenche só se a página ATUAL ainda casa com o login (e só no frame principal). */
+  fillLogin(itemId: string): void {
+    const v = this.vaultProvider?.vault();
+    const tab = this.activeTab();
+    const wc = tab && this.views.get(tab.id)?.webContents;
+    if (!v || !wc || wc.isDestroyed()) return;
+    const url = wc.mainFrame.url;
+    const login = v.logins.find((l) => l.id === itemId);
+    if (!login || !login.uris.some((u) => uriMatches(u, url))) return;
+    wc.mainFrame.send('apollo:fill', { username: login.username, password: v.password(itemId) });
+  }
+
+  /** Ctrl+Shift+L: preenche o primeiro login do site; cofre bloqueado → abre o diálogo. */
+  autofill(): void {
+    const status = this.vaultProvider?.status() ?? 'disconnected';
+    if (status !== 'unlocked') { this.emit({ type: 'open-vault' }); return; }
+    const url = this.liveUrl();
+    const first = url ? loginsFor(this.vaultProvider!.vault()!.logins, url)[0] : undefined;
+    if (first) this.fillLogin(first.id);
+  }
+
+  /** Copia e apaga da área de transferência em 30 s (se ainda for o mesmo conteúdo). */
+  copyFromVault(itemId: string, what: 'username' | 'password' | 'totp'): void {
+    const v = this.vaultProvider?.vault();
+    const login = v?.logins.find((l) => l.id === itemId);
+    if (!v || !login) return;
+    let value: string | null = null;
+    if (what === 'username') value = login.username;
+    else if (what === 'password') value = v.password(itemId);
+    else {
+      const secret = v.totpSecret(itemId);
+      try { value = secret ? totp(parseTotp(secret)).code : null; } catch { value = null; }
+    }
+    if (!value) return;
+    void clipboard.writeText(value);
+    if (what === 'username') return; // usuário não é segredo
+    if (this.clipboardTimer) clearTimeout(this.clipboardTimer);
+    const copied = value;
+    this.clipboardTimer = setTimeout(() => {
+      void Promise.resolve(clipboard.readText()).then((now) => { if (now === copied) clipboard.clear(); });
+    }, CLIPBOARD_CLEAR_MS);
+    this.clipboardTimer.unref();
+  }
 
   setVault(info: VaultStatusInfo): void {
     this.vaultInfo = info;
@@ -1085,6 +1174,7 @@ export class Browser {
       update: this.update,
       memory: this.memoryReport,
       vault: this.vaultInfo,
+      vaultSite: this.vaultSite(active?.url),
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }

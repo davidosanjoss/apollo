@@ -21,11 +21,12 @@ describe('shortcutFor', () => {
     [key('t', { meta: true }), 'new-tab'],
     [key('T', { control: true, shift: true }), 'reopen-tab'],
     [key('Escape', { shift: true }), 'memory-monitor'],
+    [key('L', { control: true, shift: true }), 'autofill'],
   ])('%o → %s', (input, action) => {
     expect(shortcutFor(input)).toBe(action);
   });
 
-  it('ignora teclas sem modificador, keyUp e Ctrl+Shift+W/L', () => {
+  it('ignora teclas sem modificador, keyUp e Ctrl+Shift+W', () => {
     expect(shortcutFor(key('t'))).toBeNull();
     expect(shortcutFor({ ...key('t', { control: true }), type: 'keyUp' })).toBeNull();
     expect(shortcutFor(key('w', { control: true, shift: true }))).toBeNull();

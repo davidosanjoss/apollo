@@ -217,6 +217,13 @@ dialog .error[hidden] { display: none; }
 
 #site-btn[hidden] { display: none; }
 #shield-btn[hidden] { display: none; }
+/* Chave do Bitwarden: mesmo estilo do escudo. */
+#key-btn { position: relative; display: inline-grid; place-items: center; color: var(--muted); }
+#key-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#key-btn.unlocked.has-logins { color: #3fb950; }
+#key-btn.locked svg { stroke-dasharray: 3 2; }
+#key-btn .badge { position: absolute; right: -2px; top: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  background: #3fb950; color: #111; font-size: 9px; font-weight: 700; line-height: 15px; }
 /* Engrenagem no mesmo estilo do escudo: ícone em traço; destacada se o site tem permissões definidas. */
 #site-btn { display: inline-grid; place-items: center; color: var(--muted); }
 #site-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }

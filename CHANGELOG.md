@@ -6,6 +6,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ### Adicionado
 - Bitwarden nativo (sem extensão): conectar com a chave de API pessoal + senha mestra (bitwarden.com, bitwarden.eu ou servidor próprio/Vaultwarden). A senha mestra nunca sai do computador; o cofre fica cifrado na memória e senhas só são decifradas na hora do uso.
+- Chave do Bitwarden na barra de endereço: mostra quantos logins servem para o site (regras de correspondência do Bitwarden) e abre um menu para preencher, copiar usuário/senha ou o código de verificação (TOTP). Ctrl+Shift+L preenche o primeiro login. Senha copiada é apagada da área de transferência em 30 s.
+- Preenchimento seguro: só no frame principal, conferindo na hora que a página ainda é do site do login; login https nunca é oferecido em página http; campos escondidos (armadilhas) são ignorados. Funciona em logins de duas etapas (e-mail primeiro, senha depois).
 - Bloqueio automático do cofre: após um tempo sem usar o computador (padrão 15 min), ao bloquear a tela, ao suspender e ao fechar o Apollo. Desbloqueio funciona sem internet (cópia local cifrada com o chaveiro do sistema).
 - Compatibilidade testada contra servidor real (Vaultwarden) e o CLI oficial do Bitwarden, inclusive contas Argon2id e itens de organização.
 
