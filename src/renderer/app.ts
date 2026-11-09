@@ -32,6 +32,30 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 
 // ------------------------------------------------------------ render
 
+const tabEls = new Map<string, HTMLElement>();
+const workspaceEls = new Map<string, HTMLElement>();
+
+// Atualiza a lista reaproveitando os elementos existentes (chave = id). Recriar tudo
+// a cada estado trocava o botão entre o "apertar" e o "soltar" do mouse, e o clique
+// se perdia (ex.: fechar aba com a barra de endereço focada exigia dois cliques).
+function reconcile<T>(
+  parent: HTMLElement, cache: Map<string, HTMLElement>, items: T[], key: (item: T) => string,
+  create: (item: T) => HTMLElement, update: (node: HTMLElement, item: T, index: number) => void,
+): void {
+  const keep = new Set(items.map(key));
+  for (const [id, node] of cache) {
+    if (!keep.has(id)) { node.remove(); cache.delete(id); }
+  }
+  items.forEach((item, i) => {
+    const id = key(item);
+    let node = cache.get(id);
+    if (!node) { node = create(item); cache.set(id, node); }
+    update(node, item, i);
+    // Só move o nó se ele estiver fora de posição.
+    if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
+  });
+}
+
 function render(): void {
   if (!state) return;
   const s = state;
@@ -43,36 +67,45 @@ function render(): void {
   $('#ws-badge').textContent = ws.name;
 
   // sidebar
-  $('#workspace-list').replaceChildren(...s.workspaces.map((w, i) => {
-    const b = el('button', {
-      className: 'ws-btn' + (w.id === ws.id ? ' active' : ''),
-      textContent: w.name.trim().charAt(0).toUpperCase() || '?',
-      title: `${w.name}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`,
-    });
-    b.style.background = w.color;
+  reconcile($('#workspace-list'), workspaceEls, s.workspaces, (w) => w.id, (w) => {
+    const b = el('button');
     b.onclick = () => send({ type: 'workspace:switch', workspaceId: w.id });
-    b.oncontextmenu = (e) => { e.preventDefault(); openWorkspaceDialog(w); };
+    b.oncontextmenu = (e) => {
+      e.preventDefault();
+      const current = state?.workspaces.find((x) => x.id === w.id);
+      if (current) openWorkspaceDialog(current);
+    };
     return b;
-  }));
+  }, (b, w, i) => {
+    b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '');
+    b.textContent = w.name.trim().charAt(0).toUpperCase() || '?';
+    b.title = `${w.name}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
+    b.style.background = w.color;
+  });
 
   // abas
-  $('#tabs').replaceChildren(...s.tabs.map((t) => {
-    const item = el('div', {
-      className: ['tab', t.id === s.activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading'].filter(Boolean).join(' '),
-      title: t.title || t.url,
-    });
-    if (t.favicon) {
-      const img = el('img', { src: t.favicon, alt: '' });
-      img.onerror = () => img.remove();
-      item.appendChild(img);
-    }
+  reconcile($('#tabs'), tabEls, s.tabs, (t) => t.id, (t) => {
+    const item = el('div');
+    const img = el('img', { alt: '' });
+    img.onerror = () => { img.hidden = true; };
     const close = el('button', { className: 'close', textContent: '×', title: 'Fechar (Ctrl+W)' });
     close.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:close', tabId: t.id }); };
-    item.append(el('span', { className: 'title', textContent: t.title || t.url }), close);
+    item.append(img, el('span', { className: 'title' }), close);
     item.onclick = () => send({ type: 'tab:activate', tabId: t.id });
     item.onauxclick = (e) => { if (e.button === 1) send({ type: 'tab:close', tabId: t.id }); };
     return item;
-  }));
+  }, (item, t) => {
+    item.className = ['tab', t.id === s.activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading'].filter(Boolean).join(' ');
+    item.title = t.title || t.url;
+    const img = item.querySelector('img')!;
+    if (t.favicon) {
+      if (img.getAttribute('src') !== t.favicon) { img.hidden = false; img.src = t.favicon; }
+    } else {
+      img.hidden = true;
+      img.removeAttribute('src');
+    }
+    item.querySelector('.title')!.textContent = t.title || t.url;
+  });
 
   ($('#back') as HTMLButtonElement).disabled = !tab?.canGoBack;
   ($('#forward') as HTMLButtonElement).disabled = !tab?.canGoForward;

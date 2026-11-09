@@ -22,6 +22,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Abas só carregam ao serem abertas: iniciar o navegador carrega apenas a aba ativa.
 - Apenas uma janela do Apollo por perfil; abrir de novo foca a existente.
 
+### Corrigido
+- Fechar aba ou trocar de workspace exigia dois cliques quando a barra de endereço estava focada (ex.: em uma aba nova).
+
 ## [0.1.0] - 2026-11-09
 
 Primeira versão: protótipo para validar a base. Ainda não recomendado para uso diário.
