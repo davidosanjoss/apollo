@@ -23,6 +23,7 @@
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
       <button id="site-btn" class="icon-btn" title="Permissões do site" hidden>⚙</button>
+      <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
     </nav>
 
@@ -48,8 +49,23 @@
       <button id="update-later">Depois</button>
     </div>
 
-    <!-- Área onde o processo principal posiciona a página da aba ativa. -->
-    <div id="views"></div>
+    <div id="content">
+      <!-- Área onde o processo principal posiciona a página da aba ativa. -->
+      <div id="views"></div>
+
+      <aside id="memory-panel" hidden>
+        <header>
+          <strong>Memória</strong>
+          <span class="spacer"></span>
+          <button id="memory-close" class="icon-btn" title="Fechar (Shift+Esc)">×</button>
+        </header>
+        <div id="memory-total"></div>
+        <label class="memory-limit">Limite (hiberna as abas menos usadas)
+          <select id="memory-limit"></select>
+        </label>
+        <ul id="memory-tabs"></ul>
+      </aside>
+    </div>
   </main>
 
   <dialog id="ws-dialog">

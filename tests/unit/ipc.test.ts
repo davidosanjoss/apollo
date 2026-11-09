@@ -28,6 +28,10 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'tab:duplicate', tabId: 't' },
       { type: 'tab:hibernate', tabId: 't' },
       { type: 'tab:hibernate-others', tabId: 't' },
+      { type: 'tab:reveal', tabId: 't' },
+      { type: 'memory:toggle', open: true },
+      { type: 'settings:memory-limit', mb: 0 },
+      { type: 'settings:memory-limit', mb: 4096 },
       { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 0 },
       { type: 'workspace:update', workspaceId: 'w', name: 'X', color: '#000000', home: '', hibernateAfterMin: 240 },
       { type: 'tab:close-others', tabId: 't' },
@@ -82,6 +86,9 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 7 },
       { type: 'workspace:update', workspaceId: 'w', name: 'X', color: '#000000', home: '', hibernateAfterMin: '30' },
       { type: 'tab:hibernate' },
+      { type: 'memory:toggle' },
+      { type: 'settings:memory-limit', mb: 5 },
+      { type: 'settings:memory-limit', mb: '4096' },
     ];
     for (const cmd of invalid) expect(parseCommand(cmd), JSON.stringify(cmd)).toBeNull();
   });

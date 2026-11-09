@@ -41,3 +41,15 @@ Teste unitário quando a lógica dá para isolar; integração quando o bug depe
 - Teclas injetadas via CDP **não** passam pelo `before-input-event` do Electron: atalhos são testados no unitário (`shortcutFor`) e a ação, pelo comando equivalente (`app.send`).
 
 `APOLLO_E2E_LOG=1 npm run test:e2e` mostra o log do Electron.
+
+### Variáveis só para testes
+
+Lidas pelo app apenas para tornar cenários de tempo determinísticos (sem efeito se ausentes):
+
+| Variável | Efeito |
+|---|---|
+| `APOLLO_TEST_SESSION_RESTORE_DELAY_MS` | Atrasa a restauração dos cookies de sessão (simula chaveiro lento) |
+| `APOLLO_TEST_MINUTE_MS` | Duração de um "minuto" da hibernação |
+| `APOLLO_TEST_HIBERNATION_TICK_MS` | Intervalo da verificação de hibernação |
+
+Passe com `Apollo.launch(perfil, { VAR: 'valor' })`.

@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -68,7 +68,58 @@ function render(): void {
   renderPermissionPrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
+  renderMemory(s);
 }
+
+// ------------------------------------------------------------ monitor de memória
+
+const memoryEls = new Map<string, HTMLElement>();
+const fmtMb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+
+function renderMemory(s: UiState): void {
+  const panel = $('#memory-panel');
+  const m = s.memory;
+  panel.hidden = !m;
+  $('#memory-btn').classList.toggle('active', Boolean(m));
+  if (!m) return;
+
+  const over = m.limitMb > 0 && m.totalMb > m.limitMb;
+  $('#memory-total').innerHTML = '';
+  $('#memory-total').append(
+    el('strong', { textContent: fmtMb(m.totalMb), className: over ? 'over' : '' }),
+    ` no total · navegador e GPU: ${fmtMb(m.otherMb)}`,
+  );
+  const limit = $<HTMLSelectElement>('#memory-limit');
+  if (document.activeElement !== limit) limit.value = String(m.limitMb);
+
+  const wsColor = new Map(s.workspaces.map((w) => [w.id, w.color]));
+  const wsName = new Map(s.workspaces.map((w) => [w.id, w.name]));
+  reconcile($('#memory-tabs'), memoryEls, m.tabs, (t) => t.id, (t) => {
+    const li = el('li');
+    const hib = el('button', { textContent: 'Hibernar', title: 'Liberar a memória desta aba' });
+    hib.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:hibernate', tabId: t.id }); };
+    li.append(el('span', { className: 'ws-dot' }), el('span', { className: 'name' }), el('span', { className: 'tag' }),
+      el('span', { className: 'mb' }), hib);
+    li.onclick = () => send({ type: 'tab:reveal', tabId: t.id });
+    return li;
+  }, (li, t) => {
+    li.className = t.mb === null ? 'dormant' : '';
+    li.dataset.tabId = t.id;
+    li.title = `${t.title}\nWorkspace: ${wsName.get(t.workspaceId) ?? ''}`;
+    li.querySelector<HTMLElement>('.ws-dot')!.style.background = wsColor.get(t.workspaceId) ?? 'transparent';
+    li.querySelector('.name')!.textContent = t.title;
+    li.querySelector('.tag')!.textContent = t.visible ? 'na tela' : t.playing ? '♪' : t.keepAwake ? 'sempre ativa' : '';
+    li.querySelector('.mb')!.textContent = t.mb === null ? 'hibernada' : fmtMb(t.mb);
+    li.querySelector('button')!.disabled = t.mb === null || t.visible;
+  });
+}
+
+$('#memory-limit').replaceChildren(...MEMORY_LIMIT_OPTIONS_MB.map((mb) =>
+  el('option', { value: String(mb), textContent: mb === 0 ? 'Sem limite' : fmtMb(mb) })));
+$<HTMLSelectElement>('#memory-limit').onchange = (e) =>
+  send({ type: 'settings:memory-limit', mb: Number((e.target as HTMLSelectElement).value) });
+$('#memory-btn').onclick = () => send({ type: 'memory:toggle', open: !state?.memory });
+$('#memory-close').onclick = () => send({ type: 'memory:toggle', open: false });
 
 // ------------------------------------------------------------ barra de abas
 

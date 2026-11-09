@@ -70,6 +70,31 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface MemoryTab {
+  id: string;
+  workspaceId: string;
+  title: string;
+  favicon: string | null;
+  /** null = sem página carregada (hibernada). */
+  mb: number | null;
+  visible: boolean;
+  keepAwake: boolean;
+  playing: boolean;
+}
+
+/** Só existe enquanto o monitor de memória está aberto (fechado = custo zero). */
+export interface MemoryReport {
+  totalMb: number;
+  /** Navegador, GPU, rede etc. */
+  otherMb: number;
+  /** 0 = sem limite. */
+  limitMb: number;
+  tabs: MemoryTab[];
+}
+
+/** Opções do limite de memória do Apollo (MB; 0 = sem limite). */
+export const MEMORY_LIMIT_OPTIONS_MB = [0, 1024, 2048, 3072, 4096, 6144, 8192] as const;
+
 export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
@@ -80,6 +105,7 @@ export interface UiState {
   /** Permissões do site da aba ativa (para o painel ao lado da barra de endereço). */
   sitePermissions: SitePermissions | null;
   update: UpdateStatus | null;
+  memory: MemoryReport | null;
 }
 
 export type UiCommand =
@@ -98,6 +124,10 @@ export type UiCommand =
   | { type: 'tab:keep-awake'; tabId: string; keepAwake: boolean }
   | { type: 'tab:duplicate'; tabId: string }
   | { type: 'tab:hibernate'; tabId: string }
+  /** Mostra a aba, trocando de workspace se preciso (monitor de memória). */
+  | { type: 'tab:reveal'; tabId: string }
+  | { type: 'memory:toggle'; open: boolean }
+  | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }
   | { type: 'tab:close-right'; tabId: string }

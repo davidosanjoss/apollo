@@ -11,7 +11,7 @@ export interface KeyInput {
 
 export type ShortcutAction =
   | 'new-tab' | 'reopen-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
-  | 'next-tab' | 'prev-tab' | `workspace-${number}`;
+  | 'next-tab' | 'prev-tab' | 'memory-monitor' | `workspace-${number}`;
 
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (input.type !== 'keyDown') return null;
@@ -23,6 +23,7 @@ export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (mod && !input.shift && k === 'l') return 'focus-address';
   if ((mod && k === 'r') || input.key === 'F5') return 'reload';
   if (mod && input.key === 'Tab') return input.shift ? 'prev-tab' : 'next-tab';
+  if (input.shift && !mod && !input.alt && input.key === 'Escape') return 'memory-monitor';
   if (input.alt && input.key === 'ArrowLeft') return 'back';
   if (input.alt && input.key === 'ArrowRight') return 'forward';
   if (mod && /^[1-9]$/.test(input.key)) return `workspace-${Number(input.key)}`;

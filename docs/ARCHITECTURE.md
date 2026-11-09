@@ -107,7 +107,7 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 
 0. ✅ Validação técnica ([phase-0.md](phase-0.md))
 1. ✅ Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
-2. Sessão e abas: restauração, grupos, hibernação, monitor de memória
+2. ✅ Sessão e abas: restauração, grupos, hibernação, monitor de memória
 3. Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL
 4. Bitwarden nativo
 5. Módulos, painéis laterais, paleta de comandos

@@ -201,7 +201,30 @@ body { display: flex; }
 #site-btn[hidden] { display: none; }
 
 /* A página real é desenhada pelo processo principal por cima desta área. */
-#views { flex: 1; position: relative; background: var(--panel); }
+#content { flex: 1; display: flex; min-height: 0; }
+#views { flex: 1; position: relative; background: var(--panel); min-width: 0; }
+
+/* ---------- monitor de memória ---------- */
+#memory-panel { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; border-left: 1px solid var(--panel-2); overflow: hidden; }
+#memory-panel[hidden] { display: none; }
+#memory-panel header { display: flex; align-items: center; }
+#memory-panel .spacer { flex: 1; }
+#memory-total { color: var(--muted); }
+#memory-total strong { color: var(--text); font-size: 18px; }
+#memory-total .over { color: #e5534b; }
+.memory-limit { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 12px; }
+.memory-limit select { background: var(--panel-2); color: var(--text); border: 0; border-radius: 6px; padding: 4px; }
+#memory-tabs { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1; }
+#memory-tabs li { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-radius: 6px; cursor: pointer; }
+#memory-tabs li:hover { background: var(--panel-2); }
+#memory-tabs .ws-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+#memory-tabs .name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#memory-tabs .mb { color: var(--muted); font-variant-numeric: tabular-nums; }
+#memory-tabs li.dormant .name { opacity: .5; }
+#memory-tabs .tag { font-size: 11px; color: var(--muted); }
+#memory-tabs button { border: 0; background: var(--panel-2); color: var(--text); border-radius: 5px; padding: 2px 6px; cursor: pointer; font-size: 11px; }
+#memory-tabs button:disabled { visibility: hidden; }
 
 
 /* ---------- diálogo ---------- */
@@ -238,3 +261,4 @@ dialog input[type=color] { width: 60px; height: 32px; border: 0; background: non
 }
 .dialog-actions .primary { background: var(--accent); color: #fff; }
 .dialog-actions .danger { background: transparent; color: #ff6b6b; padding-left: 0; }
+.icon-btn.active { background: var(--panel-2); }

@@ -20,6 +20,7 @@ describe('shortcutFor', () => {
     [key('9', { control: true }), 'workspace-9'],
     [key('t', { meta: true }), 'new-tab'],
     [key('T', { control: true, shift: true }), 'reopen-tab'],
+    [key('Escape', { shift: true }), 'memory-monitor'],
   ])('%o → %s', (input, action) => {
     expect(shortcutFor(input)).toBe(action);
   });
@@ -30,5 +31,7 @@ describe('shortcutFor', () => {
     expect(shortcutFor(key('w', { control: true, shift: true }))).toBeNull();
     expect(shortcutFor(key('0', { control: true }))).toBeNull();
     expect(shortcutFor(key('ArrowLeft'))).toBeNull();
+    expect(shortcutFor(key('Escape'))).toBeNull(); // Esc sozinho é das páginas
+    expect(shortcutFor(key('Escape', { shift: true, control: true }))).toBeNull();
   });
 });

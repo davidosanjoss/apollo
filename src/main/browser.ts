@@ -2,13 +2,14 @@ import { app, BrowserWindow, Menu, WebContentsView, session, type MenuItemConstr
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
+import { memoryBreakdown } from './memory';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
+import type { MemoryReport, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
 import { GROUP_COLORS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -55,6 +56,10 @@ export class Browser {
   /** Abas cuja página recusou sair (beforeunload) — não tentar de novo até serem vistas. */
   private readonly unloadBlocked = new Set<string>();
   private hibernationTimer: NodeJS.Timeout | null = null;
+
+  // Monitor de memória: só mede enquanto aberto.
+  private memoryTimer: NodeJS.Timeout | null = null;
+  private memoryReport: MemoryReport | null = null;
   private readonly permissions: PermissionManager;
 
   private activeWorkspaceId: string;
@@ -352,20 +357,58 @@ export class Browser {
     this.destroyView(tabId, true);
   }
 
-  private memoryInfo(): { usedMb: number; perTab: Map<string, number> } {
-    const metrics = app.getAppMetrics();
-    const byPid = new Map(metrics.map((m) => [m.pid, m.memory.workingSetSize / 1024]));
-    const usedMb = [...byPid.values()].reduce((a, b) => a + b, 0);
-    // Abas do mesmo site podem dividir um processo: divide a memória entre elas.
-    const tabsByPid = new Map<number, string[]>();
-    for (const [tabId, view] of this.views) {
-      if (view.webContents.isDestroyed()) continue;
-      const pid = view.webContents.getOSProcessId();
-      tabsByPid.set(pid, [...(tabsByPid.get(pid) ?? []), tabId]);
+  private memoryInfo(): { usedMb: number; otherMb: number; perTab: Map<string, number> } {
+    const metrics = app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, workingSetKb: m.memory.workingSetSize }));
+    const tabs = [...this.views].map(([tabId, view]) => ({
+      tabId,
+      pid: view.webContents.isDestroyed() ? null : view.webContents.getOSProcessId(),
+    }));
+    const r = memoryBreakdown(metrics, tabs);
+    return { usedMb: r.totalMb, otherMb: r.otherMb, perTab: r.perTabMb };
+  }
+
+  // ------------------------------------------------------------ monitor de memória
+
+  toggleMemoryMonitor(open: boolean): void {
+    if (open && !this.memoryTimer) {
+      this.refreshMemory();
+      this.memoryTimer = setInterval(() => this.refreshMemory(), 2000);
+    } else if (!open && this.memoryTimer) {
+      clearInterval(this.memoryTimer);
+      this.memoryTimer = null;
+      this.memoryReport = null;
     }
-    const perTab = new Map<string, number>();
-    for (const [pid, ids] of tabsByPid) for (const id of ids) perTab.set(id, (byPid.get(pid) ?? 0) / ids.length);
-    return { usedMb, perTab };
+    this.push();
+  }
+
+  private refreshMemory(): void {
+    const { usedMb, otherMb, perTab } = this.memoryInfo();
+    const tabs = this.store.listWorkspaces().flatMap((ws) => this.store.listTabs(ws.id).map((t) => ({
+      id: t.id,
+      workspaceId: ws.id,
+      title: t.title || t.url,
+      favicon: t.favicon,
+      mb: perTab.has(t.id) ? Math.round(perTab.get(t.id)!) : null,
+      visible: t.id === this.attachedTabId,
+      keepAwake: t.keepAwake,
+      playing: this.playing.has(t.id) || Boolean(this.views.get(t.id)?.webContents.isCurrentlyAudible()),
+    })));
+    tabs.sort((a, b) => (b.mb ?? -1) - (a.mb ?? -1));
+    this.memoryReport = {
+      totalMb: Math.round(usedMb),
+      otherMb: Math.round(otherMb),
+      limitMb: Number(this.store.getKv('memoryLimitMb')) || 0,
+      tabs,
+    };
+    this.push();
+  }
+
+  /** Mostra a aba, trocando de workspace se preciso. */
+  revealTab(tabId: string): void {
+    const tab = this.store.getTab(tabId);
+    if (!tab) return;
+    this.switchWorkspace(tab.workspaceId);
+    this.activateTab(tabId);
   }
 
   private hibernationCandidates(perTab: Map<string, number>, now: number): HibernationCandidate[] {
@@ -739,6 +782,7 @@ export class Browser {
       case 'forward': this.withActiveView((wc) => wc.navigationHistory.canGoForward() && wc.navigationHistory.goForward()); break;
       case 'next-tab': this.cycleTab(1); break;
       case 'prev-tab': this.cycleTab(-1); break;
+      case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
       default: {
         const ws = this.store.listWorkspaces()[Number(action.split('-')[1]) - 1];
         if (ws) this.switchWorkspace(ws.id);
@@ -761,7 +805,14 @@ export class Browser {
       case 'tab:pin': this.pinTab(cmd.tabId, cmd.pinned); break;
       case 'tab:keep-awake': if (this.tabInActiveWorkspace(cmd.tabId)) this.store.setKeepAwake(cmd.tabId, cmd.keepAwake); break;
       case 'tab:duplicate': this.duplicateTab(cmd.tabId); break;
-      case 'tab:hibernate': if (this.tabInActiveWorkspace(cmd.tabId)) this.hibernateTab(cmd.tabId, true); break;
+      // O monitor de memória lista abas de todos os workspaces.
+      case 'tab:hibernate': if (this.store.getTab(cmd.tabId)) this.hibernateTab(cmd.tabId, true); break;
+      case 'tab:reveal': this.revealTab(cmd.tabId); break;
+      case 'memory:toggle': this.toggleMemoryMonitor(cmd.open); break;
+      case 'settings:memory-limit':
+        this.store.setKv('memoryLimitMb', String(cmd.mb));
+        if (this.memoryReport) this.memoryReport = { ...this.memoryReport, limitMb: cmd.mb };
+        break;
       case 'tab:hibernate-others':
         for (const t of this.store.listTabs(this.activeWorkspaceId)) if (t.id !== cmd.tabId) this.hibernateTab(t.id, true);
         break;
@@ -850,6 +901,7 @@ export class Browser {
       permissionPrompt: this.permissions.promptFor(ws.activeTabId),
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
       update: this.update,
+      memory: this.memoryReport,
     };
   }
 }
