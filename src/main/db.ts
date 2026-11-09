@@ -50,6 +50,19 @@ const MIGRATIONS: string[] = [
     value TEXT NOT NULL
   );
   `,
+
+  /* v2: fase 2 — histórico por aba, cookies de sessão, hibernação */ `
+  ALTER TABLE tabs ADD COLUMN history TEXT;
+  ALTER TABLE tabs ADD COLUMN keep_awake INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE workspaces ADD COLUMN hibernate_after_min INTEGER NOT NULL DEFAULT 30;
+
+  -- Cookies de sessão de cada workspace, cifrados (ver session-cookies.ts).
+  CREATE TABLE session_cookies (
+    workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+    data         BLOB NOT NULL,
+    saved_at     INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

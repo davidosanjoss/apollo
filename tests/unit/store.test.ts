@@ -185,3 +185,115 @@ describe('importLegacyState (v0.1.0 → SQLite)', () => {
     expect(fs.existsSync(file)).toBe(true);
   });
 });
+
+describe('fase 2: posição, histórico e cookies de sessão', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('insertTabAt insere na posição exata (início, meio, fim)', () => {
+    tab('t1', 'a'); tab('t2', 'a');
+    store.insertTabAt({ id: 'x', workspaceId: 'a', url: 'https://x.com/', title: 'x' }, 0);
+    expect(order('a')).toEqual(['x', 't1', 't2']);
+    store.insertTabAt({ id: 'y', workspaceId: 'a', url: 'https://y.com/', title: 'y' }, 2);
+    expect(order('a')).toEqual(['x', 't1', 'y', 't2']);
+    store.insertTabAt({ id: 'z', workspaceId: 'a', url: 'https://z.com/', title: 'z' }, 99);
+    expect(order('a')).toEqual(['x', 't1', 'y', 't2', 'z']);
+    expect(store.tabIndex('y')).toBe(2);
+    expect(store.tabIndex('nao-existe')).toBe(-1);
+  });
+
+  // Regressão: insertTabAt usava o índice como posição; depois de excluir abas
+  // (posições com buracos) a aba reaberta ia para o lugar errado.
+  it('índice continua certo depois de excluir abas (posições com buracos)', () => {
+    tab('t1', 'a'); tab('t2', 'a'); tab('t3', 'a');
+    store.deleteTab('t1');
+    expect(store.tabIndex('t3')).toBe(1);
+    store.insertTabAt({ id: 'n', workspaceId: 'a', url: 'https://n.com/', title: 'n' }, 1);
+    expect(order('a')).toEqual(['t2', 'n', 't3']);
+  });
+
+  it('histórico da aba é salvo, higienizado e lido', () => {
+    tab('t1', 'a');
+    expect(store.getTab('t1')!.history).toBeNull();
+    store.setTabHistory('t1', { index: 1, entries: [{ url: 'https://a.com/', title: 'A', pageState: 'ps' }, { url: 'https://b.com/', title: 'B' }] });
+    expect(store.getTab('t1')!.history).toEqual({ index: 1, entries: [{ url: 'https://a.com/', title: 'A', pageState: 'ps' }, { url: 'https://b.com/', title: 'B' }] });
+    store.setTabHistory('t1', null);
+    expect(store.getTab('t1')!.history).toBeNull();
+  });
+
+  it('aba nova pode nascer com histórico (reabrir aba fechada)', () => {
+    const t = store.insertTabAt({ id: 'r', workspaceId: 'a', url: 'https://b.com/', title: 'B',
+      history: { index: 1, entries: [{ url: 'https://a.com/', title: 'A' }, { url: 'https://b.com/', title: 'B' }] } }, null);
+    expect(t.history!.entries).toHaveLength(2);
+  });
+
+  it('cookies de sessão por workspace, sobrescritos e apagados com o workspace', () => {
+    expect(store.loadSessionCookies('a')).toBeNull();
+    store.saveSessionCookies('a', Buffer.from([1, 2, 3]));
+    store.saveSessionCookies('a', Buffer.from([4, 5]));
+    store.saveSessionCookies('b', Buffer.from([9]));
+    expect([...store.loadSessionCookies('a')!]).toEqual([4, 5]);
+    store.deleteWorkspace('a');
+    expect(store.loadSessionCookies('a')).toBeNull();
+    expect([...store.loadSessionCookies('b')!]).toEqual([9]);
+  });
+});
+
+describe('fase 2b: ordem, fixadas e grupos', () => {
+  beforeEach(() => { ws('a'); ws('b'); tab('t1', 'a'); tab('t2', 'a'); tab('t3', 'a'); });
+
+  it('applyOrder grava posição, fixação e grupo', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'G', color: '#4c8bf5' });
+    store.applyOrder('a', [
+      { id: 't3', pinned: true, groupId: null },
+      { id: 't1', pinned: false, groupId: 'g' },
+      { id: 't2', pinned: false, groupId: null },
+    ]);
+    expect(store.listTabs('a').map((t) => [t.id, t.pinned, t.groupId])).toEqual([['t3', true, null], ['t1', false, 'g'], ['t2', false, null]]);
+  });
+
+  it('applyOrder ignora abas de outro workspace', () => {
+    tab('x', 'b');
+    store.applyOrder('a', [{ id: 'x', pinned: true, groupId: null }]);
+    expect(store.getTab('x')!.pinned).toBe(false);
+  });
+
+  it('grupo vazio some ao aplicar ordem ou fechar a última aba dele', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'G', color: '#4c8bf5' });
+    store.createGroup({ id: 'h', workspaceId: 'a', name: 'H', color: '#e5534b' });
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: 'g' }, { id: 't2', pinned: false, groupId: 'h' }, { id: 't3', pinned: false, groupId: null }]);
+    expect(store.listGroups('a').map((g) => g.id)).toEqual(['g', 'h']);
+    store.deleteTab('t2');
+    expect(store.listGroups('a').map((g) => g.id)).toEqual(['g']);
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: null }, { id: 't3', pinned: false, groupId: null }]);
+    expect(store.listGroups('a')).toEqual([]);
+  });
+
+  it('atualizar e excluir grupo (abas ficam sem grupo)', () => {
+    store.createGroup({ id: 'g', workspaceId: 'a', name: '', color: '#4c8bf5' });
+    store.applyOrder('a', [{ id: 't1', pinned: false, groupId: 'g' }, { id: 't2', pinned: false, groupId: null }, { id: 't3', pinned: false, groupId: null }]);
+    store.updateGroup('g', { name: 'Faculdade', collapsed: true });
+    expect(store.getGroup('g')).toMatchObject({ name: 'Faculdade', color: '#4c8bf5', collapsed: true });
+    store.deleteGroup('g');
+    expect(store.getTab('t1')!.groupId).toBeNull();
+  });
+
+  it('manter sempre ativa', () => {
+    store.setKeepAwake('t1', true);
+    expect(store.getTab('t1')!.keepAwake).toBe(true);
+    store.setKeepAwake('t1', false);
+    expect(store.getTab('t1')!.keepAwake).toBe(false);
+  });
+});
+
+describe('fase 2c: tempo de hibernação por workspace', () => {
+  it('padrão 30 min; criar com valor; atualizar sem informar mantém', () => {
+    expect(ws('a').hibernateAfterMin).toBe(30);
+    expect(store.getWorkspace('a')!.hibernateAfterMin).toBe(30);
+    store.createWorkspace({ id: 'b', name: 'B', color: '#000000', home: '', hibernateAfterMin: 0 });
+    expect(store.getWorkspace('b')!.hibernateAfterMin).toBe(0);
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hibernateAfterMin: 120 });
+    expect(store.getWorkspace('a')!.hibernateAfterMin).toBe(120);
+    store.updateWorkspace('a', { name: 'A2', color: '#000000', home: '' });
+    expect(store.getWorkspace('a')).toMatchObject({ name: 'A2', hibernateAfterMin: 120 });
+  });
+});

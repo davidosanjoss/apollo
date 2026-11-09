@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Apollo, startSite, tempProfile, waitFor, type TestSite } from './harness';
+import { Apollo, sleep, startSite, tempProfile, waitFor, type TestSite } from './harness';
 
 let app: Apollo;
 let site: TestSite;
@@ -36,6 +36,37 @@ describe('abas', () => {
     const s = await navigate(`${site.url}/page?title=Ola`);
     await waitFor(async () => app.activeTab(await app.state()).title === 'Ola', 'título');
     expect(app.activeTab(s).url).toBe(`${site.url}/page?title=Ola`);
+  });
+
+  // Regressão: ir para uma aba vazia (que foca a barra de endereço) mantinha na
+  // barra a URL da aba anterior.
+  it('barra de endereço mostra a URL da aba atual ao trocar de aba', async () => {
+    const address = () => app.ui.eval<string>(`document.getElementById('address').value`);
+    const s0 = await navigate(`${site.url}/page?title=Origem`);
+    const origem = s0.activeTabId!;
+    await waitFor(async () => (await address()) === `${site.url}/page?title=Origem`, 'URL na barra');
+
+    await app.send({ type: 'tab:new' });
+    const s1 = await app.until((x) => x.activeTabId !== origem, 'aba nova');
+    await waitFor(async () => app.ui.eval<boolean>(`document.activeElement.id === 'address'`), 'barra focada');
+    await sleep(200);
+    expect(await address()).toBe('');
+
+    // Voltar para a aba com site (barra ainda focada) mostra a URL dela.
+    await app.send({ type: 'tab:activate', tabId: origem });
+    await waitFor(async () => (await address()) === `${site.url}/page?title=Origem`, 'URL da aba de origem');
+
+    // E de novo para a vazia.
+    await app.send({ type: 'tab:activate', tabId: s1.activeTabId! });
+    await waitFor(async () => (await address()) === '', 'barra vazia na aba vazia');
+
+    // O que o usuário está digitando não é apagado por atualizações da MESMA aba.
+    await app.ui.eval(`(() => { const a = document.getElementById('address'); a.focus(); a.value = 'digitando'; a.dispatchEvent(new Event('input')); return true; })()`);
+    await app.send({ type: 'tab:focus' });
+    await sleep(200);
+    expect(await address()).toBe('digitando');
+    await app.send({ type: 'tab:close', tabId: s1.activeTabId! });
+    await app.until((x) => x.activeTabId === origem, 'fechou a vazia');
   });
 
   it('nova aba e fechar aba', async () => {

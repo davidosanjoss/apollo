@@ -1,10 +1,11 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
+import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -14,6 +15,9 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySe
 const send = (cmd: UiCommand) => window.apollo.send(cmd);
 
 let state: UiState | null = null;
+/** Aba cuja URL está na barra de endereço, e se o usuário editou o texto. */
+let addressTabId: string | null = null;
+let addressEdited = false;
 let siteBarOpen = false;
 let updateDismissed = false;
 
@@ -23,7 +27,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 
 // ------------------------------------------------------------ render
 
-const tabEls = new Map<string, HTMLElement>();
+const stripEls = new Map<string, HTMLElement>();
 const workspaceEls = new Map<string, HTMLElement>();
 
 function render(): void {
@@ -53,40 +57,179 @@ function render(): void {
     b.style.background = w.color;
   });
 
-  // abas
-  reconcile($('#tabs'), tabEls, s.tabs, (t) => t.id, (t) => {
-    const item = el('div');
-    const img = el('img', { alt: '' });
-    img.onerror = () => { img.hidden = true; };
-    const close = el('button', { className: 'close', textContent: '×', title: 'Fechar (Ctrl+W)' });
-    close.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:close', tabId: t.id }); };
-    item.append(img, el('span', { className: 'title' }), close);
-    item.onclick = () => send({ type: 'tab:activate', tabId: t.id });
-    item.onauxclick = (e) => { if (e.button === 1) send({ type: 'tab:close', tabId: t.id }); };
-    return item;
-  }, (item, t) => {
-    item.className = ['tab', t.id === s.activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading'].filter(Boolean).join(' ');
-    item.title = t.title || t.url;
-    const img = item.querySelector('img')!;
-    if (t.favicon) {
-      if (img.getAttribute('src') !== t.favicon) { img.hidden = false; img.src = t.favicon; }
-    } else {
-      img.hidden = true;
-      img.removeAttribute('src');
-    }
-    item.querySelector('.title')!.textContent = t.title || t.url;
-  });
+  // abas (com chips de grupo)
+  reconcile($('#tabs'), stripEls, buildStrip(s.tabs, s.groups, s.activeTabId), (i) => i.key,
+    (i) => (i.kind === 'group' ? createGroupChip(i.group.id) : createTabEl(i.tab.id)),
+    (node, i) => (i.kind === 'group' ? updateGroupChip(node, i) : updateTabEl(node, i, s.activeTabId)));
 
   ($('#back') as HTMLButtonElement).disabled = !tab?.canGoBack;
   ($('#forward') as HTMLButtonElement).disabled = !tab?.canGoForward;
 
+  // Só preserva o texto da barra se o usuário o editou e continua na mesma aba;
+  // senão mostra a URL da aba atual (aba vazia = barra vazia).
   const address = $<HTMLInputElement>('#address');
-  if (document.activeElement !== address) address.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+  const keepTyped = addressEdited && document.activeElement === address && addressTabId === (tab?.id ?? null);
+  if (!keepTyped) {
+    address.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+    addressEdited = false;
+  }
+  addressTabId = tab?.id ?? null;
 
   renderPermissionPrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
+  renderMemory(s);
 }
+
+// ------------------------------------------------------------ monitor de memória
+
+const memoryEls = new Map<string, HTMLElement>();
+const fmtMb = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`);
+
+function renderMemory(s: UiState): void {
+  const panel = $('#memory-panel');
+  const m = s.memory;
+  panel.hidden = !m;
+  $('#memory-btn').classList.toggle('active', Boolean(m));
+  if (!m) return;
+
+  const over = m.limitMb > 0 && m.totalMb > m.limitMb;
+  $('#memory-total').innerHTML = '';
+  $('#memory-total').append(
+    el('strong', { textContent: fmtMb(m.totalMb), className: over ? 'over' : '' }),
+    ` no total · navegador e GPU: ${fmtMb(m.otherMb)}`,
+  );
+  const limit = $<HTMLSelectElement>('#memory-limit');
+  if (document.activeElement !== limit) limit.value = String(m.limitMb);
+
+  const wsColor = new Map(s.workspaces.map((w) => [w.id, w.color]));
+  const wsName = new Map(s.workspaces.map((w) => [w.id, w.name]));
+  reconcile($('#memory-tabs'), memoryEls, m.tabs, (t) => t.id, (t) => {
+    const li = el('li');
+    const hib = el('button', { textContent: 'Hibernar', title: 'Liberar a memória desta aba' });
+    hib.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:hibernate', tabId: t.id }); };
+    li.append(el('span', { className: 'ws-dot' }), el('span', { className: 'name' }), el('span', { className: 'tag' }),
+      el('span', { className: 'mb' }), hib);
+    li.onclick = () => send({ type: 'tab:reveal', tabId: t.id });
+    return li;
+  }, (li, t) => {
+    li.className = t.mb === null ? 'dormant' : '';
+    li.dataset.tabId = t.id;
+    li.title = `${t.title}\nWorkspace: ${wsName.get(t.workspaceId) ?? ''}`;
+    li.querySelector<HTMLElement>('.ws-dot')!.style.background = wsColor.get(t.workspaceId) ?? 'transparent';
+    li.querySelector('.name')!.textContent = t.title;
+    li.querySelector('.tag')!.textContent = t.visible ? 'na tela' : t.playing ? '♪' : t.keepAwake ? 'sempre ativa' : '';
+    li.querySelector('.mb')!.textContent = t.mb === null ? 'hibernada' : fmtMb(t.mb);
+    li.querySelector('button')!.disabled = t.mb === null || t.visible;
+  });
+}
+
+$('#memory-limit').replaceChildren(...MEMORY_LIMIT_OPTIONS_MB.map((mb) =>
+  el('option', { value: String(mb), textContent: mb === 0 ? 'Sem limite' : fmtMb(mb) })));
+$<HTMLSelectElement>('#memory-limit').onchange = (e) =>
+  send({ type: 'settings:memory-limit', mb: Number((e.target as HTMLSelectElement).value) });
+$('#memory-btn').onclick = () => send({ type: 'memory:toggle', open: !state?.memory });
+$('#memory-close').onclick = () => send({ type: 'memory:toggle', open: false });
+
+// ------------------------------------------------------------ barra de abas
+
+function createTabEl(tabId: string): HTMLElement {
+  const item = el('div', { draggable: true });
+  item.dataset.tabId = tabId;
+  const img = el('img', { alt: '' });
+  const letter = el('span', { className: 'letter', hidden: true });
+  img.onerror = () => { img.hidden = true; letter.hidden = !item.classList.contains('pinned'); };
+  const close = el('button', { className: 'close', textContent: '×', title: 'Fechar (Ctrl+W)' });
+  close.onclick = (e) => { e.stopPropagation(); send({ type: 'tab:close', tabId }); };
+  item.append(img, letter, el('span', { className: 'title' }), close);
+  item.onclick = () => send({ type: 'tab:activate', tabId });
+  item.onauxclick = (e) => { if (e.button === 1) send({ type: 'tab:close', tabId }); };
+  item.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'tab:menu', tabId, x: e.clientX, y: e.clientY }); };
+  item.ondragstart = (e) => {
+    dragging = tabId;
+    e.dataTransfer!.effectAllowed = 'move';
+    e.dataTransfer!.setData('text/plain', '');
+  };
+  item.ondragend = () => { dragging = null; clearDropMarks(); };
+  return item;
+}
+
+function updateTabEl(item: HTMLElement, i: Extract<StripItem, { kind: 'tab' }>, activeTabId: string | null): void {
+  const t = i.tab;
+  item.className = ['tab', t.id === activeTabId && 'active', t.dormant && 'dormant', t.loading && 'loading',
+    t.pinned && 'pinned', i.group && 'grouped'].filter(Boolean).join(' ');
+  item.hidden = i.hidden;
+  item.style.setProperty('--group-color', i.group?.color ?? 'transparent');
+  item.title = `${t.title || t.url}${t.keepAwake ? '\n(sempre ativa)' : ''}`;
+  const img = item.querySelector('img')!;
+  if (t.favicon) {
+    if (img.getAttribute('src') !== t.favicon) { img.hidden = false; img.src = t.favicon; }
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+  }
+  item.querySelector('.title')!.textContent = t.title || t.url;
+  // Sem ícone, a aba fixada (que só mostra o ícone) ficaria vazia: usa a inicial.
+  const letter = item.querySelector<HTMLElement>('.letter')!;
+  letter.textContent = (t.title || t.url).trim().charAt(0).toUpperCase();
+  letter.hidden = !t.pinned || !img.hidden;
+}
+
+function createGroupChip(groupId: string): HTMLElement {
+  const chip = el('div', { className: 'group-chip' });
+  chip.dataset.groupId = groupId;
+  chip.onclick = () => {
+    const g = state?.groups.find((x) => x.id === groupId);
+    if (g) send({ type: 'group:collapse', groupId, collapsed: !g.collapsed });
+  };
+  chip.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'group:menu', groupId, x: e.clientX, y: e.clientY }); };
+  return chip;
+}
+
+function updateGroupChip(chip: HTMLElement, i: Extract<StripItem, { kind: 'group' }>): void {
+  const g = i.group;
+  chip.style.setProperty('--group-color', g.color);
+  chip.classList.toggle('collapsed', g.collapsed);
+  chip.classList.toggle('unnamed', !g.name);
+  // Recolhido mostra quantas abas tem: "Faculdade (3)", ou "(3)" sem nome.
+  chip.textContent = g.collapsed ? `${g.name ? `${g.name} ` : ''}(${i.count})` : g.name;
+  chip.title = `${g.name || 'Grupo'} — clique para ${g.collapsed ? 'expandir' : 'recolher'}; botão direito para opções`;
+}
+
+// Arrastar e soltar abas.
+let dragging: string | null = null;
+
+function clearDropMarks(): void {
+  document.querySelectorAll('.drop-before, .drop-after').forEach((n) => n.classList.remove('drop-before', 'drop-after'));
+}
+
+function dropTargetAt(e: DragEvent): { target: DropTarget; node: HTMLElement | null } {
+  const node = (e.target as HTMLElement).closest<HTMLElement>('.tab, .group-chip');
+  if (node?.dataset.groupId) return { target: { kind: 'group', id: node.dataset.groupId }, node };
+  if (node?.dataset.tabId) {
+    const r = node.getBoundingClientRect();
+    return { target: { kind: 'tab', id: node.dataset.tabId, after: e.clientX > r.left + r.width / 2 }, node };
+  }
+  return { target: { kind: 'end' }, node: null };
+}
+
+const tabsBar = $('#tabs');
+tabsBar.addEventListener('dragover', (e) => {
+  if (!dragging) return;
+  e.preventDefault();
+  clearDropMarks();
+  const { target, node } = dropTargetAt(e);
+  if (node) node.classList.add(target.kind === 'tab' && target.after ? 'drop-after' : 'drop-before');
+});
+tabsBar.addEventListener('dragleave', (e) => { if (e.target === tabsBar) clearDropMarks(); });
+tabsBar.addEventListener('drop', (e) => {
+  e.preventDefault();
+  clearDropMarks();
+  if (!dragging || !state) return;
+  const drop = computeDrop(state.tabs, dragging, dropTargetAt(e).target);
+  if (drop) send({ type: 'tab:move', tabId: dragging, index: drop.index, ...(drop.groupId !== undefined ? { groupId: drop.groupId } : {}) });
+  dragging = null;
+});
 
 function renderPermissionPrompt(s: UiState): void {
   const bar = $('#permission-bar');
@@ -160,12 +303,16 @@ window.addEventListener('resize', sendBounds);
 const dialog = $<HTMLDialogElement>('#ws-dialog');
 let editing: WorkspaceInfo | null = null;
 
+const hibernateLabel = (m: number) => (m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
+$('#ws-hibernate').replaceChildren(...HIBERNATE_OPTIONS_MIN.map((m) => el('option', { value: String(m), textContent: hibernateLabel(m) })));
+
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
   $('#ws-dialog-title').textContent = ws ? 'Editar workspace' : 'Novo workspace';
   $<HTMLInputElement>('#ws-name').value = ws?.name ?? '';
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
+  $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
   send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
@@ -178,9 +325,10 @@ $('#ws-form').addEventListener('submit', () => {
   const name = $<HTMLInputElement>('#ws-name').value.trim();
   const color = $<HTMLInputElement>('#ws-color').value;
   const home = normalizeUrl($<HTMLInputElement>('#ws-home').value) ?? '';
+  const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home });
-  else send({ type: 'workspace:create', name, color, home });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -200,6 +348,42 @@ $('#ws-delete').onclick = () => {
   send({ type: 'workspace:delete', workspaceId: editing.id });
   dialog.close();
 };
+
+// ------------------------------------------------------------ diálogo de grupo
+
+const groupDialog = $<HTMLDialogElement>('#group-dialog');
+let editingGroup: GroupInfo | null = null;
+
+$('#group-colors').replaceChildren(...GROUP_COLORS.map((c) => {
+  const label = el('label', { className: 'swatch', title: c });
+  label.style.background = c;
+  label.appendChild(el('input', { type: 'radio', name: 'group-color', value: c }));
+  return label;
+}));
+
+// O evento "editar grupo" pode chegar antes do estado que já tem o grupo novo:
+// guarda o pedido e abre quando o grupo aparecer.
+let pendingGroupEdit: string | null = null;
+
+function openGroupDialog(groupId: string): void {
+  const g = state?.groups.find((x) => x.id === groupId);
+  if (!g) { pendingGroupEdit = groupId; return; }
+  pendingGroupEdit = null;
+  editingGroup = g;
+  $<HTMLInputElement>('#group-name').value = g.name;
+  for (const r of document.querySelectorAll<HTMLInputElement>('input[name="group-color"]')) r.checked = r.value === g.color;
+  send({ type: 'layout:overlay', open: true });
+  groupDialog.showModal();
+  $('#group-name').focus();
+}
+
+groupDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
+$('#group-cancel').onclick = () => groupDialog.close();
+$('#group-form').addEventListener('submit', () => {
+  if (!editingGroup) return;
+  const color = document.querySelector<HTMLInputElement>('input[name="group-color"]:checked')?.value ?? editingGroup.color;
+  send({ type: 'group:update', groupId: editingGroup.id, name: $<HTMLInputElement>('#group-name').value.trim(), color });
+});
 
 // ------------------------------------------------------------ eventos
 
@@ -226,16 +410,19 @@ $('#update-primary').onclick = () => {
 };
 $('#update-later').onclick = () => { updateDismissed = true; $('#update-bar').hidden = true; };
 
+$<HTMLInputElement>('#address').addEventListener('input', () => { addressEdited = true; });
 $<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
   const input = e.target as HTMLInputElement;
   if (e.key === 'Enter') {
     const url = normalizeUrl(input.value);
     if (!url) return;
+    addressEdited = false;
     input.blur();
     send({ type: 'tab:navigate', url });
   } else if (e.key === 'Escape') {
     const tab = state?.tabs.find((t) => t.id === state?.activeTabId);
     input.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
+    addressEdited = false;
     input.blur();
     send({ type: 'tab:focus' });
   }
@@ -247,10 +434,13 @@ window.apollo.onState((next) => {
   if (state && next.sitePermissions?.origin !== state.sitePermissions?.origin) siteBarOpen = false;
   state = next;
   render();
+  if (pendingGroupEdit) openGroupDialog(pendingGroupEdit);
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'focus-address') {
+  if (event.type === 'edit-group') {
+    openGroupDialog(event.groupId);
+  } else if (event.type === 'focus-address') {
     const input = $<HTMLInputElement>('#address');
     input.focus();
     input.select();

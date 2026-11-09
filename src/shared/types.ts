@@ -6,7 +6,12 @@ export interface WorkspaceInfo {
   name: string;
   color: string;
   home: string;
+  /** Minutos sem uso para hibernar abas (0 = nunca). */
+  hibernateAfterMin: number;
 }
+
+/** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
+export const HIBERNATE_OPTIONS_MIN = [0, 5, 15, 30, 60, 120, 240] as const;
 
 export interface TabInfo {
   id: string;
@@ -18,7 +23,21 @@ export interface TabInfo {
   canGoForward: boolean;
   /** Ainda sem página carregada (será carregada ao ativar). */
   dormant: boolean;
+  pinned: boolean;
+  /** Nunca hiberna. */
+  keepAwake: boolean;
+  groupId: string | null;
 }
+
+export interface GroupInfo {
+  id: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+}
+
+/** Cores de grupo (as mesmas ideias de Chrome/Opera). */
+export const GROUP_COLORS = ['#8a8f98', '#4c8bf5', '#e5534b', '#e3b341', '#3fb950', '#db61a2', '#a371f7', '#39c5cf', '#f0883e'] as const;
 
 export type PermissionKind =
   | 'media-video'
@@ -51,19 +70,47 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface MemoryTab {
+  id: string;
+  workspaceId: string;
+  title: string;
+  favicon: string | null;
+  /** null = sem página carregada (hibernada). */
+  mb: number | null;
+  visible: boolean;
+  keepAwake: boolean;
+  playing: boolean;
+}
+
+/** Só existe enquanto o monitor de memória está aberto (fechado = custo zero). */
+export interface MemoryReport {
+  totalMb: number;
+  /** Navegador, GPU, rede etc. */
+  otherMb: number;
+  /** 0 = sem limite. */
+  limitMb: number;
+  tabs: MemoryTab[];
+}
+
+/** Opções do limite de memória do Apollo (MB; 0 = sem limite). */
+export const MEMORY_LIMIT_OPTIONS_MB = [0, 1024, 2048, 3072, 4096, 6144, 8192] as const;
+
 export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
   tabs: TabInfo[];
+  groups: GroupInfo[];
   activeTabId: string | null;
   permissionPrompt: PermissionPrompt | null;
   /** Permissões do site da aba ativa (para o painel ao lado da barra de endereço). */
   sitePermissions: SitePermissions | null;
   update: UpdateStatus | null;
+  memory: MemoryReport | null;
 }
 
 export type UiCommand =
   | { type: 'tab:new'; url?: string }
+  | { type: 'tab:reopen' }
   | { type: 'tab:close'; tabId: string }
   | { type: 'tab:activate'; tabId: string }
   | { type: 'tab:navigate'; url: string }
@@ -71,9 +118,32 @@ export type UiCommand =
   | { type: 'tab:forward' }
   | { type: 'tab:reload' }
   | { type: 'tab:focus' }
+  /** Arrastar: índice final e grupo de destino (null = sem grupo; ausente = mantém). */
+  | { type: 'tab:move'; tabId: string; index: number; groupId?: string | null }
+  | { type: 'tab:pin'; tabId: string; pinned: boolean }
+  | { type: 'tab:keep-awake'; tabId: string; keepAwake: boolean }
+  | { type: 'tab:duplicate'; tabId: string }
+  | { type: 'tab:hibernate'; tabId: string }
+  /** Mostra a aba, trocando de workspace se preciso (monitor de memória). */
+  | { type: 'tab:reveal'; tabId: string }
+  | { type: 'memory:toggle'; open: boolean }
+  | { type: 'settings:memory-limit'; mb: number }
+  | { type: 'tab:hibernate-others'; tabId: string }
+  | { type: 'tab:close-others'; tabId: string }
+  | { type: 'tab:close-right'; tabId: string }
+  /** Abre o menu de contexto nativo da aba em (x, y) da janela. */
+  | { type: 'tab:menu'; tabId: string; x: number; y: number }
+  | { type: 'group:create'; tabId: string }
+  | { type: 'group:add'; tabId: string; groupId: string | null }
+  | { type: 'group:update'; groupId: string; name: string; color: string }
+  | { type: 'group:collapse'; groupId: string; collapsed: boolean }
+  | { type: 'group:ungroup'; groupId: string }
+  | { type: 'group:close'; groupId: string }
+  | { type: 'group:new-tab'; groupId: string }
+  | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }
@@ -83,7 +153,10 @@ export type UiCommand =
   | { type: 'update:install' };
 
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
-export type UiEvent = { type: 'focus-address' };
+export type UiEvent =
+  | { type: 'focus-address' }
+  /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
+  | { type: 'edit-group'; groupId: string };
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

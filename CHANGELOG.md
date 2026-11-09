@@ -4,6 +4,26 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-11-09
+
+### Adicionado
+- Logins que dependem de cookies de sessão (Microsoft/Outlook, SSO de empresa e faculdade) continuam ativos depois de fechar e abrir o Apollo. Os cookies ficam cifrados com o chaveiro do sistema; sem chaveiro, não são salvos.
+- Voltar/avançar e a posição de rolagem de cada aba são restaurados ao reabrir.
+- Ctrl+Shift+T reabre a última aba fechada, no mesmo lugar e com o histórico.
+- Tamanho, posição e estado maximizado da janela são lembrados (se o monitor sumiu, a janela abre centralizada).
+- Arrastar abas para reordenar.
+- Abas fixadas: ficam no começo, compactas (só o ícone).
+- Grupos de abas com nome e cor: recolher/expandir clicando no chip (recolhido mostra a quantidade, ex.: "Faculdade (3)"), arrastar abas para dentro/fora, desagrupar, fechar grupo. Abas abertas a partir de uma aba do grupo entram no grupo.
+- Hibernação: abas paradas além do tempo do workspace (padrão 30 min; ajustável ou "Nunca" no diálogo do workspace) liberam a memória e recarregam ao clicar, com histórico e rolagem. Nunca hibernam: a aba na tela, as marcadas como "sempre ativa", as tocando áudio/vídeo e as com formulário não enviado. Fixadas hibernam normalmente.
+- "Hibernar agora" e "Hibernar outras abas" no menu da aba.
+- Monitor de memória (Shift+Esc ou ▤ na barra): total, navegador/GPU e cada aba de todos os workspaces, com botão para hibernar e clique para ir até a aba. Limite de memória opcional: acima dele, as abas menos usadas hibernam. Só mede enquanto aberto.
+- Menu do botão direito na aba: nova aba à direita, recarregar, duplicar (com histórico), fixar, manter sempre ativa, grupos, fechar outras / à direita, reabrir aba fechada.
+
+### Corrigido
+- Com um grupo recolhido, a aba nova (inclusive a criada ao recolher o grupo quando não havia outras abas) nascia dentro do grupo. Agora nasce fora, depois dele; "Nova aba no grupo" expande o grupo e cria dentro.
+- Ao ir para uma aba vazia, a barra de endereço continuava mostrando a URL da aba anterior.
+- Navegar logo ao abrir o Apollo, antes de a sessão terminar de ser restaurada, era desfeito (a aba voltava para a página anterior).
+
 ## [0.2.0] - 2026-11-09
 
 ### Adicionado

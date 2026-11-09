@@ -23,6 +23,7 @@
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
       <button id="site-btn" class="icon-btn" title="Permissões do site" hidden>⚙</button>
+      <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
     </nav>
 
@@ -48,8 +49,23 @@
       <button id="update-later">Depois</button>
     </div>
 
-    <!-- Área onde o processo principal posiciona a página da aba ativa. -->
-    <div id="views"></div>
+    <div id="content">
+      <!-- Área onde o processo principal posiciona a página da aba ativa. -->
+      <div id="views"></div>
+
+      <aside id="memory-panel" hidden>
+        <header>
+          <strong>Memória</strong>
+          <span class="spacer"></span>
+          <button id="memory-close" class="icon-btn" title="Fechar (Shift+Esc)">×</button>
+        </header>
+        <div id="memory-total"></div>
+        <label class="memory-limit">Limite (hiberna as abas menos usadas)
+          <select id="memory-limit"></select>
+        </label>
+        <ul id="memory-tabs"></ul>
+      </aside>
+    </div>
   </main>
 
   <dialog id="ws-dialog">
@@ -58,11 +74,25 @@
       <label>Nome <input id="ws-name" required maxlength="30" autocomplete="off"></label>
       <label>Cor <input id="ws-color" type="color" value="#7c5cff"></label>
       <label>Página inicial <input id="ws-home" placeholder="Vazio = página inicial do Apollo" autocomplete="off"></label>
+      <label>Hibernar abas paradas após <select id="ws-hibernate"></select></label>
       <div class="dialog-actions">
         <button type="button" id="ws-delete" class="danger">Excluir workspace</button>
         <span class="spacer"></span>
         <button type="button" id="ws-cancel">Cancelar</button>
         <button type="submit" id="ws-save" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="group-dialog">
+    <form method="dialog" id="group-form">
+      <h2>Grupo de abas</h2>
+      <label>Nome <input id="group-name" maxlength="40" autocomplete="off" placeholder="Sem nome"></label>
+      <div id="group-colors" class="swatches"></div>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="group-cancel">Cancelar</button>
+        <button type="submit" class="primary">Salvar</button>
       </div>
     </form>
   </dialog>

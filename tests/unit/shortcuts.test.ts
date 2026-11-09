@@ -19,16 +19,19 @@ describe('shortcutFor', () => {
     [key('1', { control: true }), 'workspace-1'],
     [key('9', { control: true }), 'workspace-9'],
     [key('t', { meta: true }), 'new-tab'],
+    [key('T', { control: true, shift: true }), 'reopen-tab'],
+    [key('Escape', { shift: true }), 'memory-monitor'],
   ])('%o → %s', (input, action) => {
     expect(shortcutFor(input)).toBe(action);
   });
 
-  it('ignora teclas sem modificador, keyUp e Ctrl+Shift+T/W/L', () => {
+  it('ignora teclas sem modificador, keyUp e Ctrl+Shift+W/L', () => {
     expect(shortcutFor(key('t'))).toBeNull();
     expect(shortcutFor({ ...key('t', { control: true }), type: 'keyUp' })).toBeNull();
-    expect(shortcutFor(key('t', { control: true, shift: true }))).toBeNull();
     expect(shortcutFor(key('w', { control: true, shift: true }))).toBeNull();
     expect(shortcutFor(key('0', { control: true }))).toBeNull();
     expect(shortcutFor(key('ArrowLeft'))).toBeNull();
+    expect(shortcutFor(key('Escape'))).toBeNull(); // Esc sozinho é das páginas
+    expect(shortcutFor(key('Escape', { shift: true, control: true }))).toBeNull();
   });
 });

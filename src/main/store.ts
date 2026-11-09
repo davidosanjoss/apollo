@@ -2,12 +2,15 @@ import type { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { PermissionDecision, PermissionKind } from '../shared/types';
+import { parseHistory, sanitizeHistory, type TabHistory } from './history';
+import type { OrderTab } from './tab-order';
 
 export interface Workspace {
   id: string;
   name: string;
   color: string;
   home: string;
+  hibernateAfterMin: number;
   activeTabId: string | null;
 }
 
@@ -20,7 +23,19 @@ export interface Tab {
   title: string;
   favicon: string | null;
   pinned: boolean;
+  keepAwake: boolean;
+  history: TabHistory | null;
 }
+
+export interface TabGroup {
+  id: string;
+  workspaceId: string;
+  name: string;
+  color: string;
+  collapsed: boolean;
+}
+
+export type NewTab = Pick<Tab, 'id' | 'workspaceId' | 'url' | 'title'> & { history?: TabHistory | null };
 
 export const newId = (): string => randomUUID().replaceAll('-', '').slice(0, 12);
 
@@ -31,6 +46,7 @@ const toWorkspace = (r: Row): Workspace => ({
   name: r.name as string,
   color: r.color as string,
   home: r.home as string,
+  hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
 
@@ -43,6 +59,16 @@ const toTab = (r: Row): Tab => ({
   title: r.title as string,
   favicon: (r.favicon as string | null) ?? null,
   pinned: r.pinned === 1,
+  keepAwake: r.keep_awake === 1,
+  history: parseHistory(r.history as string | null),
+});
+
+const toGroup = (r: Row): TabGroup => ({
+  id: r.id as string,
+  workspaceId: r.workspace_id as string,
+  name: r.name as string,
+  color: r.color as string,
+  collapsed: r.collapsed === 1,
 });
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
@@ -84,16 +110,17 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId'>): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin'> & { hibernateAfterMin?: number }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now());
-    return { ...ws, activeTabId: null };
+    const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin);
+    return { ...ws, hibernateAfterMin, activeTabId: null };
   }
 
-  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'>): void {
-    this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ? WHERE id = ?')
-      .run(patch.name, patch.color, patch.home, id);
+  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {
+    this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ?, hibernate_after_min = COALESCE(?, hibernate_after_min) WHERE id = ?')
+      .run(patch.name, patch.color, patch.home, patch.hibernateAfterMin ?? null, id);
   }
 
   deleteWorkspace(id: string): void {
@@ -117,22 +144,97 @@ export class Store {
   }
 
   /** Insere logo depois de `afterTabId` (ou no fim). */
-  insertTab(tab: Pick<Tab, 'id' | 'workspaceId' | 'url' | 'title'>, afterTabId: string | null): Tab {
+  insertTab(tab: NewTab, afterTabId: string | null): Tab {
+    const after = afterTabId ? this.getTab(afterTabId) : null;
+    return this.tx(() => this.insertAtPosition(tab, after && after.workspaceId === tab.workspaceId ? after.position + 1 : null));
+  }
+
+  /** Insere no índice `index` entre as abas visíveis (0 = primeira); null ou além do fim = no fim. */
+  insertTabAt(tab: NewTab, index: number | null): Tab {
     return this.tx(() => {
-      let position: number;
-      const after = afterTabId ? this.getTab(afterTabId) : null;
-      if (after && after.workspaceId === tab.workspaceId) {
-        position = after.position + 1;
-        this.db.prepare('UPDATE tabs SET position = position + 1 WHERE workspace_id = ? AND position >= ?')
-          .run(tab.workspaceId, position);
-      } else {
-        position = (this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tabs WHERE workspace_id = ?')
-          .get(tab.workspaceId) as { next: number }).next;
-      }
-      this.db.prepare('INSERT INTO tabs(id, workspace_id, position, url, title) VALUES (?, ?, ?, ?, ?)')
-        .run(tab.id, tab.workspaceId, position, tab.url, tab.title);
-      return this.getTab(tab.id)!;
+      // Posições têm buracos depois de excluir abas: o índice vira a posição da aba que está lá.
+      const at = index === null ? undefined : this.db.prepare(
+        'SELECT position FROM tabs WHERE workspace_id = ? ORDER BY position LIMIT 1 OFFSET ?',
+      ).get(tab.workspaceId, Math.max(0, index)) as { position: number } | undefined;
+      return this.insertAtPosition(tab, at?.position ?? null);
     });
+  }
+
+  private insertAtPosition(tab: NewTab, position: number | null): Tab {
+    if (position === null) {
+      position = (this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tabs WHERE workspace_id = ?')
+        .get(tab.workspaceId) as { next: number }).next;
+    } else {
+      this.db.prepare('UPDATE tabs SET position = position + 1 WHERE workspace_id = ? AND position >= ?')
+        .run(tab.workspaceId, position);
+    }
+    const history = sanitizeHistory(tab.history);
+    this.db.prepare('INSERT INTO tabs(id, workspace_id, position, url, title, history) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(tab.id, tab.workspaceId, position, tab.url, tab.title, history ? JSON.stringify(history) : null);
+    return this.getTab(tab.id)!;
+  }
+
+  /** Índice da aba entre as do workspace (0 = primeira). */
+  tabIndex(id: string): number {
+    const tab = this.getTab(id);
+    if (!tab) return -1;
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM tabs WHERE workspace_id = ? AND position < ?')
+      .get(tab.workspaceId, tab.position) as { n: number }).n;
+  }
+
+  setKeepAwake(id: string, keepAwake: boolean): void {
+    this.db.prepare('UPDATE tabs SET keep_awake = ? WHERE id = ?').run(keepAwake ? 1 : 0, id);
+  }
+
+  /** Grava ordem, fixação e grupo de todas as abas de um workspace (ver tab-order.ts). */
+  applyOrder(workspaceId: string, tabs: OrderTab[]): void {
+    this.tx(() => {
+      const stmt = this.db.prepare('UPDATE tabs SET position = ?, pinned = ?, group_id = ? WHERE id = ? AND workspace_id = ?');
+      tabs.forEach((t, i) => stmt.run(i, t.pinned ? 1 : 0, t.groupId, t.id, workspaceId));
+      this.deleteEmptyGroups(workspaceId);
+    });
+  }
+
+  // ------------------------------------------------------------ grupos de abas
+
+  listGroups(workspaceId: string): TabGroup[] {
+    return (this.db.prepare('SELECT * FROM tab_groups WHERE workspace_id = ? ORDER BY position').all(workspaceId) as Row[]).map(toGroup);
+  }
+
+  getGroup(id: string): TabGroup | null {
+    const row = this.db.prepare('SELECT * FROM tab_groups WHERE id = ?').get(id) as Row | undefined;
+    return row ? toGroup(row) : null;
+  }
+
+  createGroup(group: Omit<TabGroup, 'collapsed'>): TabGroup {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tab_groups WHERE workspace_id = ?')
+      .get(group.workspaceId) as { next: number };
+    this.db.prepare('INSERT INTO tab_groups(id, workspace_id, name, color, collapsed, position) VALUES (?, ?, ?, ?, 0, ?)')
+      .run(group.id, group.workspaceId, group.name, group.color, next);
+    return { ...group, collapsed: false };
+  }
+
+  updateGroup(id: string, patch: Partial<Pick<TabGroup, 'name' | 'color' | 'collapsed'>>): void {
+    const g = this.getGroup(id);
+    if (!g) return;
+    const next = { ...g, ...patch };
+    this.db.prepare('UPDATE tab_groups SET name = ?, color = ?, collapsed = ? WHERE id = ?')
+      .run(next.name, next.color, next.collapsed ? 1 : 0, id);
+  }
+
+  /** Remove o grupo; as abas continuam, sem grupo. */
+  deleteGroup(id: string): void {
+    this.db.prepare('DELETE FROM tab_groups WHERE id = ?').run(id);
+  }
+
+  deleteEmptyGroups(workspaceId: string): void {
+    this.db.prepare(`DELETE FROM tab_groups WHERE workspace_id = ?
+      AND id NOT IN (SELECT group_id FROM tabs WHERE group_id IS NOT NULL)`).run(workspaceId);
+  }
+
+  setTabHistory(id: string, history: TabHistory | null): void {
+    const clean = sanitizeHistory(history);
+    this.db.prepare('UPDATE tabs SET history = ? WHERE id = ?').run(clean ? JSON.stringify(clean) : null, id);
   }
 
   updateTab(id: string, patch: Partial<Pick<Tab, 'url' | 'title' | 'favicon'>>): void {
@@ -143,7 +245,9 @@ export class Store {
   }
 
   deleteTab(id: string): void {
+    const tab = this.getTab(id);
     this.db.prepare('DELETE FROM tabs WHERE id = ?').run(id);
+    if (tab?.groupId) this.deleteEmptyGroups(tab.workspaceId);
   }
 
   // ------------------------------------------------------------ permissões
@@ -163,6 +267,19 @@ export class Store {
     this.db.prepare(`INSERT INTO site_permissions(workspace_id, origin, kind, decision, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, origin, kind) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at`)
       .run(workspaceId, origin, kind, decision, Date.now());
+  }
+
+  // ------------------------------------------------------------ cookies de sessão
+
+  saveSessionCookies(workspaceId: string, data: Buffer): void {
+    this.db.prepare(`INSERT INTO session_cookies(workspace_id, data, saved_at) VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`)
+      .run(workspaceId, data, Date.now());
+  }
+
+  loadSessionCookies(workspaceId: string): Buffer | null {
+    const row = this.db.prepare('SELECT data FROM session_cookies WHERE workspace_id = ?').get(workspaceId) as Row | undefined;
+    return row ? Buffer.from(row.data as Uint8Array) : null;
   }
 
   // ------------------------------------------------------------ migração do protótipo

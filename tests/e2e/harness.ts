@@ -40,6 +40,12 @@ export async function startSite(): Promise<TestSite> {
     };
     switch (u.pathname) {
       case '/page': return html('ok', u.searchParams.get('title') ?? 'Teste');
+      case '/slow': {
+        // Página lenta: responde depois de ?ms (simula rede/CI lentos).
+        const ms = Number(u.searchParams.get('ms') ?? 1500);
+        setTimeout(() => html('ok', u.searchParams.get('title') ?? 'Lenta'), ms);
+        return;
+      }
       case '/headers':
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify(req.headers));
@@ -51,6 +57,25 @@ export async function startSite(): Promise<TestSite> {
         });
         return res.end('<title>cookie</title>ok');
       case '/cookie': return html(req.headers.cookie ?? '', 'cookie');
+      case '/form':
+        // Formulário "não enviado": pede confirmação ao sair (precisa de um clique antes).
+        return html(`<input id="campo"><script>
+          addEventListener('beforeunload', (e) => { e.preventDefault(); e.returnValue = ''; });
+        </script>`, 'Formulário');
+      case '/video':
+        // Vídeo tocando (gerado no próprio navegador, sem arquivo nem som).
+        return html(`<canvas width="64" height="64"></canvas><video muted autoplay></video><script>
+          const c = document.querySelector('canvas'); const ctx = c.getContext('2d');
+          setInterval(() => { ctx.fillStyle = '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'); ctx.fillRect(0, 0, 64, 64); }, 50);
+          document.querySelector('video').srcObject = c.captureStream(20);
+        </script>`, 'Video');
+      case '/set-session-cookie':
+        res.writeHead(200, {
+          'content-type': 'text/html',
+          // Sem Max-Age/Expires: cookie de SESSÃO (como os de login da Microsoft).
+          'set-cookie': `sessao=${u.searchParams.get('v')}; Path=/; HttpOnly; SameSite=Lax`,
+        });
+        return res.end('<title>sessao</title>ok');
       default: res.writeHead(404); res.end();
     }
   });
@@ -127,7 +152,17 @@ async function freePort(): Promise<number> {
 
 export function tempProfile(): { dir: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apollo-e2e-'));
-  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    cleanup: () => {
+      // Processos auxiliares do Chromium podem gravar por alguns ms depois de o app sair.
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch (err) {
+        console.warn(`[e2e] não consegui apagar ${dir}: ${(err as Error).message}`);
+      }
+    },
+  };
 }
 
 // Rede de segurança: se o processo de testes sair, nenhum Electron fica para trás.
@@ -139,10 +174,12 @@ export class Apollo {
   private constructor(private proc: ChildProcess, private port: number, readonly userData: string) {}
 
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
-  static async launch(userData: string): Promise<Apollo> {
+  static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
     const port = await freePort();
-    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`], {
-      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0' },
+    // Sem janelas na tela (Linux): o Chromium desenha em memória. APOLLO_E2E_SHOW=1 mostra as janelas.
+    const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
+    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`, ...headless], {
+      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });
     const app = new Apollo(proc, port, userData);
@@ -185,8 +222,23 @@ export class Apollo {
     return this.ui.eval<UiState>('window.__s');
   }
 
-  async until(pred: (s: UiState) => unknown, what: string, timeout?: number): Promise<UiState> {
-    return waitFor(async () => { const s = await this.state(); return pred(s) ? s : null; }, what, timeout);
+  /** Espera o estado satisfazer `pred` (síncrono: para esperar a UI/página use waitFor). */
+  async until(pred: (s: UiState) => boolean | undefined | null | '' | 0, what: string, timeout?: number): Promise<UiState> {
+    let last: UiState | null = null;
+    try {
+      return await waitFor(async () => {
+        const s = await this.state();
+        last = s;
+        const ok = pred(s) as unknown;
+        if (ok instanceof Promise) throw new Error('until() recebeu predicado assíncrono; use waitFor');
+        return ok ? s : null;
+      }, what, timeout);
+    } catch (err) {
+      // Diagnóstico: onde a aba ativa estava quando o tempo acabou.
+      const s = last as UiState | null;
+      const t = s?.tabs.find((x) => x.id === s.activeTabId);
+      throw new Error(`${(err as Error).message} | aba ativa: ${t ? JSON.stringify({ url: t.url, title: t.title, loading: t.loading, canGoBack: t.canGoBack, dormant: t.dormant }) : '—'}`);
+    }
   }
 
   activeTab(s: UiState) { return s.tabs.find((t) => t.id === s.activeTabId)!; }

@@ -39,8 +39,9 @@ describe('persistência entre reinícios', () => {
 
         await app.send({ type: 'tab:navigate', url: `${site.url}/cookie` });
         const page = await app.page(`${site.url}/cookie`);
-        await waitFor(async () => (await page.eval<string>('document.readyState')) === 'complete', 'página carregada');
-        expect(await page.eval('document.body.textContent')).toBe('login=faculdade');
+        // A aba pode trocar de documento enquanto conectamos: espera o corpo da página certa.
+        await waitFor(async () => (await page.eval<string | null>('document.body?.textContent ?? null')) === 'login=faculdade',
+          'cookie persistente após reinício');
         page.close();
       } finally {
         await app.quit();
