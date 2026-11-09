@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-11-09
+
 ### Adicionado
 - Logins que dependem de cookies de sessão (Microsoft/Outlook, SSO de empresa e faculdade) continuam ativos depois de fechar e abrir o Apollo. Os cookies ficam cifrados com o chaveiro do sistema; sem chaveiro, não são salvos.
 - Voltar/avançar e a posição de rolagem de cada aba são restaurados ao reabrir.
