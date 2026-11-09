@@ -13,11 +13,10 @@ import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, PrivacyFeature, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
+import type { MemoryReport, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
 import { GROUP_COLORS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
-const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
 
 const MAX_CLOSED_TABS = 25;
 
@@ -73,6 +72,12 @@ export class Browser {
   private readonly blocked = new Map<string, { ads: number; trackers: number }>();
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
+  // Configurações (DNS): o index.ts aplica e informa aqui.
+  private settings: Omit<SettingsInfo, 'privacy'> = {
+    dns: { mode: 'secure', dohUrl: null, provider: null },
+    dnsTest: { status: 'idle' },
+  };
+
   // Monitor de memória: só mede enquanto aberto.
   private memoryTimer: NodeJS.Timeout | null = null;
   private memoryReport: MemoryReport | null = null;
@@ -93,6 +98,8 @@ export class Browser {
     private readonly cipher: Cipher | null = null,
   ) {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
+    store.deleteTemporaryWorkspaces();
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -125,8 +132,13 @@ export class Browser {
 
   // ------------------------------------------------------------ sessões
 
+  /** Partição da sessão: persistente em disco, ou só em memória (workspace temporário). */
+  private partitionOf(workspaceId: string): string {
+    return this.store.getWorkspace(workspaceId)?.temporary ? `ws-temp-${workspaceId}` : `persist:ws-${workspaceId}`;
+  }
+
   sessionFor(workspaceId: string): Session {
-    const ses = session.fromPartition(partitionOf(workspaceId));
+    const ses = session.fromPartition(this.partitionOf(workspaceId));
     if (!this.sessionsReady.has(workspaceId)) {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
@@ -150,9 +162,10 @@ export class Browser {
     if (!this.cipher) return;
     const cipher = this.cipher;
     await Promise.all([...this.sessionsReady.keys()].map(async (workspaceId) => {
-      if (!this.store.getWorkspace(workspaceId)) return; // excluído
+      const ws = this.store.getWorkspace(workspaceId);
+      if (!ws || ws.temporary) return; // excluído, ou temporário (nada vai para o disco)
       try {
-        const data = await captureSessionCookies(session.fromPartition(partitionOf(workspaceId)), cipher);
+        const data = await captureSessionCookies(session.fromPartition(this.partitionOf(workspaceId)), cipher);
         this.store.saveSessionCookies(workspaceId, data);
       } catch (err) {
         console.warn('[apollo] falha ao salvar cookies de sessão:', (err as Error).message);
@@ -842,8 +855,8 @@ export class Browser {
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number): void {
-    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin });
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean): void {
+    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, temporary });
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
@@ -865,10 +878,13 @@ export class Browser {
     if (workspaceId === this.activeWorkspaceId) {
       this.switchWorkspace(all.find((w) => w.id !== workspaceId)!.id);
     }
+    // A partição depende do workspace (temporário ou não): calcular ANTES de apagá-lo.
+    const partition = this.partitionOf(workspaceId);
     this.store.deleteWorkspace(workspaceId); // abas, grupos e permissões vão junto (cascade)
+    this.sessionsReady.delete(workspaceId);
 
     // Apaga logins, cookies, cache e storage do workspace.
-    const ses = session.fromPartition(partitionOf(workspaceId));
+    const ses = session.fromPartition(partition);
     await ses.clearStorageData();
     await ses.clearCache();
     this.push();
@@ -937,7 +953,7 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary); break;
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
@@ -952,6 +968,11 @@ export class Browser {
   }
 
   // ------------------------------------------------------------ estado para a UI
+
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy'>>): void {
+    this.settings = { ...this.settings, ...patch };
+    this.push();
+  }
 
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
@@ -1003,7 +1024,7 @@ export class Browser {
     return {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
-        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w) };
+        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w), temporary: this.store.getWorkspace(id)!.temporary };
       }),
       activeWorkspaceId: ws.id,
       tabs,
@@ -1014,6 +1035,7 @@ export class Browser {
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
       memory: this.memoryReport,
+      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }
 }

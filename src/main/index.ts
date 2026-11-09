@@ -12,7 +12,7 @@ import { DEFAULT_TOGGLES } from './privacy/rules';
 import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
-import { loadSettings, applyDns } from './settings';
+import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
 import type { Cipher } from './session-cookies';
@@ -190,6 +190,22 @@ app.whenReady().then(async () => {
 
   const { win, browser } = createWindow(store);
 
+  // DNS: o que está em uso, e mudanças pela tela de configurações.
+  let settings: Settings = loadSettings();
+  const showDns = (info: { provider?: string }) =>
+    browser.setSettings({ dns: { mode: settings.dns.mode, dohUrl: settings.dns.dohUrl, provider: info.provider ?? null } });
+  showDns(dnsInfo);
+  const testDns = async () => {
+    browser.setSettings({ dnsTest: { status: 'testing' } });
+    const t0 = Date.now();
+    try {
+      const res = await session.defaultSession.fetch('https://example.com/', { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+      browser.setSettings({ dnsTest: res.ok ? { status: 'ok', ms: Date.now() - t0 } : { status: 'fail', error: `HTTP ${res.status}` } });
+    } catch (err) {
+      browser.setSettings({ dnsTest: { status: 'fail', error: (err as Error).message } });
+    }
+  };
+
   const updater = setupUpdater(
     (status) => browser.setUpdate(status),
     () => db.exec('PRAGMA wal_checkpoint(TRUNCATE)'),
@@ -201,6 +217,13 @@ app.whenReady().then(async () => {
     if (!cmd) return console.warn('[apollo] comando inválido da UI ignorado');
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
+    if (cmd.type === 'settings:dns') {
+      settings = { ...settings, dns: { mode: cmd.mode, dohUrl: cmd.dohUrl } };
+      saveSettings(settings);
+      browser.setSettings({ dnsTest: { status: 'idle' } });
+      return showDns(applyDns(settings));
+    }
+    if (cmd.type === 'settings:test-dns') return void testDns();
     browser.handleCommand(cmd);
   });
 
@@ -223,6 +246,7 @@ app.whenReady().then(async () => {
   });
 
   app.on('will-quit', () => {
+    try { store.deleteTemporaryWorkspaces(); } catch { /* banco indisponível: apaga ao abrir */ }
     try { db.close(); } catch { /* já fechado */ }
   });
 });

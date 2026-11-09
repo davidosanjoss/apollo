@@ -88,6 +88,7 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 ### D7: DNS via Cloudflare Zero Trust Gateway
 - DoH em modo `secure`. O endereço do Gateway fica em `settings.json` local, nunca no repositório.
 - Limitação: o DNS é global do app, não por workspace.
+- Configurável pela tela de configurações; gravado em `settings.json` local com permissão 0600.
 
 ### D8: Privacidade
 - **Padrões:** sem telemetria, permissões negadas por padrão, cookies de terceiros bloqueados (com exceções de SSO Microsoft/Google), EasyPrivacy, GPC, limpeza de URL, workspace temporário opcional.
@@ -115,6 +116,6 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 0. ✅ Validação técnica ([phase-0.md](phase-0.md))
 1. ✅ Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
 2. ✅ Sessão e abas: restauração, grupos, hibernação, monitor de memória
-3. Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL
+3. ✅ Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL, workspace temporário
 4. Bitwarden nativo
 5. Módulos, painéis laterais, paleta de comandos

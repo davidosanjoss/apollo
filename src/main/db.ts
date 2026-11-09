@@ -75,6 +75,10 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (workspace_id, site, feature)
   );
   `,
+
+  /* v4: workspace temporário (sessão só em memória; apagado ao fechar) */ `
+  ALTER TABLE workspaces ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

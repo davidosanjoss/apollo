@@ -10,6 +10,8 @@ export interface WorkspaceInfo {
   hibernateAfterMin: number;
   /** Padrões do workspace (null = segue o global). */
   privacy: Record<PrivacyFeature, boolean | null>;
+  /** Sessão só em memória; some ao fechar o Apollo. */
+  temporary: boolean;
 }
 
 /** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
@@ -123,6 +125,15 @@ export interface SitePrivacy {
   blocked: { ads: number; trackers: number };
 }
 
+export type DnsMode = 'secure' | 'automatic' | 'off';
+
+export interface SettingsInfo {
+  dns: { mode: DnsMode; dohUrl: string | null; provider: string | null };
+  dnsTest: { status: 'idle' | 'testing' | 'ok' | 'fail'; ms?: number; error?: string };
+  /** Camada global de privacidade (null = padrão do Apollo). */
+  privacy: Record<PrivacyFeature, boolean | null>;
+}
+
 export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
@@ -135,6 +146,7 @@ export interface UiState {
   sitePrivacy: SitePrivacy | null;
   update: UpdateStatus | null;
   memory: MemoryReport | null;
+  settings: SettingsInfo;
 }
 
 export type UiCommand =
@@ -160,6 +172,8 @@ export type UiCommand =
   | { type: 'privacy:set'; scope: 'global' | 'workspace' | 'site'; feature: PrivacyFeature; enabled: boolean | null; workspaceId?: string }
   /** Pausa toda a proteção só na aba ativa, até ela fechar. */
   | { type: 'privacy:pause-tab'; paused: boolean }
+  | { type: 'settings:dns'; mode: DnsMode; dohUrl: string | null }
+  | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }
@@ -175,7 +189,7 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; temporary?: boolean }
   | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }

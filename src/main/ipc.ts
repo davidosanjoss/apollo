@@ -2,6 +2,7 @@ import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
 import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
+import { validDohUrl } from './settings';
 
 /**
  * Toda mensagem da UI é validada: tem que vir do frame principal da janela do
@@ -42,7 +43,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'workspace:delete': return str(c.workspaceId, 64) ? (c as UiCommand) : null;
     case 'workspace:create':
       return str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192) && hibernate(c.hibernateAfterMin)
-        ? (c as UiCommand) : null;
+        && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
     case 'workspace:update':
       return str(c.workspaceId, 64) && str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192)
         && hibernate(c.hibernateAfterMin) ? (c as UiCommand) : null;
@@ -72,6 +73,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && Object.hasOwn(PRIVACY_LABELS, c.feature) && (c.enabled === null || typeof c.enabled === 'boolean')
         && (c.workspaceId === undefined || id(c.workspaceId)) ? (c as UiCommand) : null;
     case 'privacy:pause-tab': return typeof c.paused === 'boolean' ? (c as UiCommand) : null;
+    case 'settings:dns':
+      return ['secure', 'automatic', 'off'].includes(c.mode as string) && (c.dohUrl === null || validDohUrl(c.dohUrl))
+        ? (c as UiCommand) : null;
+    case 'settings:test-dns': return { type: c.type } as UiCommand;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'settings:memory-limit': return (MEMORY_LIMIT_OPTIONS_MB as readonly unknown[]).includes(c.mb) ? (c as UiCommand) : null;
     case 'layout:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;

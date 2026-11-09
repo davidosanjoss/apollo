@@ -39,7 +39,7 @@ npm run dist:win     # instalador NSIS + zip (funciona a partir do Linux)
 
 ## Configuração local
 
-Configurações pessoais ficam **fora do repositório**, na pasta de dados do app:
+O DNS se configura pela tela de configurações (⚙ na barra lateral). Ela grava num arquivo **fora do repositório**, na pasta de dados do app, que também pode ser editado à mão:
 
 - Linux: `~/.config/apollo/settings.json`
 - Windows: `%APPDATA%\apollo\settings.json`

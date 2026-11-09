@@ -330,3 +330,19 @@ describe('fase 3: regras de privacidade', () => {
     expect(() => store.setPrivacyRule(null, 'x.com', 'ads', false)).toThrow();
   });
 });
+
+describe('fase 3d: workspace temporário', () => {
+  it('marcado como temporário e apagado (com abas e regras) por deleteTemporaryWorkspaces', () => {
+    ws('fixo');
+    store.createWorkspace({ id: 'tmp', name: 'Temp', color: '#000000', home: '', temporary: true });
+    tab('t1', 'tmp');
+    store.setPrivacyRule('tmp', 'x.com', 'ads', false);
+    expect(store.getWorkspace('tmp')!.temporary).toBe(true);
+    expect(store.getWorkspace('fixo')!.temporary).toBe(false);
+    expect(store.deleteTemporaryWorkspaces()).toEqual(['tmp']);
+    expect(store.getWorkspace('tmp')).toBeNull();
+    expect(store.getTab('t1')).toBeNull();
+    expect(store.listWorkspaces().map((w) => w.id)).toEqual(['fixo']);
+    expect(store.deleteTemporaryWorkspaces()).toEqual([]);
+  });
+});

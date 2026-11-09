@@ -10,6 +10,8 @@
   <aside id="sidebar">
     <div id="workspace-list"></div>
     <button id="add-workspace" class="ws-btn add" title="Novo workspace">+</button>
+    <span class="spacer"></span>
+    <button id="settings-btn" class="ws-btn add" title="Configurações">⚙</button>
   </aside>
 
   <main id="main">
@@ -81,6 +83,8 @@
       <label>Página inicial <input id="ws-home" placeholder="Vazio = página inicial do Apollo" autocomplete="off"></label>
       <label>Hibernar abas paradas após <select id="ws-hibernate"></select></label>
       <div id="ws-privacy"></div>
+      <label class="remember" id="ws-temporary-row"><input type="checkbox" id="ws-temporary">
+        Temporário: logins e dados só na memória; apagado ao fechar o Apollo</label>
       <div class="dialog-actions">
         <button type="button" id="ws-delete" class="danger">Excluir workspace</button>
         <span class="spacer"></span>
@@ -99,6 +103,38 @@
         <span class="spacer"></span>
         <button type="button" id="group-cancel">Cancelar</button>
         <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="settings-dialog">
+    <form method="dialog" id="settings-form">
+      <h2>Configurações</h2>
+
+      <h3>DNS</h3>
+      <label>Modo
+        <select id="dns-mode">
+          <option value="secure">Seguro (DNS sobre HTTPS, sempre)</option>
+          <option value="automatic">Automático (HTTPS quando possível)</option>
+          <option value="off">Desligado (DNS do sistema)</option>
+        </select>
+      </label>
+      <label>Endereço DoH (ex.: Cloudflare Zero Trust Gateway)
+        <input id="dns-url" autocomplete="off" spellcheck="false" placeholder="Vazio = Cloudflare público (https://cloudflare-dns.com/dns-query)">
+      </label>
+      <div class="settings-row">
+        <span id="dns-status"></span>
+        <span class="spacer"></span>
+        <button type="button" id="dns-test">Testar</button>
+        <button type="button" id="dns-save" class="primary">Aplicar</button>
+      </div>
+
+      <h3>Privacidade (padrão de todos os workspaces)</h3>
+      <div id="global-privacy"></div>
+
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="submit">Fechar</button>
       </div>
     </form>
   </dialog>

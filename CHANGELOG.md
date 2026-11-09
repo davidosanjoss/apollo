@@ -10,6 +10,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Filtros cosméticos (escondem os espaços de anúncio, inclusive os que aparecem depois) e scriptlets do uBlock (ex.: anúncios do YouTube), seguindo o mesmo interruptor "anúncios".
 - Cookies de terceiros bloqueados (não são enviados nem gravados), tratando como uma parte só os sites da mesma empresa que dependem uns dos outros para login (Microsoft: Outlook/Office/Teams/login; Google: contas/Gmail/YouTube). Liberável por site no painel ⚙.
 - Limpeza de links: parâmetros de rastreamento (`utm_*`, `fbclid`, `gclid`, `msclkid`…) são removidos ao abrir uma página.
+- Configurações (⚙ na barra lateral): DNS — modo e endereço DoH (ex.: Cloudflare Zero Trust Gateway), aplicado na hora, com botão "Testar" — e padrões globais de privacidade.
+- Workspace temporário: logins e dados só na memória, nada gravado no disco; apagado ao fechar o Apollo.
 - Listas embutidas no app e atualizadas semanalmente em segundo plano (thread separada), direto das listas públicas — sem conta e sem telemetria.
 
 ## [0.3.0] - 2026-11-09
@@ -28,6 +30,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Menu do botão direito na aba: nova aba à direita, recarregar, duplicar (com histórico), fixar, manter sempre ativa, grupos, fechar outras / à direita, reabrir aba fechada.
 
 ### Corrigido
+- Escolher DNS "Desligado" com o Apollo aberto não desfazia o DNS sobre HTTPS até reiniciar.
 - Com um grupo recolhido, a aba nova (inclusive a criada ao recolher o grupo quando não havia outras abas) nascia dentro do grupo. Agora nasce fora, depois dele; "Nova aba no grupo" expande o grupo e cria dentro.
 - Ao ir para uma aba vazia, a barra de endereço continuava mostrando a URL da aba anterior.
 - Navegar logo ao abrir o Apollo, antes de a sessão terminar de ser restaurada, era desfeito (a aba voltava para a página anterior).

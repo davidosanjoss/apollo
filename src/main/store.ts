@@ -12,6 +12,8 @@ export interface Workspace {
   color: string;
   home: string;
   hibernateAfterMin: number;
+  /** Sessão só em memória; o workspace some ao fechar o Apollo. */
+  temporary: boolean;
   activeTabId: string | null;
 }
 
@@ -48,6 +50,7 @@ const toWorkspace = (r: Row): Workspace => ({
   color: r.color as string,
   home: r.home as string,
   hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
+  temporary: r.temporary === 1,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
 
@@ -111,12 +114,20 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin'> & { hibernateAfterMin?: number }): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'temporary'> & { hibernateAfterMin?: number; temporary?: boolean }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
     const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin);
-    return { ...ws, hibernateAfterMin, activeTabId: null };
+    const temporary = ws.temporary ?? false;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, temporary ? 1 : 0);
+    return { ...ws, hibernateAfterMin, temporary, activeTabId: null };
+  }
+
+  /** Apaga os workspaces temporários (ao abrir e ao fechar). Devolve os ids apagados. */
+  deleteTemporaryWorkspaces(): string[] {
+    const ids = (this.db.prepare('SELECT id FROM workspaces WHERE temporary = 1').all() as Row[]).map((r) => r.id as string);
+    for (const id of ids) this.deleteWorkspace(id);
+    return ids;
   }
 
   updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {

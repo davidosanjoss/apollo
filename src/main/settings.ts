@@ -45,9 +45,30 @@ export function loadSettings(): Settings {
   return { dns };
 }
 
+/** Endereço DoH aceitável: https, sem credenciais, tamanho razoável. */
+export function validDohUrl(v: unknown): v is string {
+  if (typeof v !== 'string' || v.length > 512) return false;
+  try {
+    const u = new URL(v);
+    return u.protocol === 'https:' && !u.username && !u.password && Boolean(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** Grava as configurações (só leitura/escrita do próprio usuário: o endereço do Gateway é pessoal). */
+export function saveSettings(settings: Settings): void {
+  fs.mkdirSync(path.dirname(settingsPath()), { recursive: true });
+  fs.writeFileSync(settingsPath(), JSON.stringify(settings, null, 2) + '\n', { mode: 0o600 });
+}
+
 export function applyDns(settings: Settings): DnsInfo {
   const { mode, dohUrl } = settings.dns;
-  if (mode === 'off') return { mode: 'off' };
+  if (mode === 'off') {
+    // Explícito: se o DoH estava ligado nesta execução, volta ao DNS do sistema.
+    app.configureHostResolver({ secureDnsMode: 'off' });
+    return { mode: 'off' };
+  }
 
   const valid = typeof dohUrl === 'string' && /^https:\/\//.test(dohUrl);
   if (dohUrl && !valid) console.warn('[apollo] dohUrl precisa começar com https:// — usando DNS público da Cloudflare');

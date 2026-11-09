@@ -1,7 +1,7 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { GroupInfo, PermissionDecision, PrivacyFeature, PrivacyLevel, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, PrivacyLevel, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
@@ -51,9 +51,9 @@ function render(): void {
     };
     return b;
   }, (b, w, i) => {
-    b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '');
+    b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '') + (w.temporary ? ' temporary' : '');
     b.textContent = w.name.trim().charAt(0).toUpperCase() || '?';
-    b.title = `${w.name}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
+    b.title = `${w.name}${w.temporary ? ' (temporário)' : ''}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
     b.style.background = w.color;
   });
 
@@ -79,6 +79,7 @@ function render(): void {
   renderSiteBar(s);
   renderUpdate(s);
   renderMemory(s);
+  renderSettings(s);
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -350,6 +351,9 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
+  // Temporário só se escolhe ao criar.
+  $('#ws-temporary-row').hidden = Boolean(ws);
+  $<HTMLInputElement>('#ws-temporary').checked = false;
   // Padrões de privacidade do workspace (só ao editar: o novo herda o global).
   $('#ws-privacy').replaceChildren(...(ws ? (Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
     const label = el('label', { textContent: PRIVACY_LABELS[feature] });
@@ -372,7 +376,7 @@ $('#ws-form').addEventListener('submit', () => {
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   if (!name) return;
   if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -392,6 +396,54 @@ $('#ws-delete').onclick = () => {
   send({ type: 'workspace:delete', workspaceId: editing.id });
   dialog.close();
 };
+
+// ------------------------------------------------------------ configurações
+
+const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
+
+function renderSettings(s: UiState): void {
+  if (!settingsDialog.open) return;
+  const t = s.settings.dnsTest;
+  const status = $('#dns-status');
+  status.className = t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : '';
+  status.textContent = t.status === 'testing' ? 'Testando…'
+    : t.status === 'ok' ? `Funcionando (${t.ms} ms) — ${s.settings.dns.provider ?? ''}`
+    : t.status === 'fail' ? `Falhou: ${t.error}` : `Em uso: ${s.settings.dns.mode === 'off' ? 'DNS do sistema' : s.settings.dns.provider ?? ''}`;
+
+  $('#global-privacy').replaceChildren(...(Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
+    const label = el('label', { textContent: PRIVACY_LABELS[feature] });
+    const select = el('select');
+    const value = s.settings.privacy[feature];
+    for (const [v, text] of [['', 'Padrão do Apollo (ligado)'], ['1', 'Ligado'], ['0', 'Desligado']]) {
+      select.appendChild(el('option', { value: v, textContent: text, selected: (value === null ? '' : value ? '1' : '0') === v }));
+    }
+    select.onchange = () => send({ type: 'privacy:set', scope: 'global', feature, enabled: select.value === '' ? null : select.value === '1' });
+    label.appendChild(select);
+    return label;
+  }));
+}
+
+function openSettings(): void {
+  if (!state) return;
+  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
+  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
+  send({ type: 'layout:overlay', open: true });
+  settingsDialog.showModal();
+  renderSettings(state);
+}
+
+$('#settings-btn').onclick = openSettings;
+settingsDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
+$('#dns-save').onclick = () => {
+  const url = $<HTMLInputElement>('#dns-url').value.trim();
+  if (url && !/^https:\/\/[^\s]+$/.test(url)) {
+    $('#dns-status').className = 'fail';
+    $('#dns-status').textContent = 'O endereço precisa começar com https://';
+    return;
+  }
+  send({ type: 'settings:dns', mode: $<HTMLSelectElement>('#dns-mode').value as DnsMode, dohUrl: url || null });
+};
+$('#dns-test').onclick = () => send({ type: 'settings:test-dns' });
 
 // ------------------------------------------------------------ diálogo de grupo
 
