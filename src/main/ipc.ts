@@ -16,7 +16,7 @@ export function isTrustedSender(event: IpcMainEvent, ui: WebContents): boolean {
 const str = (v: unknown, max = 2048): v is string => typeof v === 'string' && v.length <= max;
 const num = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 100_000;
 const color = (v: unknown): v is string => typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v);
-const kind = (v: unknown): v is PermissionKind => typeof v === 'string' && v in PERMISSION_LABELS;
+const kind = (v: unknown): v is PermissionKind => typeof v === 'string' && Object.hasOwn(PERMISSION_LABELS, v);
 const decision = (v: unknown) => v === 'allow' || v === 'deny';
 const url = (v: unknown): v is string => str(v, 8192) && /^(https?|apollo|file|about|data|view-source):/i.test(v as string);
 

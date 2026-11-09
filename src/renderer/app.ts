@@ -3,12 +3,12 @@
 import type { ApolloApi } from '../preload/ui';
 import type { PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import { normalizeUrl } from '../shared/url';
+import { reconcile } from './reconcile';
 
 declare global {
   interface Window { apollo: ApolloApi }
 }
-
-const SEARCH_URL = 'https://www.google.com/search?q=';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const send = (cmd: UiCommand) => window.apollo.send(cmd);
@@ -16,15 +16,6 @@ const send = (cmd: UiCommand) => window.apollo.send(cmd);
 let state: UiState | null = null;
 let siteBarOpen = false;
 let updateDismissed = false;
-
-function normalizeUrl(input: string): string | null {
-  const text = input.trim();
-  if (!text) return null;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(text)) return text; // já tem esquema
-  if (/^localhost(:\d+)?(\/|$)/.test(text)) return `http://${text}`;
-  if (!/\s/.test(text) && /\.[a-z]{2,}(:\d+)?(\/|$)/i.test(text)) return `https://${text}`;
-  return SEARCH_URL + encodeURIComponent(text);
-}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
   return Object.assign(document.createElement(tag), props);
@@ -34,27 +25,6 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 
 const tabEls = new Map<string, HTMLElement>();
 const workspaceEls = new Map<string, HTMLElement>();
-
-// Atualiza a lista reaproveitando os elementos existentes (chave = id). Recriar tudo
-// a cada estado trocava o botão entre o "apertar" e o "soltar" do mouse, e o clique
-// se perdia (ex.: fechar aba com a barra de endereço focada exigia dois cliques).
-function reconcile<T>(
-  parent: HTMLElement, cache: Map<string, HTMLElement>, items: T[], key: (item: T) => string,
-  create: (item: T) => HTMLElement, update: (node: HTMLElement, item: T, index: number) => void,
-): void {
-  const keep = new Set(items.map(key));
-  for (const [id, node] of cache) {
-    if (!keep.has(id)) { node.remove(); cache.delete(id); }
-  }
-  items.forEach((item, i) => {
-    const id = key(item);
-    let node = cache.get(id);
-    if (!node) { node = create(item); cache.set(id, node); }
-    update(node, item, i);
-    // Só move o nó se ele estiver fora de posição.
-    if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] ?? null);
-  });
-}
 
 function render(): void {
   if (!state) return;

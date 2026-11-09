@@ -173,12 +173,19 @@ export class Store {
    */
   importLegacyState(file: string): boolean {
     if (!fs.existsSync(file) || this.listWorkspaces().length > 0) return false;
-    const legacy = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+    let legacy: {
       activeWorkspaceId?: string;
       workspaces?: { id: string; name: string; color: string; home?: string; activeTabId?: string;
         tabs?: { id: string; url?: string; title?: string; favicon?: string }[] }[];
     };
-    if (!Array.isArray(legacy.workspaces) || legacy.workspaces.length === 0) return false;
+    try {
+      legacy = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      // Arquivo corrompido: começa do zero, mas mantém o arquivo para recuperação manual.
+      console.warn('[apollo] state.json ilegível, ignorado:', (err as Error).message);
+      return false;
+    }
+    if (!Array.isArray(legacy?.workspaces) || legacy.workspaces.length === 0) return false;
 
     this.tx(() => {
       legacy.workspaces!.forEach((w, wi) => {

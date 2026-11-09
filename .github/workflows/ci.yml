@@ -27,6 +27,14 @@ jobs:
       - run: npm ci
       - name: Checagem de tipos
         run: npm run typecheck
+      - name: Testes unitários
+        run: npm test
+      - name: Testes de integração (app real, tela virtual)
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu 24.04 bloqueia user namespaces sem privilégio; o sandbox do Chromium precisa deles.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a npm run test:e2e
       - name: Build (sem instalador)
         run: |
           node scripts/build.mjs --prod

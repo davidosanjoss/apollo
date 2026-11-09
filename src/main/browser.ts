@@ -1,31 +1,13 @@
-import { BrowserWindow, WebContentsView, session, type Session, type WebContents, type Input } from 'electron';
+import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
+import { shortcutFor, type ShortcutAction } from './shortcuts';
 import type { TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
-
-type ShortcutAction =
-  | 'new-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
-  | 'next-tab' | 'prev-tab' | `workspace-${number}`;
-
-export function shortcutFor(input: Input): ShortcutAction | null {
-  if (input.type !== 'keyDown') return null;
-  const mod = input.control || input.meta;
-  const k = input.key.toLowerCase();
-  if (mod && !input.shift && k === 't') return 'new-tab';
-  if (mod && !input.shift && k === 'w') return 'close-tab';
-  if (mod && !input.shift && k === 'l') return 'focus-address';
-  if ((mod && k === 'r') || input.key === 'F5') return 'reload';
-  if (mod && input.key === 'Tab') return input.shift ? 'prev-tab' : 'next-tab';
-  if (input.alt && input.key === 'ArrowLeft') return 'back';
-  if (input.alt && input.key === 'ArrowRight') return 'forward';
-  if (mod && /^[1-9]$/.test(input.key)) return `workspace-${Number(input.key)}`;
-  return null;
-}
 
 /**
  * Dono de workspaces, abas e do layout. Cada aba é um WebContentsView do processo

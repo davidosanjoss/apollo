@@ -1,0 +1,213 @@
+// Infra dos testes de integração: servidor HTTP local + Apollo real controlado via CDP.
+import { spawn, type ChildProcess } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import type { UiCommand, UiState } from '../../src/shared/types';
+
+const electronBin = createRequire(import.meta.url)('electron') as unknown as string;
+const ROOT = path.resolve(import.meta.dirname, '../..');
+
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function waitFor<T>(fn: () => Promise<T> | T, what: string, timeout = 10_000): Promise<NonNullable<T>> {
+  const end = Date.now() + timeout;
+  let last: unknown;
+  while (Date.now() < end) {
+    try {
+      const v = await fn();
+      if (v) return v as NonNullable<T>;
+    } catch (err) { last = err; }
+    await sleep(100);
+  }
+  throw new Error(`timeout esperando: ${what}${last ? ` (${String(last)})` : ''}`);
+}
+
+// ------------------------------------------------------------ servidor de sites de teste
+
+export interface TestSite { url: string; close: () => Promise<void> }
+
+/** Sites falsos: /page?title=X, /headers (eco), /set-cookie?v=X, /cookie. */
+export async function startSite(): Promise<TestSite> {
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url ?? '/', 'http://x');
+    const html = (body: string, title = 'Teste') => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(`<!doctype html><title>${title}</title><body>${body}</body>`);
+    };
+    switch (u.pathname) {
+      case '/page': return html('ok', u.searchParams.get('title') ?? 'Teste');
+      case '/headers':
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify(req.headers));
+      case '/set-cookie':
+        res.writeHead(200, {
+          'content-type': 'text/html',
+          // Persistente (Max-Age): tem que sobreviver ao reinício.
+          'set-cookie': `login=${u.searchParams.get('v')}; Max-Age=86400; Path=/; SameSite=Lax`,
+        });
+        return res.end('<title>cookie</title>ok');
+      case '/cookie': return html(req.headers.cookie ?? '', 'cookie');
+      default: res.writeHead(404); res.end();
+    }
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as net.AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => r()); }),
+  };
+}
+
+// ------------------------------------------------------------ CDP
+
+export class Cdp {
+  private id = 0;
+  private pending = new Map<number, (msg: { result?: unknown; error?: unknown }) => void>();
+  private constructor(private ws: WebSocket) {
+    ws.onmessage = (m) => {
+      const msg = JSON.parse(String(m.data));
+      this.pending.get(msg.id)?.(msg);
+      this.pending.delete(msg.id);
+    };
+  }
+
+  static async connect(url: string): Promise<Cdp> {
+    const ws = new WebSocket(url);
+    await new Promise((r, j) => { ws.onopen = r; ws.onerror = j; });
+    return new Cdp(ws);
+  }
+
+  call<T = unknown>(method: string, params: object = {}): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const i = ++this.id;
+      this.pending.set(i, (msg) => (msg.error ? reject(new Error(JSON.stringify(msg.error))) : resolve(msg.result as T)));
+      this.ws.send(JSON.stringify({ id: i, method, params }));
+    });
+  }
+
+  async eval<T = unknown>(expression: string): Promise<T> {
+    const r = await this.call<{ result: { value: T }; exceptionDetails?: { text: string; exception?: { description?: string } } }>(
+      'Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text);
+    return r.result.value;
+  }
+
+  /** Clique real do mouse (mousedown + mouseup), não element.click(). */
+  async mouseClick(selector: string): Promise<void> {
+    const p = await this.eval<{ x: number; y: number } | null>(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+    if (!p) throw new Error(`elemento não encontrado: ${selector}`);
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+      await this.call('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+    }
+  }
+
+  close(): void { this.ws.close(); }
+}
+
+// ------------------------------------------------------------ Apollo
+
+interface Target { type: string; url: string; webSocketDebuggerUrl: string }
+
+async function freePort(): Promise<number> {
+  const s = net.createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', r));
+  const { port } = s.address() as net.AddressInfo;
+  await new Promise((r) => s.close(r));
+  return port;
+}
+
+export function tempProfile(): { dir: string; cleanup: () => void } {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apollo-e2e-'));
+  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+// Rede de segurança: se o processo de testes sair, nenhum Electron fica para trás.
+const running = new Set<ChildProcess>();
+process.once('exit', () => { for (const p of running) p.kill('SIGKILL'); });
+
+export class Apollo {
+  ui!: Cdp;
+  private constructor(private proc: ChildProcess, private port: number, readonly userData: string) {}
+
+  /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
+  static async launch(userData: string): Promise<Apollo> {
+    const port = await freePort();
+    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`], {
+      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0' },
+      stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
+    });
+    const app = new Apollo(proc, port, userData);
+    running.add(proc);
+    proc.once('exit', () => running.delete(proc));
+    try {
+      const ui = await waitFor(async () => (await app.targets()).find((t) => t.url.startsWith('apollo://ui')), 'janela do Apollo', 20_000);
+      app.ui = await Cdp.connect(ui.webSocketDebuggerUrl);
+      // A janela aparece antes de o preload expor window.apollo: espera.
+      await waitFor(() => app.ui.eval<boolean>(`typeof window.apollo?.onState === 'function'`), 'API da UI');
+      await app.ui.eval(`window.__s = null; window.apollo.onState((s) => { window.__s = s; }); true`);
+      await waitFor(() => app.state(), 'primeiro estado da UI');
+    } catch (err) {
+      // Nunca deixa um Electron órfão rodando (travaria a bateria inteira).
+      proc.kill('SIGKILL');
+      throw err;
+    }
+    return app;
+  }
+
+  async targets(): Promise<Target[]> {
+    return (await fetch(`http://127.0.0.1:${this.port}/json/list`)).json() as Promise<Target[]>;
+  }
+
+  /** Página de uma aba (por prefixo de URL). */
+  async page(urlPrefix: string): Promise<Cdp> {
+    const t = await waitFor(async () => (await this.targets()).find((x) => x.type === 'page' && x.url.startsWith(urlPrefix)),
+      `página ${urlPrefix}`);
+    return Cdp.connect(t.webSocketDebuggerUrl);
+  }
+
+  async send(cmd: UiCommand | Record<string, unknown>): Promise<void> {
+    await this.ui.eval(`window.apollo.send(${JSON.stringify(cmd)}); true`);
+  }
+
+  /** Estado mais recente empurrado para a UI (força um push com tab:focus). */
+  async state(): Promise<UiState> {
+    await this.send({ type: 'tab:focus' });
+    await sleep(50);
+    return this.ui.eval<UiState>('window.__s');
+  }
+
+  async until(pred: (s: UiState) => unknown, what: string, timeout?: number): Promise<UiState> {
+    return waitFor(async () => { const s = await this.state(); return pred(s) ? s : null; }, what, timeout);
+  }
+
+  activeTab(s: UiState) { return s.tabs.find((t) => t.id === s.activeTabId)!; }
+
+  /** Fecha como o usuário fecharia (grava cookies e banco). */
+  async quit(): Promise<void> {
+    if (this.proc.exitCode !== null) return;
+    const exited = new Promise((r) => this.proc.once('exit', r));
+    // Se não fechar sozinho em 10 s, mata (e o teste que depende disso falha depois).
+    const timer = setTimeout(() => this.proc.kill('SIGKILL'), 10_000);
+    try {
+      const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${this.port}/json/version`,
+        { signal: AbortSignal.timeout(2000) })).json() as Target;
+      const browser = await Cdp.connect(webSocketDebuggerUrl);
+      // O app fecha antes de responder: não esperar a resposta.
+      browser.call('Browser.close').catch(() => {});
+    } catch {
+      this.proc.kill('SIGTERM');
+    }
+    await exited;
+    clearTimeout(timer);
+    this.ui?.close();
+  }
+}

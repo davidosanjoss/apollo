@@ -56,6 +56,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           npm run typecheck
+          npm test
           node scripts/build.mjs --prod
           npx electron-builder ${{ matrix.args }} --publish always
 
