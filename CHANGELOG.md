@@ -4,6 +4,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.1.0] - 2026-11-09
+
+Primeira versão: protótipo para validar a base. Ainda não recomendado para uso diário.
+
 ### Adicionado
 - Workspaces com sessão isolada (cookies, storage e logins próprios por workspace).
 - Abas por workspace, barra de endereço e atalhos (Ctrl+T/W/L/R, Ctrl+Tab, Ctrl+1–9).
