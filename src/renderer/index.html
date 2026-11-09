@@ -11,6 +11,7 @@
     <div id="workspace-list"></div>
     <button id="add-workspace" class="ws-btn add" title="Novo workspace">+</button>
     <span class="spacer"></span>
+    <button id="vault-btn" class="ws-btn add" title="Bitwarden"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg></button>
     <button id="settings-btn" class="ws-btn add" title="Configurações">⚙</button>
   </aside>
 
@@ -124,6 +125,52 @@
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="submit">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vault-dialog">
+    <form method="dialog" id="vault-form" autocomplete="off">
+      <h2>Bitwarden</h2>
+
+      <!-- Desconectado -->
+      <div id="vault-connect" class="vault-view">
+        <label>Servidor
+          <select id="vault-server">
+            <option value="us">bitwarden.com</option>
+            <option value="eu">bitwarden.eu</option>
+            <option value="custom">Servidor próprio (Vaultwarden etc.)</option>
+          </select>
+        </label>
+        <label id="vault-custom-row" hidden>Endereço do servidor <input id="vault-custom" placeholder="https://cofre.exemplo.com" spellcheck="false"></label>
+        <p class="hint">Chave de API pessoal: no cofre web, <b>Configurações → Segurança → Chaves → Ver chave de API</b>.
+          A senha mestra é usada só neste computador, para decifrar o cofre.</p>
+        <label>client_id <input id="vault-client-id" placeholder="user.xxxxxxxx-…" spellcheck="false"></label>
+        <label>client_secret <input id="vault-client-secret" type="password" spellcheck="false"></label>
+        <label>Senha mestra <input id="vault-connect-password" type="password"></label>
+        <p class="hint" id="vault-no-keyring" hidden>Sem chaveiro do sistema: a conexão não será lembrada ao fechar o Apollo.</p>
+      </div>
+
+      <!-- Bloqueado -->
+      <div id="vault-locked" class="vault-view">
+        <p id="vault-account"></p>
+        <label>Senha mestra <input id="vault-password" type="password"></label>
+      </div>
+
+      <!-- Desbloqueado -->
+      <div id="vault-unlocked" class="vault-view">
+        <p id="vault-summary"></p>
+        <label>Bloquear após ficar sem usar o computador por <select id="vault-lock-after"></select></label>
+        <p class="hint">Também bloqueia ao bloquear a tela, ao suspender e ao fechar o Apollo.</p>
+      </div>
+
+      <p id="vault-error" class="error" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="vault-disconnect" class="danger">Desconectar</button>
+        <span class="spacer"></span>
+        <button type="button" id="vault-close">Fechar</button>
+        <button type="button" id="vault-secondary"></button>
+        <button type="submit" id="vault-primary" class="primary"></button>
       </div>
     </form>
   </dialog>

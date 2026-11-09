@@ -199,6 +199,37 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/** Servidor Bitwarden falso (http em 127.0.0.1) servindo um cofre sintético. */
+export async function startFakeBitwarden(clientSecret: string, tokenBody: object, syncBody: object) {
+  const calls: string[] = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const u = new URL(req.url ?? '/', 'http://x');
+      calls.push(u.pathname);
+      const json = (status: number, obj: object) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      if (u.pathname === '/identity/connect/token') {
+        const form = new URLSearchParams(body);
+        if (form.get('client_secret') !== clientSecret) return json(400, { error: 'invalid_client', error_description: '', message: 'Invalid client_id' });
+        return json(200, tokenBody);
+      }
+      if (u.pathname === '/api/sync') {
+        if (req.headers.authorization !== 'Bearer token-de-teste') return json(401, {});
+        return json(200, syncBody);
+      }
+      json(404, {});
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as net.AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    calls,
+    close: () => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }),
+  };
+}
+
 /** Listas de bloqueio de teste (no lugar das reais): /ads/ = anúncio, /track/ = rastreador. */
 export function testFilters(dir: string): Record<string, string> {
   const ads = path.join(dir, 'test-ads.txt');

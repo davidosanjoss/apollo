@@ -80,6 +80,7 @@ function render(): void {
   renderUpdate(s);
   renderMemory(s);
   renderSettings(s);
+  renderVault(s);
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -420,6 +421,94 @@ $('#dns-save').onclick = () => {
   send({ type: 'settings:dns', mode: $<HTMLSelectElement>('#dns-mode').value as DnsMode, dohUrl: url || null });
 };
 $('#dns-test').onclick = () => send({ type: 'settings:test-dns' });
+
+// ------------------------------------------------------------ cofre (Bitwarden)
+
+const vaultDialog = $<HTMLDialogElement>('#vault-dialog');
+const LOCK_LABELS: [number, string][] = [[1, '1 minuto'], [5, '5 minutos'], [15, '15 minutos'], [30, '30 minutos'], [60, '1 hora'], [240, '4 horas']];
+$('#vault-lock-after').replaceChildren(...LOCK_LABELS.map(([m, t]) => el('option', { value: String(m), textContent: t })));
+
+/** Senhas e segredos saem dos campos assim que enviados. */
+const takeSecret = (sel: string) => { const i = $<HTMLInputElement>(sel); const v = i.value; i.value = ''; return v; };
+
+function renderVault(s: UiState): void {
+  const v = s.vault;
+  $('#vault-btn').classList.toggle('unlocked', v.status === 'unlocked');
+  $('#vault-btn').title = v.status === 'unlocked' ? `Bitwarden: desbloqueado (${v.count} logins)`
+    : v.status === 'locked' ? 'Bitwarden: bloqueado' : 'Bitwarden: conectar';
+  if (!vaultDialog.open) return;
+
+  $('#vault-connect').hidden = v.status !== 'disconnected';
+  $('#vault-locked').hidden = v.status !== 'locked';
+  $('#vault-unlocked').hidden = v.status !== 'unlocked';
+  $('#vault-no-keyring').hidden = v.canRemember;
+  $('#vault-account').textContent = `${v.email} — ${v.server}`;
+  const sync = v.lastSync ? new Date(v.lastSync).toLocaleString('pt-BR') : 'nunca';
+  $('#vault-summary').textContent = `${v.email} — ${v.server}: ${v.count} logins. Última sincronização: ${sync}.`;
+  const lock = $<HTMLSelectElement>('#vault-lock-after');
+  if (document.activeElement !== lock) lock.value = String(v.lockAfterMin);
+
+  const err = $('#vault-error');
+  err.hidden = !v.error;
+  err.textContent = v.error ?? '';
+  $('#vault-disconnect').hidden = v.status === 'disconnected';
+  const primary = $<HTMLButtonElement>('#vault-primary');
+  const secondary = $<HTMLButtonElement>('#vault-secondary');
+  primary.disabled = v.busy;
+  secondary.disabled = v.busy;
+  primary.textContent = v.busy ? 'Aguarde…' : v.status === 'disconnected' ? 'Conectar' : v.status === 'locked' ? 'Desbloquear' : 'Bloquear';
+  secondary.hidden = v.status !== 'unlocked';
+  secondary.textContent = 'Sincronizar';
+}
+
+function openVault(): void {
+  if (!state) return;
+  send({ type: 'layout:overlay', open: true });
+  vaultDialog.showModal();
+  renderVault(state);
+  const focus = state.vault.status === 'locked' ? '#vault-password' : state.vault.status === 'disconnected' ? '#vault-client-id' : null;
+  if (focus) $(focus).focus();
+}
+
+$('#vault-btn').onclick = openVault;
+vaultDialog.addEventListener('close', () => {
+  send({ type: 'layout:overlay', open: false });
+  for (const sel of ['#vault-client-secret', '#vault-connect-password', '#vault-password']) $<HTMLInputElement>(sel).value = '';
+});
+$('#vault-close').onclick = () => vaultDialog.close();
+$<HTMLSelectElement>('#vault-server').onchange = (e) => {
+  $('#vault-custom-row').hidden = (e.target as HTMLSelectElement).value !== 'custom';
+};
+$<HTMLSelectElement>('#vault-lock-after').onchange = (e) =>
+  send({ type: 'vault:lock-after', minutes: Number((e.target as HTMLSelectElement).value) });
+$('#vault-secondary').onclick = () => send({ type: 'vault:sync' });
+$('#vault-disconnect').onclick = () => {
+  const btn = $<HTMLButtonElement>('#vault-disconnect');
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Clique de novo: esquece a conta neste computador';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Desconectar'; }, 4000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = 'Desconectar';
+  send({ type: 'vault:disconnect' });
+};
+$('#vault-form').addEventListener('submit', (e) => {
+  e.preventDefault(); // o diálogo continua aberto: o resultado chega pelo estado
+  const v = state?.vault;
+  if (!v || v.busy) return;
+  if (v.status === 'disconnected') {
+    const choice = $<HTMLSelectElement>('#vault-server').value;
+    const server = choice === 'custom' ? $<HTMLInputElement>('#vault-custom').value.trim() : choice;
+    send({ type: 'vault:connect', server, clientId: $<HTMLInputElement>('#vault-client-id').value.trim(),
+      clientSecret: takeSecret('#vault-client-secret'), password: takeSecret('#vault-connect-password') });
+  } else if (v.status === 'locked') {
+    send({ type: 'vault:unlock', password: takeSecret('#vault-password') });
+  } else {
+    send({ type: 'vault:lock' });
+  }
+});
 
 // ------------------------------------------------------------ diálogo de grupo
 

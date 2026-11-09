@@ -4,6 +4,14 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Bitwarden nativo (sem extensão): conectar com a chave de API pessoal + senha mestra (bitwarden.com, bitwarden.eu ou servidor próprio/Vaultwarden). A senha mestra nunca sai do computador; o cofre fica cifrado na memória e senhas só são decifradas na hora do uso.
+- Bloqueio automático do cofre: após um tempo sem usar o computador (padrão 15 min), ao bloquear a tela, ao suspender e ao fechar o Apollo. Desbloqueio funciona sem internet (cópia local cifrada com o chaveiro do sistema).
+- Compatibilidade testada contra servidor real (Vaultwarden) e o CLI oficial do Bitwarden, inclusive contas Argon2id e itens de organização.
+
+### Corrigido
+- Elementos que deveriam estar escondidos em diálogos apareciam (ex.: "Temporário" ao editar um workspace).
+
 ## [0.4.0] - 2026-11-09
 
 ### Adicionado

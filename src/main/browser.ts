@@ -16,7 +16,7 @@ import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
+import type { MemoryReport, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -1009,6 +1009,15 @@ export class Browser {
 
   // ------------------------------------------------------------ estado para a UI
 
+  private vaultInfo: VaultStatusInfo = {
+    status: 'disconnected', email: null, server: null, count: 0, lastSync: null, lockAfterMin: 15, busy: false, error: null, canRemember: false,
+  };
+
+  setVault(info: VaultStatusInfo): void {
+    this.vaultInfo = info;
+    this.push();
+  }
+
   setSettings(patch: Partial<Omit<SettingsInfo, 'privacy'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
@@ -1075,6 +1084,7 @@ export class Browser {
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
       memory: this.memoryReport,
+      vault: this.vaultInfo,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }

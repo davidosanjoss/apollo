@@ -54,6 +54,12 @@ export function kdfFrom(obj: unknown): Kdf | null {
   return null;
 }
 
+/** Mesmo critério do serverUrls (https, ou http só em localhost), sem lançar. */
+export function validVaultServer(v: unknown): v is ServerChoice {
+  if (typeof v !== 'string' || v.length > 512) return false;
+  try { serverUrls(v); return true; } catch { return false; }
+}
+
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');

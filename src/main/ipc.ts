@@ -3,6 +3,8 @@ import type { PermissionKind, UiCommand } from '../shared/types';
 import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
+import { LOCK_OPTIONS_MIN } from './vault/service';
+import { validVaultServer } from './vault/api';
 
 /**
  * Toda mensagem da UI é validada: tem que vir do frame principal da janela do
@@ -22,6 +24,7 @@ const decision = (v: unknown) => v === 'allow' || v === 'deny';
 const id = (v: unknown): v is string => str(v, 64) && (v as string).length > 0;
 const groupColor = (v: unknown) => typeof v === 'string' && (GROUP_COLORS as readonly string[]).includes(v);
 const hibernate = (v: unknown) => v === undefined || (HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
+const password = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 1024;
 const url = (v: unknown): v is string => str(v, 8192) && /^(https?|apollo|file|about|data|view-source):/i.test(v as string);
 
 export function parseCommand(raw: unknown): UiCommand | null {
@@ -80,6 +83,14 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return ['secure', 'automatic', 'off'].includes(c.mode as string) && (c.dohUrl === null || validDohUrl(c.dohUrl))
         ? (c as UiCommand) : null;
     case 'settings:test-dns': return { type: c.type } as UiCommand;
+    case 'vault:connect':
+      return validVaultServer(c.server) && typeof c.clientId === 'string' && /^(user|organization)\.[\w-]{1,100}$/.test(c.clientId.trim())
+        && str(c.clientSecret, 256) && (c.clientSecret as string).trim() && password(c.password) ? (c as UiCommand) : null;
+    case 'vault:unlock': return password(c.password) ? (c as UiCommand) : null;
+    case 'vault:lock':
+    case 'vault:sync':
+    case 'vault:disconnect': return { type: c.type } as UiCommand;
+    case 'vault:lock-after': return (LOCK_OPTIONS_MIN as readonly unknown[]).includes(c.minutes) ? (c as UiCommand) : null;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'settings:memory-limit': return (MEMORY_LIMIT_OPTIONS_MB as readonly unknown[]).includes(c.mb) ? (c as UiCommand) : null;
     case 'layout:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;

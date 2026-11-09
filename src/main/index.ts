@@ -1,4 +1,5 @@
-import { app, BrowserWindow, components, ipcMain, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
@@ -17,6 +18,8 @@ import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
 import type { Cipher } from './session-cookies';
 import { resolveWindowState } from './window-state';
+import { BitwardenApi, serverUrls } from './vault/api';
+import { VaultService } from './vault/service';
 
 // ------------------------------------------------------------ perfil
 // App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
@@ -190,6 +193,21 @@ app.whenReady().then(async () => {
 
   const { win, browser } = createWindow(store);
 
+  // Bitwarden: requisições pela rede do Chromium (respeita o DNS seguro/Zero Trust).
+  const vault = new VaultService(
+    store.vaultStorage(),
+    systemCipher(),
+    (server, deviceId) => new BitwardenApi(serverUrls(server), (u, i) => net.fetch(u, i), { id: deviceId, name: 'Apollo', type: 14 }),
+    () => browser.setVault(vault.info()),
+    () => randomUUID(),
+  );
+  browser.setVault(vault.info());
+  // Bloqueio automático: tela bloqueada, suspensão e tempo ocioso do sistema.
+  powerMonitor.on('lock-screen', () => vault.lock());
+  powerMonitor.on('suspend', () => vault.lock());
+  setInterval(() => vault.checkIdle(powerMonitor.getSystemIdleTime()), 30_000).unref();
+  setInterval(() => { if (vault.unlocked) void vault.sync(); }, 30 * 60_000).unref();
+
   // DNS: o que está em uso, e mudanças pela tela de configurações.
   let settings: Settings = loadSettings();
   const showDns = (info: { provider?: string }) =>
@@ -224,6 +242,14 @@ app.whenReady().then(async () => {
       return showDns(applyDns(settings));
     }
     if (cmd.type === 'settings:test-dns') return void testDns();
+    switch (cmd.type) {
+      case 'vault:connect': return void vault.connect(cmd.server, cmd.clientId, cmd.clientSecret, cmd.password);
+      case 'vault:unlock': return void vault.unlock(cmd.password);
+      case 'vault:lock': return vault.lock();
+      case 'vault:sync': return void vault.sync();
+      case 'vault:disconnect': return vault.disconnect();
+      case 'vault:lock-after': return vault.setLockAfter(cmd.minutes);
+    }
     browser.handleCommand(cmd);
   });
 
@@ -246,6 +272,7 @@ app.whenReady().then(async () => {
   });
 
   app.on('will-quit', () => {
+    vault.lock();
     try { store.deleteTemporaryWorkspaces(); } catch { /* banco indisponível: apaga ao abrir */ }
     try { db.close(); } catch { /* já fechado */ }
   });

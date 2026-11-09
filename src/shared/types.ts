@@ -125,6 +125,20 @@ export interface SitePrivacy {
   blocked: { ads: number; trackers: number };
 }
 
+/** Estado do cofre do Bitwarden (nunca contém segredos). */
+export interface VaultStatusInfo {
+  status: 'disconnected' | 'locked' | 'unlocked';
+  email: string | null;
+  server: string | null;
+  count: number;
+  lastSync: number | null;
+  lockAfterMin: number;
+  busy: boolean;
+  error: string | null;
+  /** Há chaveiro do sistema: dá para lembrar a conexão entre reinícios. */
+  canRemember: boolean;
+}
+
 export type DnsMode = 'secure' | 'automatic' | 'off';
 
 export interface SettingsInfo {
@@ -147,6 +161,7 @@ export interface UiState {
   update: UpdateStatus | null;
   memory: MemoryReport | null;
   settings: SettingsInfo;
+  vault: VaultStatusInfo;
 }
 
 export type UiCommand =
@@ -177,6 +192,13 @@ export type UiCommand =
   /** Menu nativo do escudo da barra de endereço em (x, y). */
   | { type: 'privacy:menu'; x: number; y: number }
   | { type: 'settings:dns'; mode: DnsMode; dohUrl: string | null }
+  // Bitwarden. Segredos vão só neste sentido (UI → main) e nunca voltam no estado.
+  | { type: 'vault:connect'; server: string; clientId: string; clientSecret: string; password: string }
+  | { type: 'vault:unlock'; password: string }
+  | { type: 'vault:lock' }
+  | { type: 'vault:sync' }
+  | { type: 'vault:disconnect' }
+  | { type: 'vault:lock-after'; minutes: number }
   | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
