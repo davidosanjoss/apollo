@@ -59,6 +59,10 @@ global → workspace → site no workspace → aba (temporária)
 
 Interruptores independentes: anúncios, rastreadores, cookies de terceiros, limpeza de URL. Requisições de service workers (sem aba) usam a regra de site/workspace.
 
+- "Site" = domínio registrável (eTLD+1, via `tldts`): `outlook.office.com` → `office.com`.
+- Motores do Ghostery (`@ghostery/adblocker`), um para anúncios e outro para rastreadores, montados no build a partir das listas públicas (`scripts/build-filters.mjs`) e embutidos em `build/filters/`. Atualização semanal num `worker_thread` (`filters-worker`), gravada em `<userData>/filters`; usa-se o mais novo entre embutido e baixado.
+- Regras salvas em `privacy_rules` (global/workspace/site); a camada da aba fica só em memória. Cache em memória por workspace|site, invalidado a cada mudança (a verificação roda a cada requisição).
+
 ### D4: Hibernação de abas
 - Aba hibernada = WebContents destruído. Ficam url, título, favicon, histórico de navegação (`navigationHistory.restore`) e posição de rolagem.
 - **Nunca hiberna:** fixadas, tocando mídia, em chamada, marcadas "sempre ativo", com `beforeunload`.

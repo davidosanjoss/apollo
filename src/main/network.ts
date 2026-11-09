@@ -17,6 +17,8 @@ export interface RequestContext {
   workspaceId: string;
   /** Aba de origem; null para service workers, popups e requisições do próprio navegador. */
   tabId: string | null;
+  /** URL da página da aba (primeira parte), quando há aba. */
+  tabUrl: string | null;
 }
 
 export type Headers = Record<string, string | string[]>;
@@ -34,6 +36,7 @@ export class NetworkPipeline {
   constructor(
     private readonly modules: NetworkModule[],
     private readonly resolveTab: (webContentsId: number | undefined) => string | null,
+    private readonly resolveTabUrl: (tabId: string) => string | null = () => null,
   ) {}
 
   private run<T>(module: NetworkModule, hook: string, fn: () => T): T | undefined {
@@ -47,10 +50,10 @@ export class NetworkPipeline {
   }
 
   attach(ses: Session, workspaceId: string): void {
-    const ctxFor = (webContentsId: number | undefined): RequestContext => ({
-      workspaceId,
-      tabId: this.resolveTab(webContentsId),
-    });
+    const ctxFor = (webContentsId: number | undefined): RequestContext => {
+      const tabId = this.resolveTab(webContentsId);
+      return { workspaceId, tabId, tabUrl: tabId ? this.resolveTabUrl(tabId) : null };
+    };
 
     const before = this.modules.filter((m) => m.onBeforeRequest);
     if (before.length) {

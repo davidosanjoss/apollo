@@ -63,6 +63,18 @@ const MIGRATIONS: string[] = [
     saved_at     INTEGER NOT NULL
   );
   `,
+
+  /* v3: fase 3 — regras de privacidade em camadas */ `
+  -- global: ('', ''); workspace: (id, ''); site no workspace: (id, site).
+  -- Regras da aba são temporárias e ficam só em memória.
+  CREATE TABLE privacy_rules (
+    workspace_id TEXT NOT NULL DEFAULT '',
+    site         TEXT NOT NULL DEFAULT '',
+    feature      TEXT NOT NULL,
+    enabled      INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    PRIMARY KEY (workspace_id, site, feature)
+  );
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

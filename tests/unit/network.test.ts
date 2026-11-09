@@ -50,8 +50,17 @@ describe('NetworkPipeline', () => {
     new NetworkPipeline([mod], (id) => (id === 7 ? 'tab7' : null)).attach(ses, 'ws1');
     call(l.before, { webContentsId: 7 });
     call(l.before, {});
-    expect(seen).toHaveBeenNthCalledWith(1, { workspaceId: 'ws1', tabId: 'tab7' });
-    expect(seen).toHaveBeenNthCalledWith(2, { workspaceId: 'ws1', tabId: null });
+    expect(seen).toHaveBeenNthCalledWith(1, { workspaceId: 'ws1', tabId: 'tab7', tabUrl: null });
+    expect(seen).toHaveBeenNthCalledWith(2, { workspaceId: 'ws1', tabId: null, tabUrl: null });
+  });
+
+  it('contexto traz a URL da aba (primeira parte)', () => {
+    const { ses, l } = fakeSession();
+    const seen = vi.fn();
+    new NetworkPipeline([{ name: 'spy', onBeforeRequest: (_d, ctx) => { seen(ctx.tabUrl); } }],
+      (id) => (id === 7 ? 'tab7' : null), (tab) => (tab === 'tab7' ? 'https://site.com/' : null)).attach(ses, 'w');
+    call(l.before, { webContentsId: 7 });
+    expect(seen).toHaveBeenCalledWith('https://site.com/');
   });
 
   it('o primeiro módulo que cancela/redireciona decide; os seguintes não rodam', () => {

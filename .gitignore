@@ -18,3 +18,4 @@ Partitions/
 .idea/
 .DS_Store
 Thumbs.db
+.cache/

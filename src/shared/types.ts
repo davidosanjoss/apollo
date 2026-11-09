@@ -8,6 +8,8 @@ export interface WorkspaceInfo {
   home: string;
   /** Minutos sem uso para hibernar abas (0 = nunca). */
   hibernateAfterMin: number;
+  /** Padrões do workspace (null = segue o global). */
+  privacy: Record<PrivacyFeature, boolean | null>;
 }
 
 /** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
@@ -95,6 +97,30 @@ export interface MemoryReport {
 /** Opções do limite de memória do Apollo (MB; 0 = sem limite). */
 export const MEMORY_LIMIT_OPTIONS_MB = [0, 1024, 2048, 3072, 4096, 6144, 8192] as const;
 
+// ------------------------------------------------------------ privacidade
+
+export type PrivacyFeature = 'ads' | 'trackers';
+export type PrivacyToggles = Record<PrivacyFeature, boolean>;
+/** Camada de onde veio a decisão (default = padrão do Apollo). */
+export type PrivacyLevel = 'tab' | 'site' | 'workspace' | 'global' | 'default';
+
+export const PRIVACY_LABELS: Record<PrivacyFeature, string> = {
+  ads: 'Bloquear anúncios',
+  trackers: 'Bloquear rastreadores',
+};
+
+/** Proteção do site da aba ativa (painel ⚙). */
+export interface SitePrivacy {
+  site: string;
+  toggles: PrivacyToggles;
+  source: Record<PrivacyFeature, PrivacyLevel>;
+  /** Regras salvas para este site neste workspace (null = segue o workspace). */
+  siteRules: Record<PrivacyFeature, boolean | null>;
+  /** Proteção pausada só nesta aba (até fechar). */
+  tabPaused: boolean;
+  blocked: { ads: number; trackers: number };
+}
+
 export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
@@ -104,6 +130,7 @@ export interface UiState {
   permissionPrompt: PermissionPrompt | null;
   /** Permissões do site da aba ativa (para o painel ao lado da barra de endereço). */
   sitePermissions: SitePermissions | null;
+  sitePrivacy: SitePrivacy | null;
   update: UpdateStatus | null;
   memory: MemoryReport | null;
 }
@@ -127,6 +154,10 @@ export type UiCommand =
   /** Mostra a aba, trocando de workspace se preciso (monitor de memória). */
   | { type: 'tab:reveal'; tabId: string }
   | { type: 'memory:toggle'; open: boolean }
+  /** Regra de privacidade: site = site da aba ativa no workspace ativo; null = volta a herdar. */
+  | { type: 'privacy:set'; scope: 'global' | 'workspace' | 'site'; feature: PrivacyFeature; enabled: boolean | null; workspaceId?: string }
+  /** Pausa toda a proteção só na aba ativa, até ela fechar. */
+  | { type: 'privacy:pause-tab'; paused: boolean }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }

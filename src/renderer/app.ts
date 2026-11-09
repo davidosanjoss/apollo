@@ -1,8 +1,8 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import type { GroupInfo, PermissionDecision, PrivacyFeature, PrivacyLevel, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -241,12 +241,49 @@ function renderPermissionPrompt(s: UiState): void {
   $('#permission-text').textContent = `${host} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
 }
 
+const LEVEL_LABEL: Record<PrivacyLevel, string> = {
+  default: 'padrão', global: 'global', workspace: 'do workspace', site: 'deste site', tab: 'nesta aba',
+};
+
+/** Select de 3 estados: herdar (mostrando o valor herdado) / bloquear / permitir. */
+function triSelect(value: boolean | null, inherited: string, onChange: (v: boolean | null) => void): HTMLSelectElement {
+  const select = el('select');
+  for (const [v, label] of [['', `Padrão (${inherited})`], ['1', 'Bloquear'], ['0', 'Permitir']]) {
+    select.appendChild(el('option', { value: v, textContent: label, selected: (value === null ? '' : value ? '1' : '0') === v }));
+  }
+  select.onchange = () => onChange(select.value === '' ? null : select.value === '1');
+  return select;
+}
+
 function renderSiteBar(s: UiState): void {
   const info = s.sitePermissions;
+  const p = s.sitePrivacy;
   $('#site-btn').hidden = !info;
+  const total = p ? p.blocked.ads + p.blocked.trackers : 0;
+  const badge = $('#blocked-count');
+  badge.hidden = !p || total === 0 || p.tabPaused;
+  badge.textContent = total > 99 ? '99+' : String(total);
   const bar = $('#site-bar');
   bar.hidden = !(siteBarOpen && info);
   if (!info || bar.hidden) return;
+
+  $('#site-privacy').hidden = !p;
+  if (p) {
+    $('#site-blocked').textContent = p.tabPaused
+      ? 'Proteção pausada nesta aba'
+      : `Bloqueados: ${p.blocked.ads} anúncios, ${p.blocked.trackers} rastreadores`;
+    $<HTMLInputElement>('#site-pause').checked = p.tabPaused;
+    $('#site-privacy-entries').replaceChildren(...(Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
+      // Valor herdado = o que vale sem a regra do site (e sem a pausa da aba).
+      const inheritedOn = p.siteRules[feature] === null && p.source[feature] !== 'tab' ? p.toggles[feature] : null;
+      const inherited = inheritedOn === null ? 'workspace' : `${inheritedOn ? 'bloquear' : 'permitir'}, ${LEVEL_LABEL[p.source[feature]]}`;
+      const label = el('label', { textContent: PRIVACY_LABELS[feature] });
+      label.dataset.feature = feature;
+      label.appendChild(triSelect(p.siteRules[feature], inherited, (enabled) =>
+        send({ type: 'privacy:set', scope: 'site', feature, enabled })));
+      return label;
+    }));
+  }
 
   $('#site-origin').textContent = new URL(info.origin).host;
   $('#site-entries').replaceChildren(...info.entries.map(({ kind, decision }) => {
@@ -313,6 +350,13 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
+  // Padrões de privacidade do workspace (só ao editar: o novo herda o global).
+  $('#ws-privacy').replaceChildren(...(ws ? (Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
+    const label = el('label', { textContent: PRIVACY_LABELS[feature] });
+    label.appendChild(triSelect(ws.privacy[feature], 'global', (enabled) =>
+      send({ type: 'privacy:set', scope: 'workspace', workspaceId: ws.id, feature, enabled })));
+    return label;
+  }) : []));
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
   send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
@@ -394,6 +438,8 @@ $('#forward').onclick = () => send({ type: 'tab:forward' });
 $('#reload').onclick = () => send({ type: 'tab:reload' });
 
 $('#site-btn').onclick = () => { siteBarOpen = !siteBarOpen; render(); };
+$<HTMLInputElement>('#site-pause').onchange = (e) =>
+  send({ type: 'privacy:pause-tab', paused: (e.target as HTMLInputElement).checked });
 $('#site-close').onclick = () => { siteBarOpen = false; render(); };
 
 const answerPermission = (decision: PermissionDecision) => {

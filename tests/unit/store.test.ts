@@ -297,3 +297,36 @@ describe('fase 2c: tempo de hibernação por workspace', () => {
     expect(store.getWorkspace('a')).toMatchObject({ name: 'A2', hibernateAfterMin: 120 });
   });
 });
+
+describe('fase 3: regras de privacidade', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('camadas global, workspace e site são independentes', () => {
+    store.setPrivacyRule(null, null, 'ads', false);
+    store.setPrivacyRule('a', null, 'trackers', false);
+    store.setPrivacyRule('a', 'office.com', 'trackers', true);
+    expect(store.getPrivacyLayers('a', 'office.com')).toEqual({ global: { ads: false }, workspace: { trackers: false }, site: { trackers: true } });
+    expect(store.getPrivacyLayers('b', 'office.com')).toEqual({ global: { ads: false }, workspace: {}, site: {} });
+    expect(store.getPrivacyLayers('a', null).site).toEqual({});
+  });
+
+  it('sobrescreve e remove (null = volta a herdar)', () => {
+    store.setPrivacyRule('a', 'x.com', 'ads', false);
+    store.setPrivacyRule('a', 'x.com', 'ads', true);
+    expect(store.getPrivacyLayers('a', 'x.com').site).toEqual({ ads: true });
+    store.setPrivacyRule('a', 'x.com', 'ads', null);
+    expect(store.getPrivacyLayers('a', 'x.com').site).toEqual({});
+  });
+
+  it('excluir o workspace apaga as regras dele', () => {
+    store.setPrivacyRule('a', 'x.com', 'ads', false);
+    store.setPrivacyRule('a', null, 'ads', false);
+    store.deleteWorkspace('a');
+    store.createWorkspace({ id: 'a', name: 'A', color: '#000000', home: '' });
+    expect(store.getPrivacyLayers('a', 'x.com')).toEqual({ global: {}, workspace: {}, site: {} });
+  });
+
+  it('regra de site sem workspace é erro de programação', () => {
+    expect(() => store.setPrivacyRule(null, 'x.com', 'ads', false)).toThrow();
+  });
+});

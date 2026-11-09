@@ -22,7 +22,7 @@
       <button id="forward" class="icon-btn" title="Avançar (Alt+→)">→</button>
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
-      <button id="site-btn" class="icon-btn" title="Permissões do site" hidden>⚙</button>
+      <button id="site-btn" class="icon-btn" title="Proteção e permissões do site" hidden>⚙<span id="blocked-count" hidden></span></button>
       <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
     </nav>
@@ -37,6 +37,11 @@
 
     <div id="site-bar" class="bar" hidden>
       <strong id="site-origin"></strong>
+      <div id="site-privacy">
+        <span id="site-blocked"></span>
+        <div id="site-privacy-entries"></div>
+        <label class="remember"><input type="checkbox" id="site-pause"> Pausar proteção nesta aba</label>
+      </div>
       <div id="site-entries"></div>
       <span class="spacer"></span>
       <button id="site-close">Fechar</button>
@@ -75,6 +80,7 @@
       <label>Cor <input id="ws-color" type="color" value="#7c5cff"></label>
       <label>Página inicial <input id="ws-home" placeholder="Vazio = página inicial do Apollo" autocomplete="off"></label>
       <label>Hibernar abas paradas após <select id="ws-hibernate"></select></label>
+      <div id="ws-privacy"></div>
       <div class="dialog-actions">
         <button type="button" id="ws-delete" class="danger">Excluir workspace</button>
         <span class="spacer"></span>

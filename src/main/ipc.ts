@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 
 /**
@@ -67,6 +67,11 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'group:new-tab':
     case 'group:close': return id(c.groupId) ? (c as UiCommand) : null;
     case 'group:menu': return id(c.groupId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'privacy:set':
+      return ['global', 'workspace', 'site'].includes(c.scope as string) && typeof c.feature === 'string'
+        && Object.hasOwn(PRIVACY_LABELS, c.feature) && (c.enabled === null || typeof c.enabled === 'boolean')
+        && (c.workspaceId === undefined || id(c.workspaceId)) ? (c as UiCommand) : null;
+    case 'privacy:pause-tab': return typeof c.paused === 'boolean' ? (c as UiCommand) : null;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'settings:memory-limit': return (MEMORY_LIMIT_OPTIONS_MB as readonly unknown[]).includes(c.mb) ? (c as UiCommand) : null;
     case 'layout:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;

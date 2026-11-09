@@ -5,6 +5,8 @@ import { Store } from './store';
 import { Browser } from './browser';
 import { shortcutFor } from './shortcuts';
 import { NetworkPipeline, gpcModule } from './network';
+import { Blocker, blockerModule } from './privacy/blocker';
+import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
 import { loadSettings, applyDns } from './settings';
@@ -100,7 +102,16 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   let browser: Browser | null = null;
-  const pipeline = new NetworkPipeline([gpcModule], (id) => browser?.tabIdOfWebContentsId(id) ?? null);
+  const blocker = new Blocker(loadEngines(app.getPath('userData')));
+  scheduleFilterUpdates(app.getPath('userData'), (engines) => blocker.setEngines(engines));
+  const pipeline = new NetworkPipeline(
+    [blockerModule(blocker, {
+      togglesFor: (ctx, sourceUrl) => browser?.privacyForRequest(ctx, sourceUrl) ?? { ads: true, trackers: true },
+      onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind),
+    }), gpcModule],
+    (id) => browser?.tabIdOfWebContentsId(id) ?? null,
+    (tabId) => browser?.tabUrlOf(tabId) ?? null,
+  );
   browser = new Browser(win, store, pipeline, systemCipher());
   const b = browser;
 
