@@ -26,6 +26,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Fechar aba ou trocar de workspace exigia dois cliques quando a barra de endereço estava focada (ex.: em uma aba nova).
 - Barra de endereço: `localhost:3000` e `dominio.com:8443` não abriam; endereços IP (ex.: `192.168.0.1`) iam para a pesquisa; textos como `c++: dúvida` não pesquisavam.
 - Um `state.json` corrompido impedia o Apollo de abrir.
+- Ao recusar um banco de uma versão mais nova, o arquivo ficava aberto (no Windows, travado).
 - A validação de comandos da interface aceitava tipos de permissão inválidos (ex.: `toString`).
 
 ### Interno

@@ -54,6 +54,17 @@ const MIGRATIONS: string[] = [
 
 export function openDatabase(file: string): DatabaseSync {
   const db = new DatabaseSync(file);
+  try {
+    migrate(db);
+  } catch (err) {
+    // Sem fechar, o arquivo fica travado (no Windows não dá nem para apagar/restaurar).
+    db.close();
+    throw err;
+  }
+  return db;
+}
+
+function migrate(db: DatabaseSync): void {
   db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;');
 
   const { user_version: current } = db.prepare('PRAGMA user_version').get() as { user_version: number };
@@ -71,5 +82,4 @@ export function openDatabase(file: string): DatabaseSync {
       throw err;
     }
   }
-  return db;
 }

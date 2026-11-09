@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,5 +36,17 @@ describe('openDatabase', () => {
     raw.exec('PRAGMA user_version = 999');
     raw.close();
     expect(() => openDatabase(file)).toThrow(/versão mais nova/);
+  });
+
+  // Regressão: o erro deixava o arquivo aberto; no Windows ele ficava travado
+  // (EPERM ao apagar/restaurar o banco). Só reproduz no Windows (CI).
+  it('fecha o arquivo quando recusa o banco', () => {
+    const t = tempDir(); cleanup = t.cleanup;
+    const file = path.join(t.dir, 'apollo.db');
+    const raw = new DatabaseSync(file);
+    raw.exec('PRAGMA user_version = 999');
+    raw.close();
+    expect(() => openDatabase(file)).toThrow();
+    expect(() => fs.rmSync(file)).not.toThrow();
   });
 });
