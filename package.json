@@ -13,7 +13,8 @@
     "dist:win": "node scripts/build.mjs --prod && electron-builder --win --publish never",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node scripts/build.mjs && vitest run -c vitest.e2e.config.ts"
+    "test:e2e": "node scripts/build.mjs && vitest run -c vitest.e2e.config.ts",
+    "check": "scripts/check.sh"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",

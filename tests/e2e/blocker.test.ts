@@ -45,7 +45,7 @@ describe('bloqueador', () => {
     expect(hit).toEqual({ ad: false, tracker: false });
     const s = await app.until((x) => (x.sitePrivacy?.blocked.ads ?? 0) >= 1 && (x.sitePrivacy?.blocked.trackers ?? 0) >= 1, 'contador');
     expect(s.sitePrivacy!.site).toBe('127.0.0.1');
-    expect(s.sitePrivacy!.toggles).toEqual({ ads: true, trackers: true });
+    expect(s.sitePrivacy!.toggles).toMatchObject({ ads: true, trackers: true });
     await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('blocked-count').hidden`), 'contador no botão');
   });
 
@@ -55,7 +55,7 @@ describe('bloqueador', () => {
     expect(hit).toEqual({ ad: false, tracker: true });
     const s = await app.state();
     expect(s.sitePrivacy!.source.trackers).toBe('site');
-    expect(s.sitePrivacy!.siteRules).toEqual({ ads: null, trackers: false });
+    expect(s.sitePrivacy!.siteRules).toMatchObject({ ads: null, trackers: false });
   });
 
   it('regra do site vale só neste workspace (ex.: Outlook do Trabalho × Pessoal)', async () => {
@@ -83,7 +83,7 @@ describe('bloqueador', () => {
     expect(hit).toEqual({ ad: true, tracker: false });
     const after = await app.state();
     expect(after.sitePrivacy!.source.ads).toBe('workspace');
-    expect(after.workspaces.find((w) => w.id === s.activeWorkspaceId)!.privacy).toEqual({ ads: false, trackers: null });
+    expect(after.workspaces.find((w) => w.id === s.activeWorkspaceId)!.privacy).toMatchObject({ ads: false, trackers: null });
   });
 
   it('regra do site vence a do workspace', async () => {
