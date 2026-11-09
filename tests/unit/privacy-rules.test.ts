@@ -5,19 +5,20 @@ const layers = (over: Partial<Layers> = {}): Layers => ({ global: {}, workspace:
 
 describe('resolve (camadas)', () => {
   it('sem regras: padrão do Apollo (tudo bloqueado)', () => {
-    expect(resolve(layers())).toEqual({ toggles: DEFAULT_TOGGLES, source: { ads: 'default', trackers: 'default' } });
-    expect(DEFAULT_TOGGLES).toEqual({ ads: true, trackers: true });
+    expect(resolve(layers())).toEqual({ toggles: DEFAULT_TOGGLES,
+      source: { ads: 'default', trackers: 'default', thirdPartyCookies: 'default', urlCleaning: 'default' } });
+    expect(DEFAULT_TOGGLES).toEqual({ ads: true, trackers: true, thirdPartyCookies: true, urlCleaning: true });
   });
 
   it('a camada mais específica vence, por interruptor', () => {
     const r = resolve(layers({ global: { ads: false, trackers: false }, workspace: { trackers: true }, site: { ads: true } }));
-    expect(r.toggles).toEqual({ ads: true, trackers: true });
-    expect(r.source).toEqual({ ads: 'site', trackers: 'workspace' });
+    expect(r.toggles).toMatchObject({ ads: true, trackers: true });
+    expect(r.source).toMatchObject({ ads: 'site', trackers: 'workspace' });
   });
 
   it('aba (temporária) vence tudo', () => {
     const r = resolve(layers({ site: { ads: true, trackers: true }, tab: { ads: false, trackers: false } }));
-    expect(r.toggles).toEqual({ ads: false, trackers: false });
+    expect(r.toggles).toMatchObject({ ads: false, trackers: false });
     expect(r.source.ads).toBe('tab');
   });
 

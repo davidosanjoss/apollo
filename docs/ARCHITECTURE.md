@@ -62,6 +62,8 @@ Interruptores independentes: anúncios, rastreadores, cookies de terceiros, limp
 - "Site" = domínio registrável (eTLD+1, via `tldts`): `outlook.office.com` → `office.com`.
 - Motores do Ghostery (`@ghostery/adblocker`), um para anúncios e outro para rastreadores, montados no build a partir das listas públicas (`scripts/build-filters.mjs`) e embutidos em `build/filters/`. Atualização semanal num `worker_thread` (`filters-worker`), gravada em `<userData>/filters`; usa-se o mais novo entre embutido e baixado.
 - Cosméticos e scriptlets: preload próprio das abas (`src/preload/tab.ts`, sem nada exposto à página). O pedido inicial é síncrono (`sendSync`) para os scriptlets rodarem antes dos scripts da página; todos vão num único script (como o uBlock), senão scriptlets que interceptam a mesma função (ex.: dois `json-prune`) se encadeiam e quebram a página. O motor inclui os recursos do uBlock (`resources.json`), sem os quais não há scriptlets.
+- Cookies de terceiros: na rede (remove `Cookie`/`Set-Cookie` de requisições a outro site), com grupos de sites da mesma empresa tratados como uma parte só (`third-party.ts`). Limitação: `document.cookie` dentro de iframes de terceiros não é bloqueado.
+- Limpeza de URL: só navegação principal GET, regra do site de destino (`url-cleaning.ts`).
 - Regras salvas em `privacy_rules` (global/workspace/site); a camada da aba fica só em memória. Cache em memória por workspace|site, invalidado a cada mudança (a verificação roda a cada requisição).
 
 ### D4: Hibernação de abas

@@ -6,7 +6,10 @@ import type { PrivacyFeature, PrivacyLevel, PrivacyToggles } from '../../shared/
 
 export type Overrides = Partial<PrivacyToggles>;
 
-export const DEFAULT_TOGGLES: PrivacyToggles = { ads: true, trackers: true };
+export const DEFAULT_TOGGLES: PrivacyToggles = { ads: true, trackers: true, thirdPartyCookies: true, urlCleaning: true };
+
+/** Pausar a proteção numa aba: tudo desligado. */
+export const ALL_OFF: PrivacyToggles = { ads: false, trackers: false, thirdPartyCookies: false, urlCleaning: false };
 
 export interface Layers {
   global: Overrides;

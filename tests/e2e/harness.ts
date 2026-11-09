@@ -37,16 +37,20 @@ export interface TestSite {
   thirdParty: string;
   /** Caminhos que chegaram ao servidor (para provar que algo foi bloqueado na rede). */
   hits: string[];
+  /** Último cabeçalho Cookie recebido por caminho. */
+  cookies: Map<string, string>;
   close: () => Promise<void>;
 }
 
 /** Sites falsos: /page?title=X, /headers (eco), /set-cookie?v=X, /cookie. */
 export async function startSite(): Promise<TestSite> {
   const hits: string[] = [];
+  const cookies = new Map<string, string>();
   let port = 0;
   const server = http.createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://x');
     hits.push(u.pathname);
+    cookies.set(u.pathname, req.headers.cookie ?? '');
     const html = (body: string, title = 'Teste') => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(`<!doctype html><title>${title}</title><body>${body}</body>`);
@@ -63,6 +67,19 @@ export async function startSite(): Promise<TestSite> {
           try { window.prunado = JSON.stringify(JSON.parse('{"anuncioA":1,"anuncioB":2,"video":3}')); } catch (e) { window.prunado = 'erro: ' + e.message; }
           setTimeout(() => { const d = document.createElement('div'); d.className = 'ad-slot-generico'; d.textContent = 'TARDIO';
             document.body.appendChild(d); }, 300);</script>`, 'cosmetic');
+      case '/set-cookie-3p':
+        // Cookie que PODE ir em requisições de terceiros (SameSite=None; localhost conta como seguro).
+        res.writeHead(200, {
+          'content-type': 'image/gif',
+          'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
+        });
+        return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/pixel':
+        res.writeHead(200, { 'content-type': 'image/gif' });
+        return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/embed':
+        // Página em 127.0.0.1 que pede uma imagem a localhost (terceiro).
+        return html(`<img src="http://localhost:${port}${u.searchParams.get('src') ?? '/pixel'}">`, u.searchParams.get('title') ?? 'embed');
       case '/ads/banner.js':
         res.writeHead(200, { 'content-type': 'text/javascript' });
         return res.end('window.anuncioCarregou = true;');
@@ -114,6 +131,7 @@ export async function startSite(): Promise<TestSite> {
     url: `http://127.0.0.1:${port}`,
     thirdParty: `http://localhost:${port}`,
     hits,
+    cookies,
     close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => r()); }),
   };
 }

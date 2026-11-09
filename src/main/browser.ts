@@ -4,7 +4,7 @@ import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
-import { resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
+import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
 import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
@@ -20,6 +20,10 @@ import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
 
 const MAX_CLOSED_TABS = 25;
+
+/** Regras salvas de uma camada, com null onde não há regra (herda). */
+const nullable = (o: Overrides): Record<PrivacyFeature, boolean | null> =>
+  Object.fromEntries((Object.keys(DEFAULT_TOGGLES) as PrivacyFeature[]).map((f) => [f, o[f] ?? null])) as Record<PrivacyFeature, boolean | null>;
 
 // Só para testes: acelerar o relógio da hibernação (ver tests/e2e/hibernation.test.ts).
 const minuteMs = () => Number(process.env.APOLLO_TEST_MINUTE_MS) || 60_000;
@@ -399,7 +403,7 @@ export class Browser {
       layers = this.store.getPrivacyLayers(workspaceId, site);
       this.privacyCache.set(key, layers);
     }
-    const tab: Overrides = tabId && this.pausedTabs.has(tabId) ? { ads: false, trackers: false } : {};
+    const tab: Overrides = tabId && this.pausedTabs.has(tabId) ? ALL_OFF : {};
     return resolvePrivacy({ ...layers, tab });
   }
 
@@ -452,7 +456,7 @@ export class Browser {
       site,
       toggles,
       source,
-      siteRules: { ads: rules.ads ?? null, trackers: rules.trackers ?? null },
+      siteRules: nullable(rules),
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
@@ -999,7 +1003,7 @@ export class Browser {
     return {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
-        return { id, name, color, home, hibernateAfterMin, privacy: { ads: w.ads ?? null, trackers: w.trackers ?? null } };
+        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w) };
       }),
       activeWorkspaceId: ws.id,
       tabs,

@@ -4,9 +4,11 @@ import { openDatabase } from './db';
 import { Store } from './store';
 import { Browser } from './browser';
 import { shortcutFor } from './shortcuts';
-import { NetworkPipeline, gpcModule } from './network';
+import { NetworkPipeline, gpcModule, type RequestContext } from './network';
 import { Blocker, blockerModule } from './privacy/blocker';
 import { parseFeatures } from './privacy/cosmetics';
+import { thirdPartyCookiesModule, urlCleaningModule } from './privacy/modules';
+import { DEFAULT_TOGGLES } from './privacy/rules';
 import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
@@ -105,11 +107,14 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
   let browser: Browser | null = null;
   const blocker = new Blocker(loadEngines(app.getPath('userData')));
   scheduleFilterUpdates(app.getPath('userData'), (engines) => blocker.setEngines(engines));
+  const togglesFor = (ctx: RequestContext, firstParty: string | null) => browser?.privacyForRequest(ctx, firstParty) ?? DEFAULT_TOGGLES;
   const pipeline = new NetworkPipeline(
-    [blockerModule(blocker, {
-      togglesFor: (ctx, sourceUrl) => browser?.privacyForRequest(ctx, sourceUrl) ?? { ads: true, trackers: true },
-      onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind),
-    }), gpcModule],
+    [
+      urlCleaningModule(togglesFor),
+      blockerModule(blocker, { togglesFor, onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind) }),
+      thirdPartyCookiesModule(togglesFor),
+      gpcModule,
+    ],
     (id) => browser?.tabIdOfWebContentsId(id) ?? null,
     (tabId) => browser?.tabUrlOf(tabId) ?? null,
   );

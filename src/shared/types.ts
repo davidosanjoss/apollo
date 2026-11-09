@@ -99,7 +99,7 @@ export const MEMORY_LIMIT_OPTIONS_MB = [0, 1024, 2048, 3072, 4096, 6144, 8192] a
 
 // ------------------------------------------------------------ privacidade
 
-export type PrivacyFeature = 'ads' | 'trackers';
+export type PrivacyFeature = 'ads' | 'trackers' | 'thirdPartyCookies' | 'urlCleaning';
 export type PrivacyToggles = Record<PrivacyFeature, boolean>;
 /** Camada de onde veio a decisão (default = padrão do Apollo). */
 export type PrivacyLevel = 'tab' | 'site' | 'workspace' | 'global' | 'default';
@@ -107,6 +107,8 @@ export type PrivacyLevel = 'tab' | 'site' | 'workspace' | 'global' | 'default';
 export const PRIVACY_LABELS: Record<PrivacyFeature, string> = {
   ads: 'Bloquear anúncios',
   trackers: 'Bloquear rastreadores',
+  thirdPartyCookies: 'Bloquear cookies de terceiros',
+  urlCleaning: 'Limpar rastreio dos links',
 };
 
 /** Proteção do site da aba ativa (painel ⚙). */
