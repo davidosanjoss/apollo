@@ -40,7 +40,10 @@ Teste unitário quando a lógica dá para isolar; integração quando o bug depe
   - `app.quit()` fecha como o usuário fecharia (grava cookies e banco), para testar reinícios.
 - Teclas injetadas via CDP **não** passam pelo `before-input-event` do Electron: atalhos são testados no unitário (`shortcutFor`) e a ação, pelo comando equivalente (`app.send`).
 
-`APOLLO_E2E_LOG=1 npm run test:e2e` mostra o log do Electron.
+No Linux os testes de integração rodam **sem abrir janelas** (`--ozone-platform=headless`: o Chromium desenha em memória), então dá para continuar usando o computador enquanto rodam.
+
+- `APOLLO_E2E_SHOW=1 npm run test:e2e` mostra as janelas (útil para depurar).
+- `APOLLO_E2E_LOG=1 npm run test:e2e` mostra o log do Electron.
 
 ### Variáveis só para testes
 

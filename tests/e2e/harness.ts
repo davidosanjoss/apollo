@@ -152,7 +152,17 @@ async function freePort(): Promise<number> {
 
 export function tempProfile(): { dir: string; cleanup: () => void } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apollo-e2e-'));
-  return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  return {
+    dir,
+    cleanup: () => {
+      // Processos auxiliares do Chromium podem gravar por alguns ms depois de o app sair.
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      } catch (err) {
+        console.warn(`[e2e] não consegui apagar ${dir}: ${(err as Error).message}`);
+      }
+    },
+  };
 }
 
 // Rede de segurança: se o processo de testes sair, nenhum Electron fica para trás.
@@ -166,7 +176,9 @@ export class Apollo {
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
   static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
     const port = await freePort();
-    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`], {
+    // Sem janelas na tela (Linux): o Chromium desenha em memória. APOLLO_E2E_SHOW=1 mostra as janelas.
+    const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
+    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`, ...headless], {
       env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });
