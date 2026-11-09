@@ -25,7 +25,7 @@ Rodar `npm start` e testar em workspaces diferentes:
 - [ ] YouTube logado
 - [ ] Outlook pessoal (outlook.live.com)
 - [ ] Outlook do trabalho (outlook.office.com), incluindo verificação de dispositivo/MFA
-- [ ] Outlook da faculdade, ao mesmo tempo que o do trabalho, sem um derrubar o outro
+- [x] Contas isoladas entre workspaces, logadas ao mesmo tempo sem uma derrubar a outra (validado em 2026-11-09)
 - [ ] Fechar e reabrir o Apollo: os logins continuam
 - [ ] Streaming com DRM (ex.: Netflix ou Spotify web) toca
 
