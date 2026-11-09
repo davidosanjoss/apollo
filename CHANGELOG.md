@@ -4,6 +4,13 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Página inicial própria (`apollo://home`): relógio, data e pesquisa, sem carregar nada externo.
+
+### Alterado
+- Primeira execução começa com um único workspace ("Principal") na página inicial, em vez de três workspaces abrindo o Outlook. Workspaces existentes são mantidos.
+- Desenvolvimento (`npm start`) usa um perfil separado (`apollo-dev`), sem tocar nos logins do app instalado.
+
 ## [0.1.0] - 2026-11-09
 
 Primeira versão: protótipo para validar a base. Ainda não recomendado para uso diário.

@@ -1,6 +1,7 @@
 'use strict';
 
-const DEFAULT_HOME = 'https://www.google.com';
+const DEFAULT_HOME = 'apollo://home';
+const isHome = (url) => !url || url.startsWith('apollo://home');
 const SEARCH_URL = 'https://www.google.com/search?q=';
 
 const $ = (sel) => document.querySelector(sel);
@@ -12,17 +13,12 @@ const webviews = new Map(); // tabId -> <webview>
 
 // ---------------------------------------------------------------- estado
 
+// Primeira execução: um único workspace genérico com a página inicial.
+// Quem já tem state.json mantém seus workspaces como estão.
 function defaultState() {
-  const make = (name, color, home) => {
-    const tab = { id: uid(), url: home, title: name };
-    return { id: uid(), name, color, home, tabs: [tab], activeTabId: tab.id };
-  };
-  const workspaces = [
-    make('Pessoal', '#7c5cff', 'https://outlook.live.com/mail/'),
-    make('Trabalho', '#0f9d58', 'https://outlook.office.com/mail/'),
-    make('Faculdade', '#f4b400', 'https://outlook.office.com/mail/'),
-  ];
-  return { activeWorkspaceId: workspaces[0].id, workspaces };
+  const tab = { id: uid(), url: DEFAULT_HOME, title: 'Nova aba' };
+  const ws = { id: uid(), name: 'Principal', color: '#7c5cff', home: DEFAULT_HOME, tabs: [tab], activeTabId: tab.id };
+  return { activeWorkspaceId: ws.id, workspaces: [ws] };
 }
 
 let saveTimer;
@@ -197,7 +193,7 @@ function render() {
   for (const [id, wv] of webviews) wv.classList.toggle('hidden', id !== tab?.id);
 
   const address = $('#address');
-  if (document.activeElement !== address) address.value = tab?.url || '';
+  if (document.activeElement !== address) address.value = isHome(tab?.url) ? '' : tab.url;
 }
 
 // ---------------------------------------------------------------- diálogo de workspace
@@ -275,7 +271,7 @@ $('#address').addEventListener('keydown', (e) => {
     e.target.blur();
     withActiveWebview((wv) => wv.focus());
   } else if (e.key === 'Escape') {
-    e.target.value = activeTab()?.url || '';
+    e.target.value = isHome(activeTab()?.url) ? '' : activeTab().url;
     e.target.blur();
   }
 });

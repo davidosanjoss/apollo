@@ -1,13 +1,36 @@
-const { app, BrowserWindow, ipcMain, session, components } = require('electron');
+const { app, BrowserWindow, ipcMain, session, components, protocol, net } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
 const { loadSettings, applyDns } = require('./settings');
 const { setupUpdater } = require('./updater');
 
 let mainWindow = null;
 
-// Perfil alternativo (testes/diagnóstico) sem tocar no perfil real.
-if (process.env.APOLLO_USER_DATA) app.setPath('userData', process.env.APOLLO_USER_DATA);
+// Perfis: o app instalado usa ~/.config/apollo; o código em desenvolvimento (npm start)
+// usa ~/.config/apollo-dev, para nunca mexer nos logins/sessão do uso real.
+if (process.env.APOLLO_USER_DATA) {
+  app.setPath('userData', process.env.APOLLO_USER_DATA);
+} else if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'apollo-dev'));
+}
+
+// Páginas internas: apollo://home → src/pages/home/index.html
+const PAGES_DIR = path.join(__dirname, 'pages');
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'apollo', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+function handleApolloProtocol(request) {
+  const url = new URL(request.url);
+  const rel = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+  const file = path.normalize(path.join(PAGES_DIR, url.hostname, rel));
+  // Bloqueia path traversal (apollo://home/../../main.js)
+  if (!file.startsWith(PAGES_DIR + path.sep) || !fs.existsSync(file)) {
+    return new Response('Página não encontrada', { status: 404 });
+  }
+  return net.fetch(pathToFileURL(file).toString());
+}
 
 const diagnoseArg = process.argv.find((a) => a.startsWith('--diagnose='));
 
@@ -26,7 +49,11 @@ const cleanUA = app.userAgentFallback
   .replace(/\sElectron\/\S+/i, '')
   .replace(/\sapollo\/\S+/i, '');
 app.userAgentFallback = cleanUA;
-app.on('session-created', (s) => s.setUserAgent(cleanUA));
+app.on('session-created', (s) => {
+  s.setUserAgent(cleanUA);
+  // Cada workspace é uma sessão própria; todas precisam servir as páginas internas.
+  if (!s.protocol.isProtocolHandled('apollo')) s.protocol.handle('apollo', handleApolloProtocol);
+});
 
 const statePath = () => path.join(app.getPath('userData'), 'state.json');
 
