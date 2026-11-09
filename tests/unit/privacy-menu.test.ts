@@ -44,6 +44,25 @@ describe('privacyMenu', () => {
   });
 });
 
+// Regressão: ao tirar a proteção da engrenagem, cookies de terceiros e limpeza de
+// links ficaram sem ajuste por site. Agora estão em "Mais proteções" no escudo.
+describe('mais proteções', () => {
+  it('cookies de terceiros e limpeza de links num submenu, também por site', () => {
+    const p = site({ toggles: { ...site().toggles, thirdPartyCookies: false }, siteRules: { ...site().siteRules, thirdPartyCookies: false } });
+    const more = privacyMenu(p).find((i) => i.kind === 'submenu')!;
+    expect(more.kind === 'submenu' && more.label).toBe('Mais proteções');
+    const items = more.kind === 'submenu' ? more.items : [];
+    expect(items).toMatchObject([
+      { kind: 'check', label: 'Bloquear cookies de terceiros (neste site)', checked: false,
+        command: { type: 'privacy:set', scope: 'site', feature: 'thirdPartyCookies', enabled: true } },
+      { kind: 'check', label: 'Limpar rastreio dos links', checked: true,
+        command: { type: 'privacy:set', scope: 'site', feature: 'urlCleaning', enabled: false } },
+    ]);
+    // Regra só em "mais proteções" também habilita voltar ao padrão.
+    expect(privacyMenu(p).find((i) => i.kind === 'action')).toMatchObject({ enabled: true });
+  });
+});
+
 describe('shieldState', () => {
   it('on / partial / off', () => {
     expect(shieldState(site())).toBe('on');

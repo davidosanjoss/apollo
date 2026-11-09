@@ -1,10 +1,10 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, PrivacyLevel, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
-import { shieldState } from '../shared/shield';
+import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 
@@ -19,7 +19,6 @@ let state: UiState | null = null;
 /** Aba cuja URL está na barra de endereço, e se o usuário editou o texto. */
 let addressTabId: string | null = null;
 let addressEdited = false;
-let siteBarOpen = false;
 let updateDismissed = false;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
@@ -243,10 +242,6 @@ function renderPermissionPrompt(s: UiState): void {
   $('#permission-text').textContent = `${host} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
 }
 
-const LEVEL_LABEL: Record<PrivacyLevel, string> = {
-  default: 'padrão', global: 'global', workspace: 'do workspace', site: 'deste site', tab: 'nesta aba',
-};
-
 /** Select de 3 estados: herdar (mostrando o valor herdado) / bloquear / permitir. */
 function triSelect(value: boolean | null, inherited: string, onChange: (v: boolean | null) => void): HTMLSelectElement {
   const select = el('select');
@@ -260,7 +255,15 @@ function triSelect(value: boolean | null, inherited: string, onChange: (v: boole
 function renderSiteBar(s: UiState): void {
   const info = s.sitePermissions;
   const p = s.sitePrivacy;
-  $('#site-btn').hidden = !info;
+
+  // Engrenagem: permissões do site (menu nativo, como o escudo).
+  const gear = $('#site-btn');
+  gear.hidden = !info;
+  if (info) {
+    gear.classList.toggle('custom', hasCustomPermissions(info));
+    gear.title = `Permissões em ${new URL(info.origin).host}`;
+  }
+
   // Escudo na barra de endereço: estado da proteção no domínio + contador.
   const shield = $('#shield-btn');
   shield.hidden = !p;
@@ -273,42 +276,6 @@ function renderSiteBar(s: UiState): void {
   const badge = $('#blocked-count');
   badge.hidden = !p || total === 0 || p.tabPaused;
   badge.textContent = total > 99 ? '99+' : String(total);
-  const bar = $('#site-bar');
-  bar.hidden = !(siteBarOpen && info);
-  if (!info || bar.hidden) return;
-
-  $('#site-privacy').hidden = !p;
-  if (p) {
-    $('#site-blocked').textContent = p.tabPaused
-      ? 'Proteção pausada nesta aba'
-      : `Bloqueados: ${p.blocked.ads} anúncios, ${p.blocked.trackers} rastreadores`;
-    $<HTMLInputElement>('#site-pause').checked = p.tabPaused;
-    $('#site-privacy-entries').replaceChildren(...(Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
-      // Valor herdado = o que vale sem a regra do site (e sem a pausa da aba).
-      const inheritedOn = p.siteRules[feature] === null && p.source[feature] !== 'tab' ? p.toggles[feature] : null;
-      const inherited = inheritedOn === null ? 'workspace' : `${inheritedOn ? 'bloquear' : 'permitir'}, ${LEVEL_LABEL[p.source[feature]]}`;
-      const label = el('label', { textContent: PRIVACY_LABELS[feature] });
-      label.dataset.feature = feature;
-      label.appendChild(triSelect(p.siteRules[feature], inherited, (enabled) =>
-        send({ type: 'privacy:set', scope: 'site', feature, enabled })));
-      return label;
-    }));
-  }
-
-  $('#site-origin').textContent = new URL(info.origin).host;
-  $('#site-entries').replaceChildren(...info.entries.map(({ kind, decision }) => {
-    const select = el('select');
-    for (const [value, label] of [['', 'Padrão'], ['allow', 'Permitir'], ['deny', 'Bloquear']]) {
-      select.appendChild(el('option', { value, textContent: label, selected: (decision ?? '') === value }));
-    }
-    select.onchange = () => send({
-      type: 'permission:set', origin: info.origin, kind,
-      decision: (select.value || null) as PermissionDecision | null,
-    });
-    const label = el('label', { textContent: PERMISSION_LABELS[kind] });
-    label.appendChild(select);
-    return label;
-  }));
 }
 
 function renderUpdate(s: UiState): void {
@@ -498,14 +465,12 @@ $('#back').onclick = () => send({ type: 'tab:back' });
 $('#forward').onclick = () => send({ type: 'tab:forward' });
 $('#reload').onclick = () => send({ type: 'tab:reload' });
 
-$('#site-btn').onclick = () => { siteBarOpen = !siteBarOpen; render(); };
-$('#shield-btn').onclick = () => {
-  const r = $('#shield-btn').getBoundingClientRect();
-  send({ type: 'privacy:menu', x: Math.round(r.left), y: Math.round(r.bottom) });
+const menuAt = (sel: string) => {
+  const r = $(sel).getBoundingClientRect();
+  return { x: Math.round(r.left), y: Math.round(r.bottom) };
 };
-$<HTMLInputElement>('#site-pause').onchange = (e) =>
-  send({ type: 'privacy:pause-tab', paused: (e.target as HTMLInputElement).checked });
-$('#site-close').onclick = () => { siteBarOpen = false; render(); };
+$('#site-btn').onclick = () => send({ type: 'permission:menu', ...menuAt('#site-btn') });
+$('#shield-btn').onclick = () => send({ type: 'privacy:menu', ...menuAt('#shield-btn') });
 
 const answerPermission = (decision: PermissionDecision) => {
   const promptId = $('#permission-bar').dataset.promptId;
@@ -542,7 +507,6 @@ $<HTMLInputElement>('#address').addEventListener('blur', () => render());
 
 window.apollo.onState((next) => {
   // Trocou de site: fecha o painel de permissões.
-  if (state && next.sitePermissions?.origin !== state.sitePermissions?.origin) siteBarOpen = false;
   state = next;
   render();
   if (pendingGroupEdit) openGroupDialog(pendingGroupEdit);

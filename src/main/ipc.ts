@@ -74,7 +74,8 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && (c.workspaceId === undefined || id(c.workspaceId)) ? (c as UiCommand) : null;
     case 'privacy:pause-tab': return typeof c.paused === 'boolean' ? (c as UiCommand) : null;
     case 'privacy:reset-site': return { type: c.type } as UiCommand;
-    case 'privacy:menu': return num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'privacy:menu':
+    case 'permission:menu': return num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'settings:dns':
       return ['secure', 'automatic', 'off'].includes(c.mode as string) && (c.dohUrl === null || validDohUrl(c.dohUrl))
         ? (c as UiCommand) : null;

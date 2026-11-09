@@ -36,6 +36,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'privacy:pause-tab', paused: true },
       { type: 'privacy:reset-site' },
       { type: 'privacy:menu', x: 10, y: 40 },
+      { type: 'permission:menu', x: 0, y: 40 },
       { type: 'settings:memory-limit', mb: 0 },
       { type: 'settings:memory-limit', mb: 4096 },
       { type: 'workspace:create', name: 'X', color: '#000000', home: '', hibernateAfterMin: 0 },
@@ -99,6 +100,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'privacy:set', scope: 'site', feature: 'ads', enabled: 'nao' },
       { type: 'privacy:pause-tab' },
       { type: 'privacy:menu', x: -1, y: 0 },
+      { type: 'permission:menu', x: 5 },
       { type: 'settings:memory-limit', mb: 5 },
       { type: 'settings:memory-limit', mb: '4096' },
     ];

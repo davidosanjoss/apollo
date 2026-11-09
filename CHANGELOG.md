@@ -6,10 +6,11 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ### Adicionado
 - Bloqueador de anúncios e rastreadores (motor do Ghostery; listas EasyList, EasyPrivacy e uBlock), com interruptores separados.
-- Regras em camadas: padrão global → workspace → site (dentro do workspace) → aba. Ex.: liberar rastreadores do Outlook só no workspace do Trabalho. Ajuste no painel ⚙ do site (com contador de bloqueados) e no diálogo do workspace; "Pausar proteção nesta aba" vale até a aba fechar.
+- Regras em camadas: padrão global → workspace → site (dentro do workspace) → aba. Ex.: liberar rastreadores do Outlook só no workspace do Trabalho. Ajuste no escudo da barra de endereço e no diálogo do workspace; "Pausar proteção nesta aba" vale até a aba fechar.
 - Filtros cosméticos (escondem os espaços de anúncio, inclusive os que aparecem depois) e scriptlets do uBlock (ex.: anúncios do YouTube), seguindo o mesmo interruptor "anúncios".
-- Escudo na barra de endereço: mostra a proteção do domínio (verde = anúncios e rastreadores bloqueados, amarelo = parcial, tracejado = liberado) e quantos itens foram bloqueados; o clique abre um menu para bloquear/liberar anúncios e rastreadores naquele domínio (sobrescrevendo o padrão), voltar ao padrão ou pausar só na aba.
-- Cookies de terceiros bloqueados (não são enviados nem gravados), tratando como uma parte só os sites da mesma empresa que dependem uns dos outros para login (Microsoft: Outlook/Office/Teams/login; Google: contas/Gmail/YouTube). Liberável por site no painel ⚙.
+- Escudo na barra de endereço: mostra a proteção do domínio (verde = anúncios e rastreadores bloqueados, amarelo = parcial, tracejado = liberado) e quantos itens foram bloqueados; o clique abre um menu para bloquear/liberar anúncios e rastreadores naquele domínio (sobrescrevendo o padrão; cookies de terceiros e limpeza de links em "Mais proteções"), voltar ao padrão ou pausar só na aba.
+- A engrenagem ao lado do endereço agora mostra só as permissões do site, num menu como o do escudo (destacada quando o site tem alguma permissão definida). A barra que abria embaixo foi removida.
+- Cookies de terceiros bloqueados (não são enviados nem gravados), tratando como uma parte só os sites da mesma empresa que dependem uns dos outros para login (Microsoft: Outlook/Office/Teams/login; Google: contas/Gmail/YouTube). Liberável por site no escudo (Mais proteções).
 - Limpeza de links: parâmetros de rastreamento (`utm_*`, `fbclid`, `gclid`, `msclkid`…) são removidos ao abrir uma página.
 - Configurações (⚙ na barra lateral): DNS — modo e endereço DoH (ex.: Cloudflare Zero Trust Gateway), aplicado na hora, com botão "Testar" — e padrões globais de privacidade.
 - Workspace temporário: logins e dados só na memória, nada gravado no disco; apagado ao fechar o Apollo.

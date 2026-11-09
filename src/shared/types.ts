@@ -172,7 +172,7 @@ export type UiCommand =
   | { type: 'privacy:set'; scope: 'global' | 'workspace' | 'site'; feature: PrivacyFeature; enabled: boolean | null; workspaceId?: string }
   /** Pausa toda a proteção só na aba ativa, até ela fechar. */
   | { type: 'privacy:pause-tab'; paused: boolean }
-  /** Volta o site da aba ativa ao padrão (remove as regras dele: anúncios e rastreadores). */
+  /** Volta o site da aba ativa ao padrão (remove todas as regras de proteção dele). */
   | { type: 'privacy:reset-site' }
   /** Menu nativo do escudo da barra de endereço em (x, y). */
   | { type: 'privacy:menu'; x: number; y: number }
@@ -200,6 +200,8 @@ export type UiCommand =
   | { type: 'layout:overlay'; open: boolean }
   | { type: 'permission:answer'; promptId: string; decision: PermissionDecision; remember: boolean }
   | { type: 'permission:set'; origin: string; kind: PermissionKind; decision: PermissionDecision | null }
+  /** Menu nativo da engrenagem (permissões do site da aba ativa) em (x, y). */
+  | { type: 'permission:menu'; x: number; y: number }
   | { type: 'update:download' }
   | { type: 'update:install' };
 
