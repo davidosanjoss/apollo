@@ -28,6 +28,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'tab:close':
     case 'tab:activate': return str(c.tabId, 64) ? (c as UiCommand) : null;
     case 'tab:navigate': return url(c.url) ? (c as UiCommand) : null;
+    case 'tab:reopen':
     case 'tab:back':
     case 'tab:forward':
     case 'tab:reload':

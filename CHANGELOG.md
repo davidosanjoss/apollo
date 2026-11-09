@@ -4,6 +4,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Logins que dependem de cookies de sessão (Microsoft/Outlook, SSO de empresa e faculdade) continuam ativos depois de fechar e abrir o Apollo. Os cookies ficam cifrados com o chaveiro do sistema; sem chaveiro, não são salvos.
+- Voltar/avançar e a posição de rolagem de cada aba são restaurados ao reabrir.
+- Ctrl+Shift+T reabre a última aba fechada, no mesmo lugar e com o histórico.
+- Tamanho, posição e estado maximizado da janela são lembrados (se o monitor sumiu, a janela abre centralizada).
+
 ## [0.2.0] - 2026-11-09
 
 ### Adicionado

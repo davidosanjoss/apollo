@@ -6,6 +6,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
   it('aceita comandos válidos', () => {
     const valid = [
       { type: 'tab:new' },
+      { type: 'tab:reopen' },
       { type: 'tab:new', url: 'https://example.com' },
       { type: 'tab:close', tabId: 'abc' },
       { type: 'tab:activate', tabId: 'abc' },

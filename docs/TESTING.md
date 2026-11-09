@@ -7,7 +7,7 @@
 | `npm run test:e2e` | Integração (`tests/e2e`): compila e abre o Apollo de verdade | ~5 s |
 | `npm run typecheck` | Tipos de `src/` e `tests/` | — |
 
-O CI roda tipos + unitários em todo push na `dev` e em PRs (Linux e Windows), e os de integração no Linux com tela virtual (`xvfb-run`). O release também roda os unitários antes de gerar os instaladores.
+O CI roda tipos + unitários em todo push na `dev` e em PRs (Linux e Windows), e os de integração no Linux com tela virtual e chaveiro do sistema (`scripts/ci-e2e.sh`: xvfb + gnome-keyring, necessário para os cookies de sessão). O release também roda os unitários antes de gerar os instaladores.
 
 ## Regra: todo bug ganha um teste de regressão
 
@@ -38,5 +38,6 @@ Teste unitário quando a lógica dá para isolar; integração quando o bug depe
   - `app.ui.mouseClick(seletor)` faz um clique real do mouse na interface.
   - `app.page(prefixoUrl)` conecta numa aba para executar JS dentro do site.
   - `app.quit()` fecha como o usuário fecharia (grava cookies e banco), para testar reinícios.
+- Teclas injetadas via CDP **não** passam pelo `before-input-event` do Electron: atalhos são testados no unitário (`shortcutFor`) e a ação, pelo comando equivalente (`app.send`).
 
 `APOLLO_E2E_LOG=1 npm run test:e2e` mostra o log do Electron.

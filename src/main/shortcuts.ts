@@ -10,7 +10,7 @@ export interface KeyInput {
 }
 
 export type ShortcutAction =
-  | 'new-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
+  | 'new-tab' | 'reopen-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
   | 'next-tab' | 'prev-tab' | `workspace-${number}`;
 
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
@@ -18,6 +18,7 @@ export function shortcutFor(input: KeyInput): ShortcutAction | null {
   const mod = input.control || input.meta;
   const k = input.key.toLowerCase();
   if (mod && !input.shift && k === 't') return 'new-tab';
+  if (mod && input.shift && k === 't') return 'reopen-tab';
   if (mod && !input.shift && k === 'w') return 'close-tab';
   if (mod && !input.shift && k === 'l') return 'focus-address';
   if ((mod && k === 'r') || input.key === 'F5') return 'reload';

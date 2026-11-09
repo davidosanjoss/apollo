@@ -185,3 +185,55 @@ describe('importLegacyState (v0.1.0 → SQLite)', () => {
     expect(fs.existsSync(file)).toBe(true);
   });
 });
+
+describe('fase 2: posição, histórico e cookies de sessão', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('insertTabAt insere na posição exata (início, meio, fim)', () => {
+    tab('t1', 'a'); tab('t2', 'a');
+    store.insertTabAt({ id: 'x', workspaceId: 'a', url: 'https://x.com/', title: 'x' }, 0);
+    expect(order('a')).toEqual(['x', 't1', 't2']);
+    store.insertTabAt({ id: 'y', workspaceId: 'a', url: 'https://y.com/', title: 'y' }, 2);
+    expect(order('a')).toEqual(['x', 't1', 'y', 't2']);
+    store.insertTabAt({ id: 'z', workspaceId: 'a', url: 'https://z.com/', title: 'z' }, 99);
+    expect(order('a')).toEqual(['x', 't1', 'y', 't2', 'z']);
+    expect(store.tabIndex('y')).toBe(2);
+    expect(store.tabIndex('nao-existe')).toBe(-1);
+  });
+
+  // Regressão: insertTabAt usava o índice como posição; depois de excluir abas
+  // (posições com buracos) a aba reaberta ia para o lugar errado.
+  it('índice continua certo depois de excluir abas (posições com buracos)', () => {
+    tab('t1', 'a'); tab('t2', 'a'); tab('t3', 'a');
+    store.deleteTab('t1');
+    expect(store.tabIndex('t3')).toBe(1);
+    store.insertTabAt({ id: 'n', workspaceId: 'a', url: 'https://n.com/', title: 'n' }, 1);
+    expect(order('a')).toEqual(['t2', 'n', 't3']);
+  });
+
+  it('histórico da aba é salvo, higienizado e lido', () => {
+    tab('t1', 'a');
+    expect(store.getTab('t1')!.history).toBeNull();
+    store.setTabHistory('t1', { index: 1, entries: [{ url: 'https://a.com/', title: 'A', pageState: 'ps' }, { url: 'https://b.com/', title: 'B' }] });
+    expect(store.getTab('t1')!.history).toEqual({ index: 1, entries: [{ url: 'https://a.com/', title: 'A', pageState: 'ps' }, { url: 'https://b.com/', title: 'B' }] });
+    store.setTabHistory('t1', null);
+    expect(store.getTab('t1')!.history).toBeNull();
+  });
+
+  it('aba nova pode nascer com histórico (reabrir aba fechada)', () => {
+    const t = store.insertTabAt({ id: 'r', workspaceId: 'a', url: 'https://b.com/', title: 'B',
+      history: { index: 1, entries: [{ url: 'https://a.com/', title: 'A' }, { url: 'https://b.com/', title: 'B' }] } }, null);
+    expect(t.history!.entries).toHaveLength(2);
+  });
+
+  it('cookies de sessão por workspace, sobrescritos e apagados com o workspace', () => {
+    expect(store.loadSessionCookies('a')).toBeNull();
+    store.saveSessionCookies('a', Buffer.from([1, 2, 3]));
+    store.saveSessionCookies('a', Buffer.from([4, 5]));
+    store.saveSessionCookies('b', Buffer.from([9]));
+    expect([...store.loadSessionCookies('a')!]).toEqual([4, 5]);
+    store.deleteWorkspace('a');
+    expect(store.loadSessionCookies('a')).toBeNull();
+    expect([...store.loadSessionCookies('b')!]).toEqual([9]);
+  });
+});

@@ -64,6 +64,7 @@ export interface UiState {
 
 export type UiCommand =
   | { type: 'tab:new'; url?: string }
+  | { type: 'tab:reopen' }
   | { type: 'tab:close'; tabId: string }
   | { type: 'tab:activate'; tabId: string }
   | { type: 'tab:navigate'; url: string }

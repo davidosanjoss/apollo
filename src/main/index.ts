@@ -1,4 +1,4 @@
-import { app, BrowserWindow, components, ipcMain, session } from 'electron';
+import { app, BrowserWindow, components, ipcMain, safeStorage, screen, session } from 'electron';
 import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
@@ -10,6 +10,8 @@ import { isTrustedSender, parseCommand } from './ipc';
 import { loadSettings, applyDns } from './settings';
 import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
+import type { Cipher } from './session-cookies';
+import { resolveWindowState } from './window-state';
 
 // ------------------------------------------------------------ perfil
 // App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
@@ -57,10 +59,28 @@ app.on('web-contents-created', (_e, wc) => {
 
 // ------------------------------------------------------------ janela
 
+/** Cifra do chaveiro do sistema. Sem chaveiro de verdade (basic_text), não salva cookies de sessão. */
+function systemCipher(): Cipher | null {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  if (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())) {
+    console.warn('[apollo] sem chaveiro do sistema: cookies de sessão não serão mantidos entre reinícios');
+    return null;
+  }
+  return { encrypt: (s) => safeStorage.encryptString(s), decrypt: (b) => safeStorage.decryptString(b) };
+}
+
+function readWindowState(store: Store) {
+  let saved: unknown = null;
+  try { saved = JSON.parse(store.getKv('window') ?? 'null'); } catch { /* padrão */ }
+  return resolveWindowState(saved, screen.getAllDisplays().map((d) => d.workArea));
+}
+
 function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
+  const state = readWindowState(store);
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
+    ...(state.x !== undefined ? { x: state.x, y: state.y } : {}),
+    width: state.width,
+    height: state.height,
     minWidth: 700,
     minHeight: 400,
     title: 'Apollo',
@@ -81,8 +101,15 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
 
   let browser: Browser | null = null;
   const pipeline = new NetworkPipeline([gpcModule], (id) => browser?.tabIdOfWebContentsId(id) ?? null);
-  browser = new Browser(win, store, pipeline);
+  browser = new Browser(win, store, pipeline, systemCipher());
   const b = browser;
+
+  // Antes de a janela (e as abas) sumirem: grava histórico e posição.
+  win.on('close', () => {
+    b.flushHistory();
+    const { x, y, width, height } = win.getNormalBounds();
+    store.setKv('window', JSON.stringify({ x, y, width, height, maximized: win.isMaximized() }));
+  });
 
   // Atalhos com foco na própria UI (barra de endereço, sidebar).
   win.webContents.on('before-input-event', (event, input) => {
@@ -92,7 +119,10 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
     b.runShortcut(action);
   });
 
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    if (state.maximized) win.maximize();
+    win.show();
+  });
   win.webContents.on('did-finish-load', () => b.start());
   win.loadURL(UI_URL);
   return { win, browser: b };
@@ -137,6 +167,19 @@ app.whenReady().then(async () => {
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();
     win.focus();
+  });
+
+  // Cookies de sessão: a cada 5 min (protege contra queda) e ao fechar.
+  setInterval(() => void browser.saveSessionCookies(), 5 * 60_000).unref();
+  let saved = false;
+  app.on('before-quit', (event) => {
+    if (saved) return;
+    event.preventDefault();
+    const timeout = new Promise((r) => setTimeout(r, 3000));
+    void Promise.race([browser.saveSessionCookies(), timeout]).finally(() => {
+      saved = true;
+      app.quit();
+    });
   });
 
   app.on('will-quit', () => {

@@ -45,9 +45,7 @@ jobs:
         run: npm test
       - name: Testes de integração (app real, tela virtual)
         if: runner.os == 'Linux'
-        run: |
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          xvfb-run -a npm run test:e2e
+        run: scripts/ci-e2e.sh
 
   build:
     needs: test

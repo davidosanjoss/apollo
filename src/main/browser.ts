@@ -1,5 +1,7 @@
 import { BrowserWindow, WebContentsView, session, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
+import { withNavigation, type TabHistory } from './history';
+import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
@@ -8,6 +10,16 @@ import type { TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shar
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
+
+const MAX_CLOSED_TABS = 25;
+
+interface ClosedTab {
+  workspaceId: string;
+  index: number;
+  url: string;
+  title: string;
+  history: TabHistory | null;
+}
 
 /**
  * Dono de workspaces, abas e do layout. Cada aba é um WebContentsView do processo
@@ -18,7 +30,12 @@ export class Browser {
   private readonly views = new Map<string, WebContentsView>();
   private readonly tabByWebContents = new Map<number, string>();
   private readonly loading = new Set<string>();
-  private readonly configuredSessions = new Set<string>();
+  /** Workspaces com sessão configurada → promessa de "cookies de sessão restaurados". */
+  private readonly sessionsReady = new Map<string, Promise<void>>();
+  private readonly historyTimers = new Map<string, NodeJS.Timeout>();
+  /** Abas com histórico sendo restaurado: não sobrescrever o salvo com um parcial. */
+  private readonly restoring = new Set<string>();
+  private closedTabs: ClosedTab[] = [];
   private readonly permissions: PermissionManager;
 
   private activeWorkspaceId: string;
@@ -32,6 +49,8 @@ export class Browser {
     private readonly win: BrowserWindow,
     private readonly store: Store,
     private readonly pipeline: NetworkPipeline,
+    /** null = sem chaveiro do sistema: cookies de sessão não são salvos. */
+    private readonly cipher: Cipher | null = null,
   ) {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
 
@@ -67,14 +86,35 @@ export class Browser {
   // ------------------------------------------------------------ sessões
 
   sessionFor(workspaceId: string): Session {
-    const partition = partitionOf(workspaceId);
-    const ses = session.fromPartition(partition);
-    if (!this.configuredSessions.has(partition)) {
-      this.configuredSessions.add(partition);
+    const ses = session.fromPartition(partitionOf(workspaceId));
+    if (!this.sessionsReady.has(workspaceId)) {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
+      this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
     return ses;
+  }
+
+  private async restoreCookies(ses: Session, workspaceId: string): Promise<void> {
+    const data = this.cipher && this.store.loadSessionCookies(workspaceId);
+    if (!data || !this.cipher) return;
+    const n = await restoreSessionCookies(ses, data, this.cipher).catch(() => 0);
+    if (n) console.log(`[apollo] ${n} cookies de sessão restaurados (workspace ${workspaceId})`);
+  }
+
+  /** Salva os cookies de sessão de todos os workspaces abertos nesta execução. */
+  async saveSessionCookies(): Promise<void> {
+    if (!this.cipher) return;
+    const cipher = this.cipher;
+    await Promise.all([...this.sessionsReady.keys()].map(async (workspaceId) => {
+      if (!this.store.getWorkspace(workspaceId)) return; // excluído
+      try {
+        const data = await captureSessionCookies(session.fromPartition(partitionOf(workspaceId)), cipher);
+        this.store.saveSessionCookies(workspaceId, data);
+      } catch (err) {
+        console.warn('[apollo] falha ao salvar cookies de sessão:', (err as Error).message);
+      }
+    }));
   }
 
   // ------------------------------------------------------------ abas
@@ -122,13 +162,56 @@ export class Browser {
     this.views.set(tab.id, view);
     this.tabByWebContents.set(wc.id, tab.id);
     this.wireTab(tab.id, tab.workspaceId, wc);
-    wc.loadURL(tab.url).catch(() => {}); // erros tratados em did-fail-load
+    void this.loadTab(tab, wc);
     return view;
+  }
+
+  /** Carrega a aba: espera os cookies de sessão e restaura o histórico (voltar/avançar). */
+  private async loadTab(tab: Tab, wc: WebContents): Promise<void> {
+    await this.sessionsReady.get(tab.workspaceId);
+    if (wc.isDestroyed()) return;
+    const history = this.store.getTab(tab.id)?.history ?? null;
+    if (history) {
+      this.restoring.add(tab.id);
+      try {
+        await wc.navigationHistory.restore({ index: history.index, entries: history.entries });
+        return;
+      } catch {
+        // histórico inválido para o Chromium: carrega só a URL
+      } finally {
+        this.restoring.delete(tab.id);
+      }
+      if (wc.isDestroyed()) return;
+    }
+    wc.loadURL(this.store.getTab(tab.id)?.url ?? tab.url).catch(() => {}); // erros tratados em did-fail-load
+  }
+
+  // ------------------------------------------------------------ histórico
+
+  private captureHistory(tabId: string): void {
+    const timer = this.historyTimers.get(tabId);
+    if (timer) { clearTimeout(timer); this.historyTimers.delete(tabId); }
+    const wc = this.views.get(tabId)?.webContents;
+    if (!wc || wc.isDestroyed() || this.restoring.has(tabId) || !this.store.getTab(tabId)) return;
+    const entries = wc.navigationHistory.getAllEntries();
+    if (entries.length === 0) return;
+    this.store.setTabHistory(tabId, { index: wc.navigationHistory.getActiveIndex(), entries });
+  }
+
+  private scheduleHistorySave(tabId: string): void {
+    if (this.historyTimers.has(tabId)) return;
+    this.historyTimers.set(tabId, setTimeout(() => this.captureHistory(tabId), 1000));
+  }
+
+  /** Grava o histórico de todas as abas abertas (antes de fechar a janela). */
+  flushHistory(): void {
+    for (const tabId of this.views.keys()) this.captureHistory(tabId);
   }
 
   private wireTab(tabId: string, workspaceId: string, wc: WebContents): void {
     const update = (patch: Parameters<Store['updateTab']>[1]) => {
       this.store.updateTab(tabId, patch);
+      this.scheduleHistorySave(tabId);
       this.push();
     };
 
@@ -190,6 +273,7 @@ export class Browser {
   private destroyView(tabId: string): void {
     const view = this.views.get(tabId);
     if (!view) return;
+    this.captureHistory(tabId);
     if (this.attachedTabId === tabId) {
       this.win.contentView.removeChildView(view);
       this.attachedTabId = null;
@@ -243,7 +327,12 @@ export class Browser {
     const idx = tabs.findIndex((t) => t.id === tabId);
 
     this.permissions.cancelForTab(tabId);
-    this.destroyView(tabId);
+    this.destroyView(tabId); // grava o histórico antes
+    const closed = this.store.getTab(tabId)!;
+    if (!isHomeUrl(closed.url)) {
+      this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history });
+      if (this.closedTabs.length > MAX_CLOSED_TABS) this.closedTabs.shift();
+    }
     this.store.deleteTab(tabId);
 
     const ws = this.store.getWorkspace(tab.workspaceId)!;
@@ -255,6 +344,19 @@ export class Browser {
     this.ensureHasTab(ws.id);
     if (ws.id === this.activeWorkspaceId) this.showActive();
     this.push();
+  }
+
+  /** Ctrl+Shift+T: reabre a última aba fechada do workspace ativo, no mesmo lugar. */
+  reopenClosedTab(): void {
+    const i = this.closedTabs.findLastIndex((c) => c.workspaceId === this.activeWorkspaceId);
+    if (i < 0) return;
+    const [closed] = this.closedTabs.splice(i, 1);
+    const tab = this.store.insertTabAt(
+      { id: newId(), workspaceId: closed.workspaceId, url: closed.url, title: closed.title, history: closed.history },
+      closed.index,
+    );
+    this.store.setActiveTab(tab.workspaceId, tab.id);
+    this.showActive();
   }
 
   activateTab(tabId: string): void {
@@ -284,7 +386,11 @@ export class Browser {
     this.store.updateTab(tab.id, { url });
     const view = this.views.get(tab.id);
     if (view) view.webContents.loadURL(url).catch(() => {});
-    else this.showActive(); // cria a view já com a nova URL
+    else {
+      // Aba dormindo: a navegação entra no histórico salvo, e a view nasce com ele.
+      this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
+      this.showActive();
+    }
     this.withActiveView((wc) => wc.focus());
     this.push();
   }
@@ -318,6 +424,7 @@ export class Browser {
       this.permissions.cancelForTab(tab.id);
       this.destroyView(tab.id);
     }
+    this.closedTabs = this.closedTabs.filter((c) => c.workspaceId !== workspaceId);
     if (workspaceId === this.activeWorkspaceId) {
       this.switchWorkspace(all.find((w) => w.id !== workspaceId)!.id);
     }
@@ -335,6 +442,7 @@ export class Browser {
   runShortcut(action: ShortcutAction): void {
     switch (action) {
       case 'new-tab': this.createTab(this.activeWorkspaceId, null, { activate: true }); break;
+      case 'reopen-tab': this.reopenClosedTab(); break;
       case 'close-tab': { const t = this.activeTab(); if (t) this.closeTab(t.id); break; }
       case 'focus-address': this.focusAddress(); break;
       case 'reload': this.withActiveView((wc) => wc.reload()); break;
@@ -352,6 +460,7 @@ export class Browser {
   handleCommand(cmd: UiCommand): void {
     switch (cmd.type) {
       case 'tab:new': this.createTab(this.activeWorkspaceId, cmd.url ?? null, { activate: true }); break;
+      case 'tab:reopen': this.reopenClosedTab(); break;
       case 'tab:close': this.closeTab(cmd.tabId); break;
       case 'tab:activate': this.activateTab(cmd.tabId); break;
       case 'tab:navigate': this.navigate(cmd.url); break;

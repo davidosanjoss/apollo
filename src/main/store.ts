@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { PermissionDecision, PermissionKind } from '../shared/types';
+import { parseHistory, sanitizeHistory, type TabHistory } from './history';
 
 export interface Workspace {
   id: string;
@@ -20,7 +21,10 @@ export interface Tab {
   title: string;
   favicon: string | null;
   pinned: boolean;
+  history: TabHistory | null;
 }
+
+export type NewTab = Pick<Tab, 'id' | 'workspaceId' | 'url' | 'title'> & { history?: TabHistory | null };
 
 export const newId = (): string => randomUUID().replaceAll('-', '').slice(0, 12);
 
@@ -43,6 +47,7 @@ const toTab = (r: Row): Tab => ({
   title: r.title as string,
   favicon: (r.favicon as string | null) ?? null,
   pinned: r.pinned === 1,
+  history: parseHistory(r.history as string | null),
 });
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
@@ -117,22 +122,47 @@ export class Store {
   }
 
   /** Insere logo depois de `afterTabId` (ou no fim). */
-  insertTab(tab: Pick<Tab, 'id' | 'workspaceId' | 'url' | 'title'>, afterTabId: string | null): Tab {
+  insertTab(tab: NewTab, afterTabId: string | null): Tab {
+    const after = afterTabId ? this.getTab(afterTabId) : null;
+    return this.tx(() => this.insertAtPosition(tab, after && after.workspaceId === tab.workspaceId ? after.position + 1 : null));
+  }
+
+  /** Insere no índice `index` entre as abas visíveis (0 = primeira); null ou além do fim = no fim. */
+  insertTabAt(tab: NewTab, index: number | null): Tab {
     return this.tx(() => {
-      let position: number;
-      const after = afterTabId ? this.getTab(afterTabId) : null;
-      if (after && after.workspaceId === tab.workspaceId) {
-        position = after.position + 1;
-        this.db.prepare('UPDATE tabs SET position = position + 1 WHERE workspace_id = ? AND position >= ?')
-          .run(tab.workspaceId, position);
-      } else {
-        position = (this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tabs WHERE workspace_id = ?')
-          .get(tab.workspaceId) as { next: number }).next;
-      }
-      this.db.prepare('INSERT INTO tabs(id, workspace_id, position, url, title) VALUES (?, ?, ?, ?, ?)')
-        .run(tab.id, tab.workspaceId, position, tab.url, tab.title);
-      return this.getTab(tab.id)!;
+      // Posições têm buracos depois de excluir abas: o índice vira a posição da aba que está lá.
+      const at = index === null ? undefined : this.db.prepare(
+        'SELECT position FROM tabs WHERE workspace_id = ? ORDER BY position LIMIT 1 OFFSET ?',
+      ).get(tab.workspaceId, Math.max(0, index)) as { position: number } | undefined;
+      return this.insertAtPosition(tab, at?.position ?? null);
     });
+  }
+
+  private insertAtPosition(tab: NewTab, position: number | null): Tab {
+    if (position === null) {
+      position = (this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM tabs WHERE workspace_id = ?')
+        .get(tab.workspaceId) as { next: number }).next;
+    } else {
+      this.db.prepare('UPDATE tabs SET position = position + 1 WHERE workspace_id = ? AND position >= ?')
+        .run(tab.workspaceId, position);
+    }
+    const history = sanitizeHistory(tab.history);
+    this.db.prepare('INSERT INTO tabs(id, workspace_id, position, url, title, history) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(tab.id, tab.workspaceId, position, tab.url, tab.title, history ? JSON.stringify(history) : null);
+    return this.getTab(tab.id)!;
+  }
+
+  /** Índice da aba entre as do workspace (0 = primeira). */
+  tabIndex(id: string): number {
+    const tab = this.getTab(id);
+    if (!tab) return -1;
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM tabs WHERE workspace_id = ? AND position < ?')
+      .get(tab.workspaceId, tab.position) as { n: number }).n;
+  }
+
+  setTabHistory(id: string, history: TabHistory | null): void {
+    const clean = sanitizeHistory(history);
+    this.db.prepare('UPDATE tabs SET history = ? WHERE id = ?').run(clean ? JSON.stringify(clean) : null, id);
   }
 
   updateTab(id: string, patch: Partial<Pick<Tab, 'url' | 'title' | 'favicon'>>): void {
@@ -163,6 +193,19 @@ export class Store {
     this.db.prepare(`INSERT INTO site_permissions(workspace_id, origin, kind, decision, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, origin, kind) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at`)
       .run(workspaceId, origin, kind, decision, Date.now());
+  }
+
+  // ------------------------------------------------------------ cookies de sessão
+
+  saveSessionCookies(workspaceId: string, data: Buffer): void {
+    this.db.prepare(`INSERT INTO session_cookies(workspace_id, data, saved_at) VALUES (?, ?, ?)
+      ON CONFLICT(workspace_id) DO UPDATE SET data = excluded.data, saved_at = excluded.saved_at`)
+      .run(workspaceId, data, Date.now());
+  }
+
+  loadSessionCookies(workspaceId: string): Buffer | null {
+    const row = this.db.prepare('SELECT data FROM session_cookies WHERE workspace_id = ?').get(workspaceId) as Row | undefined;
+    return row ? Buffer.from(row.data as Uint8Array) : null;
   }
 
   // ------------------------------------------------------------ migração do protótipo

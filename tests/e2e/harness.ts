@@ -51,6 +51,13 @@ export async function startSite(): Promise<TestSite> {
         });
         return res.end('<title>cookie</title>ok');
       case '/cookie': return html(req.headers.cookie ?? '', 'cookie');
+      case '/set-session-cookie':
+        res.writeHead(200, {
+          'content-type': 'text/html',
+          // Sem Max-Age/Expires: cookie de SESSÃO (como os de login da Microsoft).
+          'set-cookie': `sessao=${u.searchParams.get('v')}; Path=/; HttpOnly; SameSite=Lax`,
+        });
+        return res.end('<title>sessao</title>ok');
       default: res.writeHead(404); res.end();
     }
   });
