@@ -1,7 +1,8 @@
 import type { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import type { PermissionDecision, PermissionKind } from '../shared/types';
+import type { PermissionDecision, PermissionKind, PrivacyFeature } from '../shared/types';
+import type { Overrides } from './privacy/rules';
 import { parseHistory, sanitizeHistory, type TabHistory } from './history';
 import type { OrderTab } from './tab-order';
 
@@ -11,6 +12,8 @@ export interface Workspace {
   color: string;
   home: string;
   hibernateAfterMin: number;
+  /** Sessão só em memória; o workspace some ao fechar o Apollo. */
+  temporary: boolean;
   activeTabId: string | null;
 }
 
@@ -47,6 +50,7 @@ const toWorkspace = (r: Row): Workspace => ({
   color: r.color as string,
   home: r.home as string,
   hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
+  temporary: r.temporary === 1,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
 
@@ -110,12 +114,20 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin'> & { hibernateAfterMin?: number }): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'temporary'> & { hibernateAfterMin?: number; temporary?: boolean }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
     const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin);
-    return { ...ws, hibernateAfterMin, activeTabId: null };
+    const temporary = ws.temporary ?? false;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, temporary ? 1 : 0);
+    return { ...ws, hibernateAfterMin, temporary, activeTabId: null };
+  }
+
+  /** Apaga os workspaces temporários (ao abrir e ao fechar). Devolve os ids apagados. */
+  deleteTemporaryWorkspaces(): string[] {
+    const ids = (this.db.prepare('SELECT id FROM workspaces WHERE temporary = 1').all() as Row[]).map((r) => r.id as string);
+    for (const id of ids) this.deleteWorkspace(id);
+    return ids;
   }
 
   updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {
@@ -124,7 +136,10 @@ export class Store {
   }
 
   deleteWorkspace(id: string): void {
-    this.db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+    this.tx(() => {
+      this.db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+      this.db.prepare('DELETE FROM privacy_rules WHERE workspace_id = ?').run(id);
+    });
   }
 
   setActiveTab(workspaceId: string, tabId: string | null): void {
@@ -267,6 +282,35 @@ export class Store {
     this.db.prepare(`INSERT INTO site_permissions(workspace_id, origin, kind, decision, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, origin, kind) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at`)
       .run(workspaceId, origin, kind, decision, Date.now());
+  }
+
+  // ------------------------------------------------------------ privacidade
+
+  private privacyRules(workspaceId: string, site: string): Overrides {
+    const rows = this.db.prepare('SELECT feature, enabled FROM privacy_rules WHERE workspace_id = ? AND site = ?')
+      .all(workspaceId, site) as Row[];
+    return Object.fromEntries(rows.map((r) => [r.feature, r.enabled === 1]));
+  }
+
+  /** Camadas salvas (a da aba fica em memória, no Browser). */
+  getPrivacyLayers(workspaceId: string, site: string | null): { global: Overrides; workspace: Overrides; site: Overrides } {
+    return {
+      global: this.privacyRules('', ''),
+      workspace: this.privacyRules(workspaceId, ''),
+      site: site ? this.privacyRules(workspaceId, site) : {},
+    };
+  }
+
+  /** workspaceId null = global; site null = workspace inteiro; enabled null = remove a regra. */
+  setPrivacyRule(workspaceId: string | null, site: string | null, feature: PrivacyFeature, enabled: boolean | null): void {
+    if (site && !workspaceId) throw new Error('regra de site precisa de workspace');
+    const key = [workspaceId ?? '', site ?? '', feature];
+    if (enabled === null) {
+      this.db.prepare('DELETE FROM privacy_rules WHERE workspace_id = ? AND site = ? AND feature = ?').run(...key);
+      return;
+    }
+    this.db.prepare(`INSERT INTO privacy_rules(workspace_id, site, feature, enabled) VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_id, site, feature) DO UPDATE SET enabled = excluded.enabled`).run(...key, enabled ? 1 : 0);
   }
 
   // ------------------------------------------------------------ cookies de sessão

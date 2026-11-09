@@ -1,9 +1,10 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { GroupInfo, PermissionDecision, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, isHomeUrl } from '../shared/types';
+import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
+import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 
@@ -18,7 +19,6 @@ let state: UiState | null = null;
 /** Aba cuja URL está na barra de endereço, e se o usuário editou o texto. */
 let addressTabId: string | null = null;
 let addressEdited = false;
-let siteBarOpen = false;
 let updateDismissed = false;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLElementTagNameMap[K]> = {}): HTMLElementTagNameMap[K] {
@@ -51,9 +51,9 @@ function render(): void {
     };
     return b;
   }, (b, w, i) => {
-    b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '');
+    b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '') + (w.temporary ? ' temporary' : '');
     b.textContent = w.name.trim().charAt(0).toUpperCase() || '?';
-    b.title = `${w.name}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
+    b.title = `${w.name}${w.temporary ? ' (temporário)' : ''}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
     b.style.background = w.color;
   });
 
@@ -79,6 +79,7 @@ function render(): void {
   renderSiteBar(s);
   renderUpdate(s);
   renderMemory(s);
+  renderSettings(s);
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -241,27 +242,40 @@ function renderPermissionPrompt(s: UiState): void {
   $('#permission-text').textContent = `${host} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
 }
 
+/** Select de 3 estados: herdar (mostrando o valor herdado) / bloquear / permitir. */
+function triSelect(value: boolean | null, inherited: string, onChange: (v: boolean | null) => void): HTMLSelectElement {
+  const select = el('select');
+  for (const [v, label] of [['', `Padrão (${inherited})`], ['1', 'Bloquear'], ['0', 'Permitir']]) {
+    select.appendChild(el('option', { value: v, textContent: label, selected: (value === null ? '' : value ? '1' : '0') === v }));
+  }
+  select.onchange = () => onChange(select.value === '' ? null : select.value === '1');
+  return select;
+}
+
 function renderSiteBar(s: UiState): void {
   const info = s.sitePermissions;
-  $('#site-btn').hidden = !info;
-  const bar = $('#site-bar');
-  bar.hidden = !(siteBarOpen && info);
-  if (!info || bar.hidden) return;
+  const p = s.sitePrivacy;
 
-  $('#site-origin').textContent = new URL(info.origin).host;
-  $('#site-entries').replaceChildren(...info.entries.map(({ kind, decision }) => {
-    const select = el('select');
-    for (const [value, label] of [['', 'Padrão'], ['allow', 'Permitir'], ['deny', 'Bloquear']]) {
-      select.appendChild(el('option', { value, textContent: label, selected: (decision ?? '') === value }));
-    }
-    select.onchange = () => send({
-      type: 'permission:set', origin: info.origin, kind,
-      decision: (select.value || null) as PermissionDecision | null,
-    });
-    const label = el('label', { textContent: PERMISSION_LABELS[kind] });
-    label.appendChild(select);
-    return label;
-  }));
+  // Engrenagem: permissões do site (menu nativo, como o escudo).
+  const gear = $('#site-btn');
+  gear.hidden = !info;
+  if (info) {
+    gear.classList.toggle('custom', hasCustomPermissions(info));
+    gear.title = `Permissões em ${new URL(info.origin).host}`;
+  }
+
+  // Escudo na barra de endereço: estado da proteção no domínio + contador.
+  const shield = $('#shield-btn');
+  shield.hidden = !p;
+  if (p) {
+    shield.className = `icon-btn ${shieldState(p)}`;
+    shield.title = `Proteção em ${p.site}: ${p.tabPaused ? 'pausada nesta aba'
+      : `anúncios ${p.toggles.ads ? 'bloqueados' : 'liberados'}, rastreadores ${p.toggles.trackers ? 'bloqueados' : 'liberados'}`}`;
+  }
+  const total = p ? p.blocked.ads + p.blocked.trackers : 0;
+  const badge = $('#blocked-count');
+  badge.hidden = !p || total === 0 || p.tabPaused;
+  badge.textContent = total > 99 ? '99+' : String(total);
 }
 
 function renderUpdate(s: UiState): void {
@@ -313,6 +327,16 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
+  // Temporário só se escolhe ao criar.
+  $('#ws-temporary-row').hidden = Boolean(ws);
+  $<HTMLInputElement>('#ws-temporary').checked = false;
+  // Padrões de privacidade do workspace (só ao editar: o novo herda o global).
+  $('#ws-privacy').replaceChildren(...(ws ? (Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
+    const label = el('label', { textContent: PRIVACY_LABELS[feature] });
+    label.appendChild(triSelect(ws.privacy[feature], 'global', (enabled) =>
+      send({ type: 'privacy:set', scope: 'workspace', workspaceId: ws.id, feature, enabled })));
+    return label;
+  }) : []));
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
   send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
@@ -328,7 +352,7 @@ $('#ws-form').addEventListener('submit', () => {
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   if (!name) return;
   if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -348,6 +372,54 @@ $('#ws-delete').onclick = () => {
   send({ type: 'workspace:delete', workspaceId: editing.id });
   dialog.close();
 };
+
+// ------------------------------------------------------------ configurações
+
+const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
+
+function renderSettings(s: UiState): void {
+  if (!settingsDialog.open) return;
+  const t = s.settings.dnsTest;
+  const status = $('#dns-status');
+  status.className = t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : '';
+  status.textContent = t.status === 'testing' ? 'Testando…'
+    : t.status === 'ok' ? `Funcionando (${t.ms} ms) — ${s.settings.dns.provider ?? ''}`
+    : t.status === 'fail' ? `Falhou: ${t.error}` : `Em uso: ${s.settings.dns.mode === 'off' ? 'DNS do sistema' : s.settings.dns.provider ?? ''}`;
+
+  $('#global-privacy').replaceChildren(...(Object.keys(PRIVACY_LABELS) as PrivacyFeature[]).map((feature) => {
+    const label = el('label', { textContent: PRIVACY_LABELS[feature] });
+    const select = el('select');
+    const value = s.settings.privacy[feature];
+    for (const [v, text] of [['', 'Padrão do Apollo (ligado)'], ['1', 'Ligado'], ['0', 'Desligado']]) {
+      select.appendChild(el('option', { value: v, textContent: text, selected: (value === null ? '' : value ? '1' : '0') === v }));
+    }
+    select.onchange = () => send({ type: 'privacy:set', scope: 'global', feature, enabled: select.value === '' ? null : select.value === '1' });
+    label.appendChild(select);
+    return label;
+  }));
+}
+
+function openSettings(): void {
+  if (!state) return;
+  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
+  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
+  send({ type: 'layout:overlay', open: true });
+  settingsDialog.showModal();
+  renderSettings(state);
+}
+
+$('#settings-btn').onclick = openSettings;
+settingsDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
+$('#dns-save').onclick = () => {
+  const url = $<HTMLInputElement>('#dns-url').value.trim();
+  if (url && !/^https:\/\/[^\s]+$/.test(url)) {
+    $('#dns-status').className = 'fail';
+    $('#dns-status').textContent = 'O endereço precisa começar com https://';
+    return;
+  }
+  send({ type: 'settings:dns', mode: $<HTMLSelectElement>('#dns-mode').value as DnsMode, dohUrl: url || null });
+};
+$('#dns-test').onclick = () => send({ type: 'settings:test-dns' });
 
 // ------------------------------------------------------------ diálogo de grupo
 
@@ -393,8 +465,12 @@ $('#back').onclick = () => send({ type: 'tab:back' });
 $('#forward').onclick = () => send({ type: 'tab:forward' });
 $('#reload').onclick = () => send({ type: 'tab:reload' });
 
-$('#site-btn').onclick = () => { siteBarOpen = !siteBarOpen; render(); };
-$('#site-close').onclick = () => { siteBarOpen = false; render(); };
+const menuAt = (sel: string) => {
+  const r = $(sel).getBoundingClientRect();
+  return { x: Math.round(r.left), y: Math.round(r.bottom) };
+};
+$('#site-btn').onclick = () => send({ type: 'permission:menu', ...menuAt('#site-btn') });
+$('#shield-btn').onclick = () => send({ type: 'privacy:menu', ...menuAt('#shield-btn') });
 
 const answerPermission = (decision: PermissionDecision) => {
   const promptId = $('#permission-bar').dataset.promptId;
@@ -431,7 +507,6 @@ $<HTMLInputElement>('#address').addEventListener('blur', () => render());
 
 window.apollo.onState((next) => {
   // Trocou de site: fecha o painel de permissões.
-  if (state && next.sitePermissions?.origin !== state.sitePermissions?.origin) siteBarOpen = false;
   state = next;
   render();
   if (pendingGroupEdit) openGroupDialog(pendingGroupEdit);

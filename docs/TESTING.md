@@ -54,5 +54,6 @@ Lidas pelo app apenas para tornar cenários de tempo determinísticos (sem efeit
 | `APOLLO_TEST_SESSION_RESTORE_DELAY_MS` | Atrasa a restauração dos cookies de sessão (simula chaveiro lento) |
 | `APOLLO_TEST_MINUTE_MS` | Duração de um "minuto" da hibernação |
 | `APOLLO_TEST_HIBERNATION_TICK_MS` | Intervalo da verificação de hibernação |
+| `APOLLO_TEST_FILTERS_ADS` / `_TRACKING` | Listas de bloqueio de teste (texto) no lugar das reais; desliga a atualização semanal. Use `testFilters(dir)` |
 
 Passe com `Apollo.launch(perfil, { VAR: 'valor' })`.

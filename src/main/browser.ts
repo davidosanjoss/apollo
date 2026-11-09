@@ -1,21 +1,31 @@
+import path from 'node:path';
 import { app, BrowserWindow, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
+import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
+import type { BlockKind } from './privacy/blocker';
+import { privacyMenu } from './privacy/menu';
+import { permissionsMenu } from './permissions-menu';
+import type { MenuModelItem } from './menu-model';
+import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
+import type { MemoryReport, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus } from '../shared/types';
 import { GROUP_COLORS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
-const partitionOf = (workspaceId: string) => `persist:ws-${workspaceId}`;
 
 const MAX_CLOSED_TABS = 25;
+
+/** Regras salvas de uma camada, com null onde não há regra (herda). */
+const nullable = (o: Overrides): Record<PrivacyFeature, boolean | null> =>
+  Object.fromEntries((Object.keys(DEFAULT_TOGGLES) as PrivacyFeature[]).map((f) => [f, o[f] ?? null])) as Record<PrivacyFeature, boolean | null>;
 
 // Só para testes: acelerar o relógio da hibernação (ver tests/e2e/hibernation.test.ts).
 const minuteMs = () => Number(process.env.APOLLO_TEST_MINUTE_MS) || 60_000;
@@ -57,6 +67,20 @@ export class Browser {
   private readonly unloadBlocked = new Set<string>();
   private hibernationTimer: NodeJS.Timeout | null = null;
 
+  // Privacidade
+  /** Camadas salvas por workspace|site (consultadas a cada requisição: cache em memória). */
+  private readonly privacyCache = new Map<string, { global: Overrides; workspace: Overrides; site: Overrides }>();
+  /** Abas com a proteção pausada (temporário, até fechar). */
+  private readonly pausedTabs = new Set<string>();
+  private readonly blocked = new Map<string, { ads: number; trackers: number }>();
+  private blockedPushTimer: NodeJS.Timeout | null = null;
+
+  // Configurações (DNS): o index.ts aplica e informa aqui.
+  private settings: Omit<SettingsInfo, 'privacy'> = {
+    dns: { mode: 'secure', dohUrl: null, provider: null },
+    dnsTest: { status: 'idle' },
+  };
+
   // Monitor de memória: só mede enquanto aberto.
   private memoryTimer: NodeJS.Timeout | null = null;
   private memoryReport: MemoryReport | null = null;
@@ -77,6 +101,8 @@ export class Browser {
     private readonly cipher: Cipher | null = null,
   ) {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
+    store.deleteTemporaryWorkspaces();
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -109,8 +135,13 @@ export class Browser {
 
   // ------------------------------------------------------------ sessões
 
+  /** Partição da sessão: persistente em disco, ou só em memória (workspace temporário). */
+  private partitionOf(workspaceId: string): string {
+    return this.store.getWorkspace(workspaceId)?.temporary ? `ws-temp-${workspaceId}` : `persist:ws-${workspaceId}`;
+  }
+
   sessionFor(workspaceId: string): Session {
-    const ses = session.fromPartition(partitionOf(workspaceId));
+    const ses = session.fromPartition(this.partitionOf(workspaceId));
     if (!this.sessionsReady.has(workspaceId)) {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
@@ -134,9 +165,10 @@ export class Browser {
     if (!this.cipher) return;
     const cipher = this.cipher;
     await Promise.all([...this.sessionsReady.keys()].map(async (workspaceId) => {
-      if (!this.store.getWorkspace(workspaceId)) return; // excluído
+      const ws = this.store.getWorkspace(workspaceId);
+      if (!ws || ws.temporary) return; // excluído, ou temporário (nada vai para o disco)
       try {
-        const data = await captureSessionCookies(session.fromPartition(partitionOf(workspaceId)), cipher);
+        const data = await captureSessionCookies(session.fromPartition(this.partitionOf(workspaceId)), cipher);
         this.store.saveSessionCookies(workspaceId, data);
       } catch (err) {
         console.warn('[apollo] falha ao salvar cookies de sessão:', (err as Error).message);
@@ -185,6 +217,8 @@ export class Browser {
         nodeIntegration: false,
         webSecurity: true,
         spellcheck: true,
+        // Filtros cosméticos/scriptlets do bloqueador (nada exposto à página).
+        preload: path.join(__dirname, 'tab-preload.js'),
       },
     });
     view.setBackgroundColor('#ffffff');
@@ -256,6 +290,7 @@ export class Browser {
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
       if (!url.startsWith('apollo://error')) update({ url });
+      this.blocked.delete(tabId); // contador é por página
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
     });
@@ -367,6 +402,114 @@ export class Browser {
     }));
     const r = memoryBreakdown(metrics, tabs);
     return { usedMb: r.totalMb, otherMb: r.otherMb, perTab: r.perTabMb };
+  }
+
+  // ------------------------------------------------------------ privacidade
+
+  /** URL atual da página da aba (barato: sem banco). */
+  tabUrlOf(tabId: string): string | null {
+    const wc = this.views.get(tabId)?.webContents;
+    return wc && !wc.isDestroyed() ? wc.getURL() || null : null;
+  }
+
+  privacyFor(workspaceId: string, site: string | null, tabId: string | null): Resolved {
+    const key = `${workspaceId}|${site ?? ''}`;
+    let layers = this.privacyCache.get(key);
+    if (!layers) {
+      layers = this.store.getPrivacyLayers(workspaceId, site);
+      this.privacyCache.set(key, layers);
+    }
+    const tab: Overrides = tabId && this.pausedTabs.has(tabId) ? ALL_OFF : {};
+    return resolvePrivacy({ ...layers, tab });
+  }
+
+  /** Interruptores da aba (para os filtros cosméticos). null = não é aba. */
+  privacyForTab(tabId: string, url: string) {
+    const tab = this.store.getTab(tabId);
+    return tab ? this.privacyFor(tab.workspaceId, siteOf(url), tabId).toggles : null;
+  }
+
+  /** Interruptores para uma requisição (chamado pelo bloqueador). */
+  privacyForRequest(ctx: RequestContext, sourceUrl: string | null) {
+    return this.privacyFor(ctx.workspaceId, siteOf(sourceUrl), ctx.tabId).toggles;
+  }
+
+  onBlocked(ctx: RequestContext, kind: BlockKind): void {
+    if (!ctx.tabId) return;
+    const c = this.blocked.get(ctx.tabId) ?? { ads: 0, trackers: 0 };
+    c[kind]++;
+    this.blocked.set(ctx.tabId, c);
+    // Páginas bloqueiam dezenas de itens por segundo: atualiza o contador no máximo 2x/s.
+    if (ctx.tabId === this.attachedTabId && !this.blockedPushTimer) {
+      this.blockedPushTimer = setTimeout(() => { this.blockedPushTimer = null; this.push(); }, 500);
+    }
+  }
+
+  setPrivacy(scope: 'global' | 'workspace' | 'site', feature: PrivacyFeature, enabled: boolean | null, workspaceId?: string): void {
+    const site = scope === 'site' ? siteOf(this.activeTab()?.url) : null;
+    if (scope === 'site' && !site) return;
+    const ws = scope === 'workspace' && workspaceId ? workspaceId : this.activeWorkspaceId;
+    if (!this.store.getWorkspace(ws)) return;
+    this.store.setPrivacyRule(scope === 'global' ? null : ws, site, feature, enabled);
+    this.privacyCache.clear();
+    this.withActiveView((wc) => wc.reload()); // aplica na página atual
+  }
+
+  /** Remove todas as regras de proteção do site da aba ativa (volta ao padrão). */
+  resetSitePrivacy(): void {
+    const site = siteOf(this.activeTab()?.url);
+    if (!site) return;
+    for (const f of Object.keys(DEFAULT_TOGGLES) as PrivacyFeature[]) this.store.setPrivacyRule(this.activeWorkspaceId, site, f, null);
+    this.privacyCache.clear();
+    this.withActiveView((wc) => wc.reload());
+  }
+
+  /** Converte o modelo de menu (menu-model.ts) em menu nativo. */
+  private toTemplate(items: MenuModelItem[]): MenuItemConstructorOptions[] {
+    return items.map((item): MenuItemConstructorOptions => {
+      switch (item.kind) {
+        case 'info': return { label: item.label, enabled: false };
+        case 'separator': return { type: 'separator' };
+        case 'check': return { label: item.label, type: 'checkbox', checked: item.checked, enabled: item.enabled, click: this.run(item.command) };
+        case 'radio': return { label: item.label, type: 'radio', checked: item.checked, click: this.run(item.command) };
+        case 'action': return { label: item.label, enabled: item.enabled, click: this.run(item.command) };
+        case 'submenu': return { label: item.label, submenu: this.toTemplate(item.items) };
+      }
+    });
+  }
+
+  showPrivacyMenu(x: number, y: number): void {
+    const info = this.sitePrivacy(this.activeTab());
+    if (info) this.popup(this.toTemplate(privacyMenu(info)), x, y);
+  }
+
+  showPermissionsMenu(x: number, y: number): void {
+    const tab = this.activeTab();
+    const info = tab && this.permissions.siteInfo(tab.workspaceId, tab.url);
+    if (info) this.popup(this.toTemplate(permissionsMenu(info)), x, y);
+  }
+
+  pauseTab(paused: boolean): void {
+    const tab = this.activeTab();
+    if (!tab) return;
+    if (paused) this.pausedTabs.add(tab.id);
+    else this.pausedTabs.delete(tab.id);
+    this.withActiveView((wc) => wc.reload());
+  }
+
+  private sitePrivacy(tab: Tab | null): SitePrivacy | null {
+    const site = siteOf(tab?.url);
+    if (!tab || !site) return null;
+    const { toggles, source } = this.privacyFor(tab.workspaceId, site, tab.id);
+    const rules = this.store.getPrivacyLayers(tab.workspaceId, site).site;
+    return {
+      site,
+      toggles,
+      source,
+      siteRules: nullable(rules),
+      tabPaused: this.pausedTabs.has(tab.id),
+      blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
+    };
   }
 
   // ------------------------------------------------------------ monitor de memória
@@ -496,6 +639,8 @@ export class Browser {
     this.destroyView(tabId); // grava o histórico antes
     this.lastSeen.delete(tabId);
     this.unloadBlocked.delete(tabId);
+    this.pausedTabs.delete(tabId);
+    this.blocked.delete(tabId);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
       this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
@@ -747,8 +892,8 @@ export class Browser {
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number): void {
-    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin });
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean): void {
+    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, temporary });
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
@@ -770,10 +915,13 @@ export class Browser {
     if (workspaceId === this.activeWorkspaceId) {
       this.switchWorkspace(all.find((w) => w.id !== workspaceId)!.id);
     }
+    // A partição depende do workspace (temporário ou não): calcular ANTES de apagá-lo.
+    const partition = this.partitionOf(workspaceId);
     this.store.deleteWorkspace(workspaceId); // abas, grupos e permissões vão junto (cascade)
+    this.sessionsReady.delete(workspaceId);
 
     // Apaga logins, cookies, cache e storage do workspace.
-    const ses = session.fromPartition(partitionOf(workspaceId));
+    const ses = session.fromPartition(partition);
     await ses.clearStorageData();
     await ses.clearCache();
     this.push();
@@ -819,6 +967,11 @@ export class Browser {
       case 'tab:hibernate': if (this.store.getTab(cmd.tabId)) this.hibernateTab(cmd.tabId, true); break;
       case 'tab:reveal': this.revealTab(cmd.tabId); break;
       case 'memory:toggle': this.toggleMemoryMonitor(cmd.open); break;
+      case 'privacy:set': this.setPrivacy(cmd.scope, cmd.feature, cmd.enabled, cmd.workspaceId); break;
+      case 'privacy:pause-tab': this.pauseTab(cmd.paused); break;
+      case 'privacy:reset-site': this.resetSitePrivacy(); break;
+      case 'privacy:menu': this.showPrivacyMenu(cmd.x, cmd.y); break;
+      case 'permission:menu': this.showPermissionsMenu(cmd.x, cmd.y); break;
       case 'settings:memory-limit':
         this.store.setKv('memoryLimitMb', String(cmd.mb));
         if (this.memoryReport) this.memoryReport = { ...this.memoryReport, limitMb: cmd.mb };
@@ -840,7 +993,7 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary); break;
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
@@ -855,6 +1008,11 @@ export class Browser {
   }
 
   // ------------------------------------------------------------ estado para a UI
+
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy'>>): void {
+    this.settings = { ...this.settings, ...patch };
+    this.push();
+  }
 
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
@@ -904,15 +1062,20 @@ export class Browser {
     });
     const active = this.activeTab();
     return {
-      workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => ({ id, name, color, home, hibernateAfterMin })),
+      workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
+        const w = this.store.getPrivacyLayers(id, null).workspace;
+        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w), temporary: this.store.getWorkspace(id)!.temporary };
+      }),
       activeWorkspaceId: ws.id,
       tabs,
       groups: this.store.listGroups(ws.id).map(({ id, name, color, collapsed }) => ({ id, name, color, collapsed })),
       activeTabId: ws.activeTabId,
       permissionPrompt: this.permissions.promptFor(ws.activeTabId),
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
+      sitePrivacy: this.sitePrivacy(active),
       update: this.update,
       memory: this.memoryReport,
+      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyDns, loadSettings } from '../../src/main/settings';
+import { applyDns, loadSettings, saveSettings, validDohUrl } from '../../src/main/settings';
 import { tempDir } from '../helpers';
 
 let dir: string;
@@ -43,9 +43,10 @@ describe('loadSettings', () => {
 });
 
 describe('applyDns', () => {
-  it('off: não mexe no resolvedor', () => {
+  // Regressão: "off" não revertia o DoH aplicado antes na mesma execução.
+  it('off: volta ao DNS do sistema', () => {
     expect(applyDns({ dns: { mode: 'off', dohUrl: null } })).toEqual({ mode: 'off' });
-    expect(app.configureHostResolver).not.toHaveBeenCalled();
+    expect(app.configureHostResolver).toHaveBeenCalledWith({ secureDnsMode: 'off' });
   });
 
   it('usa o endereço configurado (Zero Trust Gateway)', () => {
@@ -60,5 +61,22 @@ describe('applyDns', () => {
     expect(app.configureHostResolver).toHaveBeenCalledWith({ secureDnsMode: 'automatic', secureDnsServers: ['https://cloudflare-dns.com/dns-query'] });
     expect(info.provider).toBe('cloudflare-public');
     warn.mockRestore();
+  });
+});
+
+describe('validDohUrl / saveSettings', () => {
+  it('só https, sem credenciais', () => {
+    expect(validDohUrl('https://abc.cloudflare-gateway.com/dns-query')).toBe(true);
+    expect(validDohUrl('http://x.com/dns-query')).toBe(false);
+    expect(validDohUrl('https://user:senha@x.com/')).toBe(false);
+    expect(validDohUrl('não é url')).toBe(false);
+    expect(validDohUrl(42)).toBe(false);
+    expect(validDohUrl('https://x.com/' + 'a'.repeat(600))).toBe(false);
+  });
+
+  it('grava e relê; arquivo só do usuário', () => {
+    saveSettings({ dns: { mode: 'automatic', dohUrl: 'https://gw.example/dns-query' } });
+    expect(loadSettings().dns).toEqual({ mode: 'automatic', dohUrl: 'https://gw.example/dns-query' });
+    if (process.platform !== 'win32') expect(fs.statSync(path.join(dir, 'settings.json')).mode & 0o777).toBe(0o600);
   });
 });

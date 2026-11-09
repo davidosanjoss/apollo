@@ -6,6 +6,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+
+const RESOURCES_URL = 'https://raw.githubusercontent.com/ghostery/adblocker/master/packages/adblocker/assets/ublock-origin/resources.json';
 import type { UiCommand, UiState } from '../../src/shared/types';
 
 const electronBin = createRequire(import.meta.url)('electron') as unknown as string;
@@ -28,18 +31,61 @@ export async function waitFor<T>(fn: () => Promise<T> | T, what: string, timeout
 
 // ------------------------------------------------------------ servidor de sites de teste
 
-export interface TestSite { url: string; close: () => Promise<void> }
+export interface TestSite {
+  url: string;
+  /** Mesmo servidor por outro nome (localhost ≠ 127.0.0.1: conta como OUTRO site). */
+  thirdParty: string;
+  /** Caminhos que chegaram ao servidor (para provar que algo foi bloqueado na rede). */
+  hits: string[];
+  /** Último cabeçalho Cookie recebido por caminho. */
+  cookies: Map<string, string>;
+  close: () => Promise<void>;
+}
 
 /** Sites falsos: /page?title=X, /headers (eco), /set-cookie?v=X, /cookie. */
 export async function startSite(): Promise<TestSite> {
+  const hits: string[] = [];
+  const cookies = new Map<string, string>();
+  let port = 0;
   const server = http.createServer((req, res) => {
     const u = new URL(req.url ?? '/', 'http://x');
+    hits.push(u.pathname);
+    cookies.set(u.pathname, req.headers.cookie ?? '');
     const html = (body: string, title = 'Teste') => {
       res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
       res.end(`<!doctype html><title>${title}</title><body>${body}</body>`);
     };
     switch (u.pathname) {
       case '/page': return html('ok', u.searchParams.get('title') ?? 'Teste');
+      case '/blocktest':
+        // Página em 127.0.0.1 que carrega um "anúncio" e um "rastreador" de localhost (terceiros).
+        return html(`<script src="http://localhost:${port}/ads/banner.js"></script>
+          <img src="http://localhost:${port}/track/pixel.gif">`, u.searchParams.get('title') ?? 'Bloqueio');
+      case '/cosmetic':
+        return html(`<div class="anuncio">ANUNCIO</div><div id="conteudo">conteudo</div>
+          <script>document.title = window.adsEnabled === false ? 'scriptlet-ok' : 'scriptlet-nao';
+          try { window.prunado = JSON.stringify(JSON.parse('{"anuncioA":1,"anuncioB":2,"video":3}')); } catch (e) { window.prunado = 'erro: ' + e.message; }
+          setTimeout(() => { const d = document.createElement('div'); d.className = 'ad-slot-generico'; d.textContent = 'TARDIO';
+            document.body.appendChild(d); }, 300);</script>`, 'cosmetic');
+      case '/set-cookie-3p':
+        // Cookie que PODE ir em requisições de terceiros (SameSite=None; localhost conta como seguro).
+        res.writeHead(200, {
+          'content-type': 'image/gif',
+          'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
+        });
+        return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/pixel':
+        res.writeHead(200, { 'content-type': 'image/gif' });
+        return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/embed':
+        // Página em 127.0.0.1 que pede uma imagem a localhost (terceiro).
+        return html(`<img src="http://localhost:${port}${u.searchParams.get('src') ?? '/pixel'}">`, u.searchParams.get('title') ?? 'embed');
+      case '/ads/banner.js':
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        return res.end('window.anuncioCarregou = true;');
+      case '/track/pixel.gif':
+        res.writeHead(200, { 'content-type': 'image/gif' });
+        return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
       case '/slow': {
         // Página lenta: responde depois de ?ms (simula rede/CI lentos).
         const ms = Number(u.searchParams.get('ms') ?? 1500);
@@ -80,9 +126,12 @@ export async function startSite(): Promise<TestSite> {
     }
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  const { port } = server.address() as net.AddressInfo;
+  port = (server.address() as net.AddressInfo).port;
   return {
     url: `http://127.0.0.1:${port}`,
+    thirdParty: `http://localhost:${port}`,
+    hits,
+    cookies,
     close: () => new Promise((r) => { server.closeAllConnections(); server.close(() => r()); }),
   };
 }
@@ -148,6 +197,26 @@ async function freePort(): Promise<number> {
   const { port } = s.address() as net.AddressInfo;
   await new Promise((r) => s.close(r));
   return port;
+}
+
+/** Listas de bloqueio de teste (no lugar das reais): /ads/ = anúncio, /track/ = rastreador. */
+export function testFilters(dir: string): Record<string, string> {
+  const ads = path.join(dir, 'test-ads.txt');
+  const tracking = path.join(dir, 'test-tracking.txt');
+  fs.writeFileSync(ads, [
+    '/ads/banner.js$third-party',
+    '127.0.0.1##.anuncio',                       // cosmético do site
+    '##.ad-slot-generico',                       // cosmético genérico (via DOM)
+    '127.0.0.1##+js(set-constant, adsEnabled, false)', // scriptlet
+    '127.0.0.1##+js(json-prune, anuncioA)',            // dois json-prune juntos (como no YouTube)
+    '127.0.0.1##+js(json-prune, anuncioB)',
+  ].join('\n') + '\n');
+  fs.writeFileSync(tracking, '/track/pixel.gif$third-party\n');
+  // Recursos do uBlock (scriptlets) baixados pelo build (scripts/build-filters.mjs).
+  const resources = path.join(ROOT, '.cache/filters',
+    createHash('sha256').update(RESOURCES_URL).digest('hex').slice(0, 16) + '.txt');
+  if (!fs.existsSync(resources)) throw new Error('rode `npm run build` antes (recursos do uBlock em .cache/filters)');
+  return { APOLLO_TEST_FILTERS_ADS: ads, APOLLO_TEST_FILTERS_TRACKING: tracking, APOLLO_TEST_FILTERS_RESOURCES: resources };
 }
 
 export function tempProfile(): { dir: string; cleanup: () => void } {

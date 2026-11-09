@@ -161,6 +161,43 @@ describe('permissões', () => {
   });
 });
 
+describe('engrenagem (permissões do site)', () => {
+  const gear = () => app.ui.eval<{ hidden: boolean; custom: boolean }>(`(() => {
+    const b = document.getElementById('site-btn'); return { hidden: b.hidden, custom: b.classList.contains('custom') };
+  })()`);
+
+  it('só permissões: a barra antiga do site não existe mais', async () => {
+    expect(await app.ui.eval(`document.getElementById('site-bar')`)).toBeNull();
+  });
+
+  it('aparece no site, destacada quando há permissão definida; some na página inicial', async () => {
+    await navigate(`${site.url}/page?title=Gear`);
+    let s = await app.state();
+    // Este site já tem a localização bloqueada pelos testes de permissão acima.
+    await waitFor(async () => !(await gear()).hidden, 'engrenagem visível');
+    expect((await gear()).custom).toBe(true);
+    for (const e of s.sitePermissions!.entries) {
+      if (e.decision) await app.send({ type: 'permission:set', origin: s.sitePermissions!.origin, kind: e.kind, decision: null });
+    }
+    await waitFor(async () => !(await gear()).custom, 'sem destaque no padrão');
+    await app.send({ type: 'permission:set', origin: s.sitePermissions!.origin, kind: 'notifications', decision: 'allow' });
+    await waitFor(async () => (await gear()).custom, 'destacada');
+    s = await app.until((x) => x.sitePermissions!.entries.find((e) => e.kind === 'notifications')!.decision === 'allow', 'salvo');
+
+    await app.send({ type: 'tab:new' });
+    await waitFor(async () => (await gear()).hidden, 'escondida na página inicial');
+    await app.send({ type: 'tab:close', tabId: (await app.state()).activeTabId! });
+  });
+
+  it('clicar abre o menu sem travar o navegador', async () => {
+    await app.until((s) => s.sitePermissions !== null, 'site ativo');
+    await app.ui.mouseClick('#site-btn');
+    await sleep(300);
+    await app.send({ type: 'tab:reload' });
+    await app.until((s) => !app.activeTab(s).loading, 'responde');
+  });
+});
+
 describe('workspaces', () => {
   let other: string;
 

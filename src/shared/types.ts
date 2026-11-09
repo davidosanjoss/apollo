@@ -8,6 +8,10 @@ export interface WorkspaceInfo {
   home: string;
   /** Minutos sem uso para hibernar abas (0 = nunca). */
   hibernateAfterMin: number;
+  /** Padrões do workspace (null = segue o global). */
+  privacy: Record<PrivacyFeature, boolean | null>;
+  /** Sessão só em memória; some ao fechar o Apollo. */
+  temporary: boolean;
 }
 
 /** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
@@ -95,6 +99,41 @@ export interface MemoryReport {
 /** Opções do limite de memória do Apollo (MB; 0 = sem limite). */
 export const MEMORY_LIMIT_OPTIONS_MB = [0, 1024, 2048, 3072, 4096, 6144, 8192] as const;
 
+// ------------------------------------------------------------ privacidade
+
+export type PrivacyFeature = 'ads' | 'trackers' | 'thirdPartyCookies' | 'urlCleaning';
+export type PrivacyToggles = Record<PrivacyFeature, boolean>;
+/** Camada de onde veio a decisão (default = padrão do Apollo). */
+export type PrivacyLevel = 'tab' | 'site' | 'workspace' | 'global' | 'default';
+
+export const PRIVACY_LABELS: Record<PrivacyFeature, string> = {
+  ads: 'Bloquear anúncios',
+  trackers: 'Bloquear rastreadores',
+  thirdPartyCookies: 'Bloquear cookies de terceiros',
+  urlCleaning: 'Limpar rastreio dos links',
+};
+
+/** Proteção do site da aba ativa (painel ⚙). */
+export interface SitePrivacy {
+  site: string;
+  toggles: PrivacyToggles;
+  source: Record<PrivacyFeature, PrivacyLevel>;
+  /** Regras salvas para este site neste workspace (null = segue o workspace). */
+  siteRules: Record<PrivacyFeature, boolean | null>;
+  /** Proteção pausada só nesta aba (até fechar). */
+  tabPaused: boolean;
+  blocked: { ads: number; trackers: number };
+}
+
+export type DnsMode = 'secure' | 'automatic' | 'off';
+
+export interface SettingsInfo {
+  dns: { mode: DnsMode; dohUrl: string | null; provider: string | null };
+  dnsTest: { status: 'idle' | 'testing' | 'ok' | 'fail'; ms?: number; error?: string };
+  /** Camada global de privacidade (null = padrão do Apollo). */
+  privacy: Record<PrivacyFeature, boolean | null>;
+}
+
 export interface UiState {
   workspaces: WorkspaceInfo[];
   activeWorkspaceId: string;
@@ -104,8 +143,10 @@ export interface UiState {
   permissionPrompt: PermissionPrompt | null;
   /** Permissões do site da aba ativa (para o painel ao lado da barra de endereço). */
   sitePermissions: SitePermissions | null;
+  sitePrivacy: SitePrivacy | null;
   update: UpdateStatus | null;
   memory: MemoryReport | null;
+  settings: SettingsInfo;
 }
 
 export type UiCommand =
@@ -127,6 +168,16 @@ export type UiCommand =
   /** Mostra a aba, trocando de workspace se preciso (monitor de memória). */
   | { type: 'tab:reveal'; tabId: string }
   | { type: 'memory:toggle'; open: boolean }
+  /** Regra de privacidade: site = site da aba ativa no workspace ativo; null = volta a herdar. */
+  | { type: 'privacy:set'; scope: 'global' | 'workspace' | 'site'; feature: PrivacyFeature; enabled: boolean | null; workspaceId?: string }
+  /** Pausa toda a proteção só na aba ativa, até ela fechar. */
+  | { type: 'privacy:pause-tab'; paused: boolean }
+  /** Volta o site da aba ativa ao padrão (remove todas as regras de proteção dele). */
+  | { type: 'privacy:reset-site' }
+  /** Menu nativo do escudo da barra de endereço em (x, y). */
+  | { type: 'privacy:menu'; x: number; y: number }
+  | { type: 'settings:dns'; mode: DnsMode; dohUrl: string | null }
+  | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }
@@ -142,13 +193,15 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; temporary?: boolean }
   | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }
   | { type: 'permission:answer'; promptId: string; decision: PermissionDecision; remember: boolean }
   | { type: 'permission:set'; origin: string; kind: PermissionKind; decision: PermissionDecision | null }
+  /** Menu nativo da engrenagem (permissões do site da aba ativa) em (x, y). */
+  | { type: 'permission:menu'; x: number; y: number }
   | { type: 'update:download' }
   | { type: 'update:install' };
 

@@ -4,10 +4,15 @@ import { openDatabase } from './db';
 import { Store } from './store';
 import { Browser } from './browser';
 import { shortcutFor } from './shortcuts';
-import { NetworkPipeline, gpcModule } from './network';
+import { NetworkPipeline, gpcModule, type RequestContext } from './network';
+import { Blocker, blockerModule } from './privacy/blocker';
+import { parseFeatures } from './privacy/cosmetics';
+import { thirdPartyCookiesModule, urlCleaningModule } from './privacy/modules';
+import { DEFAULT_TOGGLES } from './privacy/rules';
+import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
-import { loadSettings, applyDns } from './settings';
+import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
 import type { Cipher } from './session-cookies';
@@ -100,7 +105,19 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   let browser: Browser | null = null;
-  const pipeline = new NetworkPipeline([gpcModule], (id) => browser?.tabIdOfWebContentsId(id) ?? null);
+  const blocker = new Blocker(loadEngines(app.getPath('userData')));
+  scheduleFilterUpdates(app.getPath('userData'), (engines) => blocker.setEngines(engines));
+  const togglesFor = (ctx: RequestContext, firstParty: string | null) => browser?.privacyForRequest(ctx, firstParty) ?? DEFAULT_TOGGLES;
+  const pipeline = new NetworkPipeline(
+    [
+      urlCleaningModule(togglesFor),
+      blockerModule(blocker, { togglesFor, onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind) }),
+      thirdPartyCookiesModule(togglesFor),
+      gpcModule,
+    ],
+    (id) => browser?.tabIdOfWebContentsId(id) ?? null,
+    (tabId) => browser?.tabUrlOf(tabId) ?? null,
+  );
   browser = new Browser(win, store, pipeline, systemCipher());
   const b = browser;
 
@@ -118,6 +135,29 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
     event.preventDefault();
     b.runShortcut(action);
   });
+
+  // Filtros cosméticos pedidos pelo preload das abas. Só aceita o frame principal de
+  // uma aba; a URL vem do próprio frame (não do que a página diz).
+  const cosmeticsFor = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent, features?: unknown) => {
+    const tabId = b.tabIdOf(event.sender);
+    const frame = event.senderFrame;
+    if (!tabId || !frame || frame !== event.sender.mainFrame) return null;
+    if (!b.privacyForTab(tabId, frame.url)?.ads) return null;
+    const parsed = features === undefined ? undefined : parseFeatures(features);
+    if (parsed === null) return null;
+    const result = blocker.cosmetics(frame.url, parsed);
+    if (result?.styles) void event.sender.insertCSS(result.styles, { cssOrigin: 'user' }).catch(() => {});
+    return result;
+  };
+  ipcMain.on('apollo:cosmetics-start', (event) => {
+    try {
+      const r = cosmeticsFor(event);
+      event.returnValue = r ? { scripts: r.scripts } : null;
+    } catch {
+      event.returnValue = null; // nunca travar a página
+    }
+  });
+  ipcMain.handle('apollo:cosmetics-dom', (event, features) => { cosmeticsFor(event, features); });
 
   win.once('ready-to-show', () => {
     if (state.maximized) win.maximize();
@@ -150,6 +190,22 @@ app.whenReady().then(async () => {
 
   const { win, browser } = createWindow(store);
 
+  // DNS: o que está em uso, e mudanças pela tela de configurações.
+  let settings: Settings = loadSettings();
+  const showDns = (info: { provider?: string }) =>
+    browser.setSettings({ dns: { mode: settings.dns.mode, dohUrl: settings.dns.dohUrl, provider: info.provider ?? null } });
+  showDns(dnsInfo);
+  const testDns = async () => {
+    browser.setSettings({ dnsTest: { status: 'testing' } });
+    const t0 = Date.now();
+    try {
+      const res = await session.defaultSession.fetch('https://example.com/', { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+      browser.setSettings({ dnsTest: res.ok ? { status: 'ok', ms: Date.now() - t0 } : { status: 'fail', error: `HTTP ${res.status}` } });
+    } catch (err) {
+      browser.setSettings({ dnsTest: { status: 'fail', error: (err as Error).message } });
+    }
+  };
+
   const updater = setupUpdater(
     (status) => browser.setUpdate(status),
     () => db.exec('PRAGMA wal_checkpoint(TRUNCATE)'),
@@ -161,6 +217,13 @@ app.whenReady().then(async () => {
     if (!cmd) return console.warn('[apollo] comando inválido da UI ignorado');
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
+    if (cmd.type === 'settings:dns') {
+      settings = { ...settings, dns: { mode: cmd.mode, dohUrl: cmd.dohUrl } };
+      saveSettings(settings);
+      browser.setSettings({ dnsTest: { status: 'idle' } });
+      return showDns(applyDns(settings));
+    }
+    if (cmd.type === 'settings:test-dns') return void testDns();
     browser.handleCommand(cmd);
   });
 
@@ -183,6 +246,7 @@ app.whenReady().then(async () => {
   });
 
   app.on('will-quit', () => {
+    try { store.deleteTemporaryWorkspaces(); } catch { /* banco indisponível: apaga ao abrir */ }
     try { db.close(); } catch { /* já fechado */ }
   });
 });

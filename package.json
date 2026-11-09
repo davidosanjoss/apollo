@@ -1,6 +1,6 @@
 {
   "name": "apollo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Navegador pessoal com workspaces de sessão isolada",
   "main": "build/main.js",
   "private": true,
@@ -13,15 +13,20 @@
     "dist:win": "node scripts/build.mjs --prod && electron-builder --win --publish never",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "node scripts/build.mjs && vitest run -c vitest.e2e.config.ts"
+    "test:e2e": "node scripts/build.mjs && vitest run -c vitest.e2e.config.ts",
+    "check": "scripts/check.sh"
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.3",
+    "@ghostery/adblocker": "^2.20.3",
+    "@ghostery/adblocker-content": "^2.20.3",
+    "@ghostery/adblocker-electron-preload": "^2.20.3",
     "@types/node": "^24.19.2",
     "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
+    "tldts": "^7.4.19",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
