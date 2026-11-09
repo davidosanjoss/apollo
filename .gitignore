@@ -1,6 +1,7 @@
 # dependências e builds
 node_modules/
 dist/
+build/
 out/
 
 # dados locais — NUNCA versionar (logins, endereços pessoais, segredos)

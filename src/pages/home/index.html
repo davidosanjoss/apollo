@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; form-action https://www.google.com">
+  <title>Nova aba</title>
+  <link rel="stylesheet" href="home.css">
+</head>
+<body>
+  <main>
+    <p id="greeting"></p>
+    <h1 id="clock"></h1>
+    <p id="date"></p>
+    <form action="https://www.google.com/search" method="get" role="search">
+      <input name="q" type="search" placeholder="Pesquisar no Google" autocomplete="off" aria-label="Pesquisar" required>
+    </form>
+  </main>
+  <script src="home.js"></script>
+</body>
+</html>

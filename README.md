@@ -21,9 +21,14 @@ Requer Node.js 22+.
 
 ```bash
 npm install
-npm start          # abre o navegador
+npm start          # compila e abre o navegador (perfil separado: apollo-dev)
+npm run typecheck  # checagem de tipos (TypeScript)
 npm run diagnose   # valida Widevine, vídeo por GPU, DNS, cookies nesta máquina
+npm test           # testes unitários
+npm run test:e2e   # testes de integração (abre o app real; ver docs/TESTING.md)
 ```
+
+Código em `src/`: `main/` (processo principal), `renderer/` (UI), `preload/`, `shared/` (contrato UI ↔ main) e `pages/` (páginas internas `apollo://`). Detalhes em [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 Builds:
 

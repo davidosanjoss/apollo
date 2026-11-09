@@ -1,20 +1,21 @@
 // Modo de diagnóstico da fase 0. Roda via `npm run diagnose`, que chama o app
 // duas vezes (fase "set" e fase "check") com um perfil temporário.
-const { app, components, session, BrowserWindow } = require('electron');
-const fs = require('node:fs');
-const path = require('node:path');
+import { app, components, session, BrowserWindow } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { DnsInfo } from './settings';
 
 const DIAG_URL = 'https://apollo.invalid';
-const step = (msg) => process.stderr.write(`[diag] ${msg}\n`);
+const step = (msg: string) => process.stderr.write(`[diag] ${msg}\n`);
 
-async function withSecurePage(fn) {
+async function withSecurePage<T>(fn: (evaluate: (code: string) => Promise<any>) => Promise<T>): Promise<T> {
   // EME e MediaCapabilities exigem contexto seguro; file:// conta como seguro.
   const file = path.join(app.getPath('userData'), 'diag.html');
   fs.writeFileSync(file, '<!doctype html><title>diag</title>');
   const win = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:diag' } });
   try {
     await win.loadFile(file);
-    return await fn((code) => win.webContents.executeJavaScript(code));
+    return await fn((code: string) => win.webContents.executeJavaScript(code));
   } finally {
     win.destroy();
     fs.rmSync(file, { force: true });
@@ -44,8 +45,8 @@ const DECODE_PROBE = `
   )).then(Object.fromEntries)
 `;
 
-async function runDiagnose(phase, dnsInfo) {
-  const report = { phase, platform: process.platform, electron: process.versions.electron };
+export async function runDiagnose(phase: string, dnsInfo: DnsInfo): Promise<void> {
+  const report: Record<string, any> = { phase, platform: process.platform, electron: process.versions.electron };
   const ses = session.fromPartition('persist:diag');
 
   try {
@@ -90,15 +91,14 @@ async function runDiagnose(phase, dnsInfo) {
         report.dns.resolveOk = res.ok;
       } catch (e) {
         report.dns.resolveOk = false;
-        report.dns.error = e.message;
+        report.dns.error = (e as Error).message;
       }
     }
   } catch (err) {
-    report.fatal = String(err?.stack || err);
+    report.fatal = String((err as Error)?.stack || err);
   }
 
   process.stdout.write(`APOLLO_DIAG ${JSON.stringify(report)}\n`);
   app.exit(0);
 }
 
-module.exports = { runDiagnose };

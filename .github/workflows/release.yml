@@ -24,8 +24,33 @@ jobs:
       - name: Tag precisa bater com package.json
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
-  build:
+  # Nada é compilado nem publicado se algum teste falhar.
+  test:
     needs: validate
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Checagem de tipos
+        run: npm run typecheck
+      - name: Testes unitários
+        run: npm test
+      - name: Testes de integração (app real, tela virtual)
+        if: runner.os == 'Linux'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a npm run test:e2e
+
+  build:
+    needs: test
     strategy:
       matrix:
         include:
@@ -54,7 +79,9 @@ jobs:
       - name: Build e upload para apollo-releases
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: npx electron-builder ${{ matrix.args }} --publish always
+        run: |
+          node scripts/build.mjs --prod
+          npx electron-builder ${{ matrix.args }} --publish always
 
   publish:
     needs: build
