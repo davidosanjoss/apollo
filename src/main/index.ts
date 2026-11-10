@@ -1,4 +1,5 @@
-import { app, BrowserWindow, components, ipcMain, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
@@ -15,8 +16,10 @@ import { isTrustedSender, parseCommand } from './ipc';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
-import type { Cipher } from './session-cookies';
+import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
+import { BitwardenApi, serverUrls } from './vault/api';
+import { VaultService } from './vault/service';
 
 // ------------------------------------------------------------ perfil
 // App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
@@ -64,14 +67,20 @@ app.on('web-contents-created', (_e, wc) => {
 
 // ------------------------------------------------------------ janela
 
-/** Cifra do chaveiro do sistema. Sem chaveiro de verdade (basic_text), não salva cookies de sessão. */
-function systemCipher(): Cipher | null {
-  if (!safeStorage.isEncryptionAvailable()) return null;
+/**
+ * Chaveiro do sistema (API assíncrona: a síncrona foi descontinuada pelo Electron).
+ * Sem chaveiro de verdade (basic_text no Linux), devolve null: nada sensível é salvo.
+ */
+async function systemSecretBox(): Promise<SecretBox | null> {
+  if (!(await safeStorage.isAsyncEncryptionAvailable())) return null;
   if (process.platform === 'linux' && ['basic_text', 'unknown'].includes(safeStorage.getSelectedStorageBackend())) {
-    console.warn('[apollo] sem chaveiro do sistema: cookies de sessão não serão mantidos entre reinícios');
+    console.warn('[apollo] sem chaveiro do sistema: cookies de sessão e Bitwarden não serão lembrados entre reinícios');
     return null;
   }
-  return { encrypt: (s) => safeStorage.encryptString(s), decrypt: (b) => safeStorage.decryptString(b) };
+  return {
+    encrypt: (s) => safeStorage.encryptStringAsync(s),
+    decrypt: async (b) => (await safeStorage.decryptStringAsync(b)).result,
+  };
 }
 
 function readWindowState(store: Store) {
@@ -80,7 +89,7 @@ function readWindowState(store: Store) {
   return resolveWindowState(saved, screen.getAllDisplays().map((d) => d.workArea));
 }
 
-function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
+function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow; browser: Browser } {
   const state = readWindowState(store);
   const win = new BrowserWindow({
     ...(state.x !== undefined ? { x: state.x, y: state.y } : {}),
@@ -118,7 +127,7 @@ function createWindow(store: Store): { win: BrowserWindow; browser: Browser } {
     (id) => browser?.tabIdOfWebContentsId(id) ?? null,
     (tabId) => browser?.tabUrlOf(tabId) ?? null,
   );
-  browser = new Browser(win, store, pipeline, systemCipher());
+  browser = new Browser(win, store, pipeline, box);
   const b = browser;
 
   // Antes de a janela (e as abas) sumirem: grava histórico e posição.
@@ -188,7 +197,46 @@ app.whenReady().then(async () => {
     console.log('[apollo] estado da v0.1 migrado para o banco (backup: state.json.migrated)');
   }
 
-  const { win, browser } = createWindow(store);
+  const box = await systemSecretBox();
+  const { win, browser } = createWindow(store, box);
+
+  // Bitwarden: requisições pela rede do Chromium (respeita o DNS seguro/Zero Trust).
+  const vault = new VaultService(
+    store.vaultStorage(),
+    box,
+    (server, deviceId) => new BitwardenApi(serverUrls(server), (u, i) => net.fetch(u, i), { id: deviceId, name: 'Apollo', type: 14 }),
+    () => browser.setVault(vault.info()),
+    () => randomUUID(),
+  );
+  browser.setVault(vault.info());
+  browser.setVaultProvider({
+    status: () => vault.status(),
+    vault: () => vault.unlocked,
+    saveLogin: (l) => vault.saveLogin(l),
+    updatePassword: (id, p) => vault.updatePassword(id, p),
+  });
+  // Logins enviados nas abas (preload): só do frame principal de uma aba; URL do próprio frame.
+  const fromTabFrame = (event: Electron.IpcMainEvent) => {
+    const tabId = browser.tabIdOf(event.sender);
+    const frame = event.senderFrame;
+    return tabId && frame && frame === event.sender.mainFrame ? { tabId, url: frame.url } : null;
+  };
+  const text = (v: unknown, max = 1024) => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : null);
+  ipcMain.on('apollo:login-submitted', (event, data: { username?: unknown; password?: unknown }) => {
+    const src = fromTabFrame(event);
+    const password = text(data?.password);
+    if (src && password) browser.onLoginSubmitted(src.tabId, src.url, text(data?.username), password);
+  });
+  ipcMain.on('apollo:username-step', (event, username: unknown) => {
+    const src = fromTabFrame(event);
+    const u = text(username);
+    if (src && u) browser.onUsernameStep(src.tabId, src.url, u);
+  });
+  // Bloqueio automático: tela bloqueada, suspensão e tempo ocioso do sistema.
+  powerMonitor.on('lock-screen', () => vault.lock());
+  powerMonitor.on('suspend', () => vault.lock());
+  setInterval(() => vault.checkIdle(powerMonitor.getSystemIdleTime()), 30_000).unref();
+  setInterval(() => { if (vault.unlocked) void vault.sync(); }, 30 * 60_000).unref();
 
   // DNS: o que está em uso, e mudanças pela tela de configurações.
   let settings: Settings = loadSettings();
@@ -224,6 +272,14 @@ app.whenReady().then(async () => {
       return showDns(applyDns(settings));
     }
     if (cmd.type === 'settings:test-dns') return void testDns();
+    switch (cmd.type) {
+      case 'vault:connect': return void vault.connect(cmd.server, cmd.clientId, cmd.clientSecret, cmd.password);
+      case 'vault:unlock': return void vault.unlock(cmd.password);
+      case 'vault:lock': return vault.lock();
+      case 'vault:sync': return void vault.sync();
+      case 'vault:disconnect': return vault.disconnect();
+      case 'vault:lock-after': return vault.setLockAfter(cmd.minutes);
+    }
     browser.handleCommand(cmd);
   });
 
@@ -246,6 +302,7 @@ app.whenReady().then(async () => {
   });
 
   app.on('will-quit', () => {
+    vault.lock();
     try { store.deleteTemporaryWorkspaces(); } catch { /* banco indisponível: apaga ao abrir */ }
     try { db.close(); } catch { /* já fechado */ }
   });

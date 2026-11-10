@@ -8,6 +8,8 @@
 }
 
 * { box-sizing: border-box; }
+/* Regressão: regras como "dialog label { display: flex }" venciam o atributo hidden. */
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -59,6 +61,16 @@ body { display: flex; }
 #dns-status.ok { color: #3fb950; }
 #dns-status.fail { color: #e5534b; }
 #global-privacy { display: flex; flex-direction: column; gap: 8px; }
+#vault-dialog { width: 460px; max-width: calc(100vw - 32px); }
+.row-inline { display: flex; align-items: center; gap: 12px; }
+.row-inline .remember { display: flex; align-items: center; gap: 6px; }
+#save-text b { color: var(--text); }
+#vault-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#vault-btn.unlocked { color: #3fb950; border-color: #3fb95066; }
+.vault-view[hidden] { display: none; }
+dialog .hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+dialog .error { color: #e5534b; font-size: 13px; margin: 0 0 12px; }
+dialog .error[hidden] { display: none; }
 
 /* ---------- área principal ---------- */
 #main {
@@ -208,6 +220,13 @@ body { display: flex; }
 
 #site-btn[hidden] { display: none; }
 #shield-btn[hidden] { display: none; }
+/* Chave do Bitwarden: mesmo estilo do escudo. */
+#key-btn { position: relative; display: inline-grid; place-items: center; color: var(--muted); }
+#key-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#key-btn.unlocked.has-logins { color: #3fb950; }
+#key-btn.locked svg { stroke-dasharray: 3 2; }
+#key-btn .badge { position: absolute; right: -2px; top: -2px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  background: #3fb950; color: #111; font-size: 9px; font-weight: 700; line-height: 15px; }
 /* Engrenagem no mesmo estilo do escudo: ícone em traço; destacada se o site tem permissões definidas. */
 #site-btn { display: inline-grid; place-items: center; color: var(--muted); }
 #site-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }

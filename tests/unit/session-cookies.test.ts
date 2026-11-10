@@ -6,8 +6,8 @@ import {
 
 // Cifra de teste reversível (a real usa o chaveiro do sistema).
 const cipher: Cipher = {
-  encrypt: (s) => Buffer.from(s, 'utf8').reverse(),
-  decrypt: (b) => Buffer.from(b).reverse().toString('utf8'),
+  encrypt: async (s) => Buffer.from(s, 'utf8').reverse(),
+  decrypt: async (b) => Buffer.from(b).reverse().toString('utf8'),
 };
 
 const cookie = (over: Partial<Cookie>): Cookie => ({
@@ -68,9 +68,9 @@ describe('captura e restauração', () => {
 
   it('dado ilegível (chaveiro trocou) não quebra', async () => {
     const { ses, set } = fakeSession([]);
-    const broken: Cipher = { encrypt: cipher.encrypt, decrypt: () => { throw new Error('chave errada'); } };
+    const broken: Cipher = { encrypt: cipher.encrypt, decrypt: async () => { throw new Error('chave errada'); } };
     expect(await restoreSessionCookies(ses, Buffer.from('x'), broken)).toBe(0);
-    expect(await restoreSessionCookies(ses, cipher.encrypt('{"não":"lista"}'), cipher)).toBe(0);
+    expect(await restoreSessionCookies(ses, await cipher.encrypt('{"não":"lista"}'), cipher)).toBe(0);
     expect(set).toEqual([]);
   });
 });

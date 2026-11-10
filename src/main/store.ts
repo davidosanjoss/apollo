@@ -284,6 +284,26 @@ export class Store {
       .run(workspaceId, origin, kind, decision, Date.now());
   }
 
+  // ------------------------------------------------------------ cofre (Bitwarden)
+
+  /** Persistência do VaultService: conta em claro (sem segredos) e segredos já cifrados. */
+  vaultStorage() {
+    return {
+      getAccount: () => this.getKv('vault.account'),
+      setAccount: (json: string | null) => this.setOrDeleteKv('vault.account', json),
+      getSecret: (name: 'clientSecret' | 'sync') => {
+        const v = this.getKv(`vault.${name}`);
+        return v ? Buffer.from(v, 'base64') : null;
+      },
+      setSecret: (name: 'clientSecret' | 'sync', data: Buffer | null) => this.setOrDeleteKv(`vault.${name}`, data ? data.toString('base64') : null),
+    };
+  }
+
+  private setOrDeleteKv(key: string, value: string | null): void {
+    if (value === null) this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+    else this.setKv(key, value);
+  }
+
   // ------------------------------------------------------------ privacidade
 
   private privacyRules(workspaceId: string, site: string): Overrides {

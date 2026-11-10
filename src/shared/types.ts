@@ -125,6 +125,20 @@ export interface SitePrivacy {
   blocked: { ads: number; trackers: number };
 }
 
+/** Estado do cofre do Bitwarden (nunca contém segredos). */
+export interface VaultStatusInfo {
+  status: 'disconnected' | 'locked' | 'unlocked';
+  email: string | null;
+  server: string | null;
+  count: number;
+  lastSync: number | null;
+  lockAfterMin: number;
+  busy: boolean;
+  error: string | null;
+  /** Há chaveiro do sistema: dá para lembrar a conexão entre reinícios. */
+  canRemember: boolean;
+}
+
 export type DnsMode = 'secure' | 'automatic' | 'off';
 
 export interface SettingsInfo {
@@ -147,7 +161,16 @@ export interface UiState {
   update: UpdateStatus | null;
   memory: MemoryReport | null;
   settings: SettingsInfo;
+  vault: VaultStatusInfo;
+  /** Logins do Bitwarden para o site da aba ativa (null = página não é web ou cofre desconectado). */
+  vaultSite: { status: 'locked' | 'unlocked'; count: number } | null;
+  /** Barra "salvar/atualizar senha" para a aba ativa (a senha nunca vem para a UI). */
+  savePrompt: { id: string; site: string; username: string | null; mode: 'save' | 'update' | 'locked' } | null;
+  generator: { length: number; symbols: boolean };
 }
+
+/** Tamanhos oferecidos pelo gerador de senhas. */
+export const GENERATOR_LENGTHS = [12, 16, 20, 24, 32, 48, 64] as const;
 
 export type UiCommand =
   | { type: 'tab:new'; url?: string }
@@ -177,6 +200,22 @@ export type UiCommand =
   /** Menu nativo do escudo da barra de endereço em (x, y). */
   | { type: 'privacy:menu'; x: number; y: number }
   | { type: 'settings:dns'; mode: DnsMode; dohUrl: string | null }
+  // Bitwarden. Segredos vão só neste sentido (UI → main) e nunca voltam no estado.
+  | { type: 'vault:connect'; server: string; clientId: string; clientSecret: string; password: string }
+  | { type: 'vault:unlock'; password: string }
+  | { type: 'vault:lock' }
+  | { type: 'vault:sync' }
+  | { type: 'vault:disconnect' }
+  | { type: 'vault:lock-after'; minutes: number }
+  /** Menu da chave na barra de endereço (logins do site da aba ativa). */
+  | { type: 'vault:menu'; x: number; y: number }
+  | { type: 'vault:fill'; itemId: string }
+  | { type: 'vault:copy'; itemId: string; what: 'username' | 'password' | 'totp' }
+  | { type: 'vault:open' }
+  | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
+  /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
+  | { type: 'vault:generate'; fill: boolean }
+  | { type: 'vault:generator'; length: number; symbols: boolean }
   | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
@@ -208,6 +247,8 @@ export type UiCommand =
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
 export type UiEvent =
   | { type: 'focus-address' }
+  /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
+  | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
   | { type: 'edit-group'; groupId: string };
 

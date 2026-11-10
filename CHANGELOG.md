@@ -4,6 +4,23 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.5.0] - 2026-11-10
+
+### Adicionado
+- Bitwarden nativo (sem extensão): conectar com a chave de API pessoal + senha mestra (bitwarden.com, bitwarden.eu ou servidor próprio/Vaultwarden). A senha mestra nunca sai do computador; o cofre fica cifrado na memória e senhas só são decifradas na hora do uso.
+- Chave do Bitwarden na barra de endereço: mostra quantos logins servem para o site (regras de correspondência do Bitwarden) e abre um menu para preencher, copiar usuário/senha ou o código de verificação (TOTP). Ctrl+Shift+L preenche o primeiro login. Senha copiada é apagada da área de transferência em 30 s.
+- Preenchimento seguro: só no frame principal, conferindo na hora que a página ainda é do site do login; login https nunca é oferecido em página http; campos escondidos (armadilhas) são ignorados. Funciona em logins de duas etapas (e-mail primeiro, senha depois).
+- Salvar senhas no Bitwarden: ao fazer login num site, uma barra oferece salvar (ou atualizar, se a senha mudou), "Agora não" ou "Nunca neste site". Funciona com logins em duas etapas. Com o cofre bloqueado, a barra pede para desbloquear e depois salva. Atualizar troca só a senha: notas, campos, TOTP e passkeys ficam intactos, e a senha antiga vai para o histórico.
+- Gerador de senhas no menu da chave: "Gerar senha e preencher" (preenche senha e confirmação de cadastros) e "Gerar senha e copiar"; tamanho e símbolos configuráveis no diálogo do cofre.
+- Bloqueio automático do cofre: após um tempo sem usar o computador (padrão 15 min), ao bloquear a tela, ao suspender e ao fechar o Apollo. Desbloqueio funciona sem internet (cópia local cifrada com o chaveiro do sistema).
+- Compatibilidade testada contra servidor real (Vaultwarden) e o CLI oficial do Bitwarden, inclusive contas Argon2id e itens de organização.
+
+### Corrigido
+- O contador de bloqueios do escudo podia mostrar menos itens que o real (zerava tarde demais em máquinas lentas).
+- Conectar ao bitwarden.com falhava com "HTTP 400: No client version header found": o servidor oficial exige a versão do cliente em toda requisição (o Vaultwarden não exige).
+- Avisos de API descontinuada do Electron (chaveiro do sistema): cookies de sessão e segredos do Bitwarden passam a usar a API assíncrona; o segredo do Bitwarden é regravado com a chave atual do chaveiro a cada sincronização.
+- Elementos que deveriam estar escondidos em diálogos apareciam (ex.: "Temporário" ao editar um workspace).
+
 ## [0.4.0] - 2026-11-09
 
 ### Adicionado

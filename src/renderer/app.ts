@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -76,10 +76,12 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderPermissionPrompt(s);
+  renderSavePrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
   renderMemory(s);
   renderSettings(s);
+  renderVault(s);
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -264,6 +266,19 @@ function renderSiteBar(s: UiState): void {
     gear.title = `Permissões em ${new URL(info.origin).host}`;
   }
 
+  // Chave do Bitwarden: logins para este site.
+  const key = $('#key-btn');
+  const vs = s.vaultSite;
+  key.hidden = !vs;
+  if (vs) {
+    key.className = `icon-btn ${vs.status}${vs.count ? ' has-logins' : ''}`;
+    key.title = vs.status === 'locked' ? 'Bitwarden bloqueado — clique para desbloquear'
+      : vs.count ? `${vs.count} login(s) para este site (Ctrl+Shift+L preenche)` : 'Nenhum login salvo para este site';
+    const kc = $('#key-count');
+    kc.hidden = vs.status !== 'unlocked' || vs.count === 0;
+    kc.textContent = String(vs.count);
+  }
+
   // Escudo na barra de endereço: estado da proteção no domínio + contador.
   const shield = $('#shield-btn');
   shield.hidden = !p;
@@ -276,6 +291,24 @@ function renderSiteBar(s: UiState): void {
   const badge = $('#blocked-count');
   badge.hidden = !p || total === 0 || p.tabPaused;
   badge.textContent = total > 99 ? '99+' : String(total);
+}
+
+function renderSavePrompt(s: UiState): void {
+  const bar = $('#save-bar');
+  const p = s.savePrompt;
+  bar.hidden = !p;
+  if (!p) return;
+  bar.dataset.promptId = p.id;
+  const who = p.username ? `de <b></b> ` : '';
+  const text = $('#save-text');
+  text.innerHTML = p.mode === 'update' ? `Atualizar a senha ${who}em <span></span> no Bitwarden?`
+    : p.mode === 'locked' ? `Desbloqueie o Bitwarden para salvar a senha ${who}em <span></span>.`
+    : `Salvar a senha ${who}em <span></span> no Bitwarden?`;
+  // Textos vindos de fora (usuário/site) entram como texto, nunca como HTML.
+  const b = text.querySelector('b');
+  if (b) b.textContent = p.username;
+  text.querySelector('span')!.textContent = p.site;
+  $('#save-yes').textContent = p.mode === 'update' ? 'Atualizar' : p.mode === 'locked' ? 'Desbloquear…' : 'Salvar';
 }
 
 function renderUpdate(s: UiState): void {
@@ -421,6 +454,111 @@ $('#dns-save').onclick = () => {
 };
 $('#dns-test').onclick = () => send({ type: 'settings:test-dns' });
 
+// ------------------------------------------------------------ cofre (Bitwarden)
+
+const vaultDialog = $<HTMLDialogElement>('#vault-dialog');
+const LOCK_LABELS: [number, string][] = [[1, '1 minuto'], [5, '5 minutos'], [15, '15 minutos'], [30, '30 minutos'], [60, '1 hora'], [240, '4 horas']];
+$('#vault-lock-after').replaceChildren(...LOCK_LABELS.map(([m, t]) => el('option', { value: String(m), textContent: t })));
+
+/** Senhas e segredos saem dos campos assim que enviados. */
+const takeSecret = (sel: string) => { const i = $<HTMLInputElement>(sel); const v = i.value; i.value = ''; return v; };
+
+function renderVault(s: UiState): void {
+  const v = s.vault;
+  $('#vault-btn').classList.toggle('unlocked', v.status === 'unlocked');
+  $('#vault-btn').title = v.status === 'unlocked' ? `Bitwarden: desbloqueado (${v.count} logins)`
+    : v.status === 'locked' ? 'Bitwarden: bloqueado' : 'Bitwarden: conectar';
+  if (!vaultDialog.open) return;
+
+  $('#vault-connect').hidden = v.status !== 'disconnected';
+  $('#vault-locked').hidden = v.status !== 'locked';
+  $('#vault-unlocked').hidden = v.status !== 'unlocked';
+  $('#vault-no-keyring').hidden = v.canRemember;
+  $('#vault-account').textContent = `${v.email} — ${v.server}`;
+  const sync = v.lastSync ? new Date(v.lastSync).toLocaleString('pt-BR') : 'nunca';
+  $('#vault-summary').textContent = `${v.email} — ${v.server}: ${v.count} logins. Última sincronização: ${sync}.`;
+  const lock = $<HTMLSelectElement>('#vault-lock-after');
+  if (document.activeElement !== lock) lock.value = String(v.lockAfterMin);
+  $<HTMLSelectElement>('#gen-length').value = String(s.generator.length);
+  $<HTMLInputElement>('#gen-symbols').checked = s.generator.symbols;
+
+  const err = $('#vault-error');
+  err.hidden = !v.error;
+  err.textContent = v.error ?? '';
+  $('#vault-disconnect').hidden = v.status === 'disconnected';
+  const primary = $<HTMLButtonElement>('#vault-primary');
+  const secondary = $<HTMLButtonElement>('#vault-secondary');
+  primary.disabled = v.busy;
+  secondary.disabled = v.busy;
+  primary.textContent = v.busy ? 'Aguarde…' : v.status === 'disconnected' ? 'Conectar' : v.status === 'locked' ? 'Desbloquear' : 'Bloquear';
+  secondary.hidden = v.status !== 'unlocked';
+  secondary.textContent = 'Sincronizar';
+}
+
+function openVault(): void {
+  if (!state) return;
+  send({ type: 'layout:overlay', open: true });
+  vaultDialog.showModal();
+  renderVault(state);
+  const focus = state.vault.status === 'locked' ? '#vault-password' : state.vault.status === 'disconnected' ? '#vault-client-id' : null;
+  if (focus) $(focus).focus();
+}
+
+$('#vault-btn').onclick = openVault;
+$('#gen-length').replaceChildren(...GENERATOR_LENGTHS.map((n) => el('option', { value: String(n), textContent: `${n} caracteres` })));
+const sendGenerator = () => send({ type: 'vault:generator', length: Number($<HTMLSelectElement>('#gen-length').value),
+  symbols: $<HTMLInputElement>('#gen-symbols').checked });
+$<HTMLSelectElement>('#gen-length').onchange = sendGenerator;
+$<HTMLInputElement>('#gen-symbols').onchange = sendGenerator;
+const answerSave = (action: 'save' | 'dismiss' | 'never') => {
+  const promptId = $('#save-bar').dataset.promptId;
+  if (promptId) send({ type: 'vault:save-answer', promptId, action });
+};
+$('#save-yes').onclick = () => {
+  if (state?.savePrompt?.mode === 'locked') openVault(); // depois de desbloquear, a barra vira "Salvar"
+  else answerSave('save');
+};
+$('#save-no').onclick = () => answerSave('dismiss');
+$('#save-never').onclick = () => answerSave('never');
+vaultDialog.addEventListener('close', () => {
+  send({ type: 'layout:overlay', open: false });
+  for (const sel of ['#vault-client-secret', '#vault-connect-password', '#vault-password']) $<HTMLInputElement>(sel).value = '';
+});
+$('#vault-close').onclick = () => vaultDialog.close();
+$<HTMLSelectElement>('#vault-server').onchange = (e) => {
+  $('#vault-custom-row').hidden = (e.target as HTMLSelectElement).value !== 'custom';
+};
+$<HTMLSelectElement>('#vault-lock-after').onchange = (e) =>
+  send({ type: 'vault:lock-after', minutes: Number((e.target as HTMLSelectElement).value) });
+$('#vault-secondary').onclick = () => send({ type: 'vault:sync' });
+$('#vault-disconnect').onclick = () => {
+  const btn = $<HTMLButtonElement>('#vault-disconnect');
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Clique de novo: esquece a conta neste computador';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Desconectar'; }, 4000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = 'Desconectar';
+  send({ type: 'vault:disconnect' });
+};
+$('#vault-form').addEventListener('submit', (e) => {
+  e.preventDefault(); // o diálogo continua aberto: o resultado chega pelo estado
+  const v = state?.vault;
+  if (!v || v.busy) return;
+  if (v.status === 'disconnected') {
+    const choice = $<HTMLSelectElement>('#vault-server').value;
+    const server = choice === 'custom' ? $<HTMLInputElement>('#vault-custom').value.trim() : choice;
+    send({ type: 'vault:connect', server, clientId: $<HTMLInputElement>('#vault-client-id').value.trim(),
+      clientSecret: takeSecret('#vault-client-secret'), password: takeSecret('#vault-connect-password') });
+  } else if (v.status === 'locked') {
+    send({ type: 'vault:unlock', password: takeSecret('#vault-password') });
+  } else {
+    send({ type: 'vault:lock' });
+  }
+});
+
 // ------------------------------------------------------------ diálogo de grupo
 
 const groupDialog = $<HTMLDialogElement>('#group-dialog');
@@ -471,6 +609,7 @@ const menuAt = (sel: string) => {
 };
 $('#site-btn').onclick = () => send({ type: 'permission:menu', ...menuAt('#site-btn') });
 $('#shield-btn').onclick = () => send({ type: 'privacy:menu', ...menuAt('#shield-btn') });
+$('#key-btn').onclick = () => send({ type: 'vault:menu', ...menuAt('#key-btn') });
 
 const answerPermission = (decision: PermissionDecision) => {
   const promptId = $('#permission-bar').dataset.promptId;
@@ -513,7 +652,9 @@ window.apollo.onState((next) => {
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'edit-group') {
+  if (event.type === 'open-vault') {
+    if (!vaultDialog.open) openVault();
+  } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);
   } else if (event.type === 'focus-address') {
     const input = $<HTMLInputElement>('#address');

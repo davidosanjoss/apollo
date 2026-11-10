@@ -46,6 +46,9 @@ jobs:
       - name: Testes de integração (app real, tela virtual)
         if: runner.os == 'Linux'
         run: scripts/ci-e2e.sh
+      - name: Compatibilidade com o Bitwarden (Vaultwarden + CLI oficial)
+        if: runner.os == 'Linux'
+        run: npm run test:interop
 
   build:
     needs: test

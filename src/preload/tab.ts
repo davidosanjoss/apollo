@@ -2,6 +2,25 @@
 // nada a ela: só pede ao processo principal os filtros cosméticos e scriptlets.
 import { ipcRenderer, webFrame } from 'electron';
 import { DOMMonitor } from '@ghostery/adblocker-content';
+import { fillLogin, fillNewPassword } from './fill';
+import { watchLogins } from './capture';
+
+// Preenchimento do Bitwarden: só o processo principal envia (mainFrame.send), e só
+// depois de conferir que a URL desta página casa com o login.
+if (window === window.top) {
+  ipcRenderer.on('apollo:fill', (_e, data: { username: string | null; password: string | null }) => {
+    fillLogin(document, data?.username ?? null, data?.password ?? null);
+  });
+  ipcRenderer.on('apollo:fill-new-password', (_e, password: string) => {
+    if (typeof password === 'string') fillNewPassword(document, password);
+  });
+  // Oferecer salvar no Bitwarden: avisa o main quando um login é enviado.
+  if (/^https?:/.test(location.href)) {
+    watchLogins(document,
+      (c) => ipcRenderer.send('apollo:login-submitted', c),
+      (u) => ipcRenderer.send('apollo:username-step', u));
+  }
+}
 
 /**
  * Um único script com todos os scriptlets, como o uBlock faz: as funções nativas

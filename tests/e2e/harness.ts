@@ -61,6 +61,16 @@ export async function startSite(): Promise<TestSite> {
         // Página em 127.0.0.1 que carrega um "anúncio" e um "rastreador" de localhost (terceiros).
         return html(`<script src="http://localhost:${port}/ads/banner.js"></script>
           <img src="http://localhost:${port}/track/pixel.gif">`, u.searchParams.get('title') ?? 'Bloqueio');
+      case '/signup':
+        return html(`<form onsubmit="return false"><input id="email" type="email" name="email">
+          <input id="nova" type="password" name="nova"><input id="conf" type="password" name="conf"></form>`, 'Cadastro');
+      case '/step1':
+        return html(`<form onsubmit="return false"><input id="email" type="email" name="loginfmt"><button id="avancar">Avançar</button></form>`, 'Etapa 1');
+      case '/step2':
+        return html(`<form onsubmit="return false"><input id="senha" type="password" name="passwd"><button id="entrar">Entrar</button></form>`, 'Etapa 2');
+      case '/login':
+        return html(`<form><input id="busca" type="search" name="q">
+          <input id="email" type="email" name="email"><input id="senha" type="password" name="senha"></form>`, 'Entrar');
       case '/cosmetic':
         return html(`<div class="anuncio">ANUNCIO</div><div id="conteudo">conteudo</div>
           <script>document.title = window.adsEnabled === false ? 'scriptlet-ok' : 'scriptlet-nao';
@@ -184,6 +194,14 @@ export class Cdp {
     }
   }
 
+  /** Enter de verdade (evento confiável) no elemento, como o usuário faria. */
+  async pressEnter(selector: string): Promise<void> {
+    await this.eval(`document.querySelector(${JSON.stringify(selector)}).focus(); true`);
+    await this.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await this.call('Input.dispatchKeyEvent', { type: 'char', key: 'Enter', text: '\r' });
+    await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  }
+
   close(): void { this.ws.close(); }
 }
 
@@ -197,6 +215,56 @@ async function freePort(): Promise<number> {
   const { port } = s.address() as net.AddressInfo;
   await new Promise((r) => s.close(r));
   return port;
+}
+
+/** Servidor Bitwarden falso (http em 127.0.0.1) servindo um cofre sintético. */
+export async function startFakeBitwarden(clientSecret: string, tokenBody: object, syncBody: object) {
+  const calls: string[] = [];
+  // Itens gravados pelo Apollo entram no /sync seguinte (como num servidor de verdade).
+  const sync = JSON.parse(JSON.stringify(syncBody)) as { ciphers: Record<string, unknown>[] };
+  const writes: { method: string; id?: string; body: Record<string, any> }[] = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      const u = new URL(req.url ?? '/', 'http://x');
+      calls.push(u.pathname);
+      const json = (status: number, obj: object) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+      if (u.pathname === '/identity/connect/token') {
+        const form = new URLSearchParams(body);
+        if (form.get('client_secret') !== clientSecret) return json(400, { error: 'invalid_client', error_description: '', message: 'Invalid client_id' });
+        return json(200, tokenBody);
+      }
+      if (u.pathname === '/api/sync') {
+        if (req.headers.authorization !== 'Bearer token-de-teste') return json(401, {});
+        return json(200, sync);
+      }
+      if (u.pathname === '/api/ciphers' && req.method === 'POST') {
+        const b = JSON.parse(body);
+        const id = `novo-${writes.length}`;
+        writes.push({ method: 'POST', id, body: b });
+        sync.ciphers.push({ ...b, id, revisionDate: new Date().toISOString() });
+        return json(200, { id });
+      }
+      const m = u.pathname.match(/^\/api\/ciphers\/(.+)$/);
+      if (m && req.method === 'PUT') {
+        const b = JSON.parse(body);
+        writes.push({ method: 'PUT', id: m[1], body: b });
+        const i = sync.ciphers.findIndex((c) => c.id === m[1]);
+        sync.ciphers[i] = { ...sync.ciphers[i], ...b, id: m[1], revisionDate: new Date().toISOString() };
+        return json(200, {});
+      }
+      json(404, {});
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address() as net.AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    calls,
+    writes,
+    close: () => new Promise<void>((r) => { server.closeAllConnections(); server.close(() => r()); }),
+  };
 }
 
 /** Listas de bloqueio de teste (no lugar das reais): /ads/ = anúncio, /track/ = rastreador. */

@@ -21,10 +21,8 @@ export interface StoredCookie {
   sameSite: CookiesSetDetails['sameSite'];
 }
 
-export interface Cipher {
-  encrypt(plain: string): Buffer;
-  decrypt(data: Buffer): string;
-}
+export type { SecretBox as Cipher } from './secret-box';
+import type { SecretBox as Cipher } from './secret-box';
 
 export function toStored(c: Cookie): StoredCookie | null {
   if (!c.session || !c.domain) return null;
@@ -58,14 +56,14 @@ export function toSetDetails(c: StoredCookie): CookiesSetDetails {
 
 export async function captureSessionCookies(ses: Session, cipher: Cipher): Promise<Buffer> {
   const cookies = (await ses.cookies.get({})).map(toStored).filter((c): c is StoredCookie => c !== null);
-  return cipher.encrypt(JSON.stringify(cookies));
+  return await cipher.encrypt(JSON.stringify(cookies));
 }
 
 /** Devolve os cookies à sessão. Erros (dado ilegível, cookie recusado) não impedem o resto. */
 export async function restoreSessionCookies(ses: Session, data: Buffer, cipher: Cipher): Promise<number> {
   let cookies: StoredCookie[];
   try {
-    cookies = JSON.parse(cipher.decrypt(data));
+    cookies = JSON.parse(await cipher.decrypt(data));
     if (!Array.isArray(cookies)) return 0;
   } catch {
     return 0; // chave do chaveiro mudou ou dado corrompido: segue sem eles

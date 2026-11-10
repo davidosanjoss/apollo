@@ -11,6 +11,7 @@
     <div id="workspace-list"></div>
     <button id="add-workspace" class="ws-btn add" title="Novo workspace">+</button>
     <span class="spacer"></span>
+    <button id="vault-btn" class="ws-btn add" title="Bitwarden"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg></button>
     <button id="settings-btn" class="ws-btn add" title="Configurações">⚙</button>
   </aside>
 
@@ -26,6 +27,7 @@
       <span id="ws-badge"></span>
       <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
       <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
       <button id="shield-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg><span id="blocked-count" hidden></span></button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
     </nav>
@@ -36,6 +38,14 @@
       <span class="spacer"></span>
       <button id="permission-allow" class="primary">Permitir</button>
       <button id="permission-deny">Bloquear</button>
+    </div>
+
+    <div id="save-bar" class="bar" hidden>
+      <span id="save-text"></span>
+      <span class="spacer"></span>
+      <button id="save-yes" class="primary"></button>
+      <button id="save-no">Agora não</button>
+      <button id="save-never">Nunca neste site</button>
     </div>
 
     <div id="update-bar" class="bar" hidden>
@@ -124,6 +134,54 @@
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="submit">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vault-dialog">
+    <form method="dialog" id="vault-form" autocomplete="off">
+      <h2>Bitwarden</h2>
+
+      <!-- Desconectado -->
+      <div id="vault-connect" class="vault-view">
+        <label>Servidor
+          <select id="vault-server">
+            <option value="us">bitwarden.com</option>
+            <option value="eu">bitwarden.eu</option>
+            <option value="custom">Servidor próprio (Vaultwarden etc.)</option>
+          </select>
+        </label>
+        <label id="vault-custom-row" hidden>Endereço do servidor <input id="vault-custom" placeholder="https://cofre.exemplo.com" spellcheck="false"></label>
+        <p class="hint">Chave de API pessoal: no cofre web, <b>Configurações → Segurança → Chaves → Ver chave de API</b>.
+          A senha mestra é usada só neste computador, para decifrar o cofre.</p>
+        <label>client_id <input id="vault-client-id" placeholder="user.xxxxxxxx-…" spellcheck="false"></label>
+        <label>client_secret <input id="vault-client-secret" type="password" spellcheck="false"></label>
+        <label>Senha mestra <input id="vault-connect-password" type="password"></label>
+        <p class="hint" id="vault-no-keyring" hidden>Sem chaveiro do sistema: a conexão não será lembrada ao fechar o Apollo.</p>
+      </div>
+
+      <!-- Bloqueado -->
+      <div id="vault-locked" class="vault-view">
+        <p id="vault-account"></p>
+        <label>Senha mestra <input id="vault-password" type="password"></label>
+      </div>
+
+      <!-- Desbloqueado -->
+      <div id="vault-unlocked" class="vault-view">
+        <p id="vault-summary"></p>
+        <label>Bloquear após ficar sem usar o computador por <select id="vault-lock-after"></select></label>
+        <p class="hint">Também bloqueia ao bloquear a tela, ao suspender e ao fechar o Apollo.</p>
+        <label>Senhas geradas <span class="row-inline"><select id="gen-length"></select>
+          <span class="remember"><input type="checkbox" id="gen-symbols"> com símbolos</span></span></label>
+      </div>
+
+      <p id="vault-error" class="error" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="vault-disconnect" class="danger">Desconectar</button>
+        <span class="spacer"></span>
+        <button type="button" id="vault-close">Fechar</button>
+        <button type="button" id="vault-secondary"></button>
+        <button type="submit" id="vault-primary" class="primary"></button>
       </div>
     </form>
   </dialog>

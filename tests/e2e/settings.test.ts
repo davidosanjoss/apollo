@@ -65,6 +65,28 @@ describe('configurações', () => {
   });
 });
 
+describe('elementos escondidos ficam escondidos', () => {
+  // Regressão: "dialog label { display: flex }" vencia o atributo hidden — o campo de
+  // servidor próprio do Bitwarden e a opção "Temporário" ao editar apareciam.
+  const visible = (sel: string) => app.ui.eval<boolean>(`(() => { const e = document.querySelector('${sel}'); return !!e && getComputedStyle(e).display !== 'none'; })()`);
+
+  it('campo de servidor próprio só aparece ao escolher "Servidor próprio"', async () => {
+    await app.ui.mouseClick('#vault-btn');
+    await waitFor(() => app.ui.eval<boolean>(`document.getElementById('vault-dialog').open`), 'diálogo');
+    expect(await visible('#vault-custom-row')).toBe(false);
+    await app.ui.eval(`(() => { const s = document.getElementById('vault-server'); s.value = 'custom'; s.dispatchEvent(new Event('change')); return true; })()`);
+    expect(await visible('#vault-custom-row')).toBe(true);
+    await app.ui.eval(`document.getElementById('vault-dialog').close(); true`);
+  });
+
+  it('"Temporário" não aparece ao editar um workspace existente', async () => {
+    await app.ui.eval(`document.querySelector('#workspace-list .ws-btn').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })); true`);
+    await waitFor(() => app.ui.eval<boolean>(`document.getElementById('ws-dialog').open`), 'diálogo do workspace');
+    expect(await visible('#ws-temporary-row')).toBe(false);
+    await app.ui.eval(`document.getElementById('ws-dialog').close(); true`);
+  });
+});
+
 describe('workspace temporário', () => {
   it('funciona normalmente, mas nada vai para o disco e some ao reabrir', async () => {
     await app.send({ type: 'workspace:create', name: 'Anônimo', color: '#444444', home: '', temporary: true });
