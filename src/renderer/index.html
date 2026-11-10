@@ -40,6 +40,14 @@
       <button id="permission-deny">Bloquear</button>
     </div>
 
+    <div id="save-bar" class="bar" hidden>
+      <span id="save-text"></span>
+      <span class="spacer"></span>
+      <button id="save-yes" class="primary"></button>
+      <button id="save-no">Agora não</button>
+      <button id="save-never">Nunca neste site</button>
+    </div>
+
     <div id="update-bar" class="bar" hidden>
       <span id="update-text"></span>
       <span class="spacer"></span>
@@ -163,6 +171,8 @@
         <p id="vault-summary"></p>
         <label>Bloquear após ficar sem usar o computador por <select id="vault-lock-after"></select></label>
         <p class="hint">Também bloqueia ao bloquear a tela, ao suspender e ao fechar o Apollo.</p>
+        <label>Senhas geradas <span class="row-inline"><select id="gen-length"></select>
+          <span class="remember"><input type="checkbox" id="gen-symbols"> com símbolos</span></span></label>
       </div>
 
       <p id="vault-error" class="error" hidden></p>

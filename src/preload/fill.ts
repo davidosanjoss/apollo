@@ -3,7 +3,7 @@
 
 const USERNAME_HINT = /user|usuario|login|e-?mail|mail|conta|account|cpf|matr[ií]cula|identifier|loginfmt/i;
 
-function visible(el: HTMLInputElement): boolean {
+export function visible(el: HTMLInputElement): boolean {
   if (el.disabled || el.readOnly || el.type === 'hidden' || el.hidden) return false;
   for (let n: HTMLElement | null = el; n; n = n.parentElement) {
     const st = n.ownerDocument.defaultView?.getComputedStyle(n);
@@ -23,7 +23,7 @@ function setValue(el: HTMLInputElement, value: string): void {
 
 const TEXTUAL = new Set(['text', 'email', 'tel', '']);
 
-function findUsername(scope: ParentNode, before?: Element): HTMLInputElement | null {
+export function findUsername(scope: ParentNode, before?: Element): HTMLInputElement | null {
   const inputs = [...scope.querySelectorAll('input')].filter((i) => TEXTUAL.has(i.type) && visible(i));
   const candidates = before ? inputs.filter((i) => before.compareDocumentPosition(i) & Node.DOCUMENT_POSITION_PRECEDING) : inputs;
   const hinted = candidates.filter((i) => i.autocomplete === 'username' || i.type === 'email'
@@ -42,4 +42,11 @@ export function fillLogin(doc: Document, username: string | null, password: stri
   if (user && username) { setValue(user, username); result.username = true; }
   if (pass && password) { setValue(pass, password); result.password = true; }
   return result;
+}
+
+/** Gerador: preenche os campos de senha VAZIOS e visíveis (senha nova + confirmação). */
+export function fillNewPassword(doc: Document, password: string): number {
+  const fields = [...doc.querySelectorAll<HTMLInputElement>('input[type=password]')].filter((i) => visible(i) && !i.value);
+  for (const f of fields) setValue(f, password);
+  return fields.length;
 }

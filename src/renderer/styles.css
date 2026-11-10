@@ -62,6 +62,9 @@ body { display: flex; }
 #dns-status.fail { color: #e5534b; }
 #global-privacy { display: flex; flex-direction: column; gap: 8px; }
 #vault-dialog { width: 460px; max-width: calc(100vw - 32px); }
+.row-inline { display: flex; align-items: center; gap: 12px; }
+.row-inline .remember { display: flex; align-items: center; gap: 6px; }
+#save-text b { color: var(--text); }
 #vault-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
 #vault-btn.unlocked { color: #3fb950; border-color: #3fb95066; }
 .vault-view[hidden] { display: none; }

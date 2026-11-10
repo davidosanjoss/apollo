@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -76,6 +76,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderPermissionPrompt(s);
+  renderSavePrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
   renderMemory(s);
@@ -292,6 +293,24 @@ function renderSiteBar(s: UiState): void {
   badge.textContent = total > 99 ? '99+' : String(total);
 }
 
+function renderSavePrompt(s: UiState): void {
+  const bar = $('#save-bar');
+  const p = s.savePrompt;
+  bar.hidden = !p;
+  if (!p) return;
+  bar.dataset.promptId = p.id;
+  const who = p.username ? `de <b></b> ` : '';
+  const text = $('#save-text');
+  text.innerHTML = p.mode === 'update' ? `Atualizar a senha ${who}em <span></span> no Bitwarden?`
+    : p.mode === 'locked' ? `Desbloqueie o Bitwarden para salvar a senha ${who}em <span></span>.`
+    : `Salvar a senha ${who}em <span></span> no Bitwarden?`;
+  // Textos vindos de fora (usuário/site) entram como texto, nunca como HTML.
+  const b = text.querySelector('b');
+  if (b) b.textContent = p.username;
+  text.querySelector('span')!.textContent = p.site;
+  $('#save-yes').textContent = p.mode === 'update' ? 'Atualizar' : p.mode === 'locked' ? 'Desbloquear…' : 'Salvar';
+}
+
 function renderUpdate(s: UiState): void {
   const bar = $('#update-bar');
   const u = s.update;
@@ -460,6 +479,8 @@ function renderVault(s: UiState): void {
   $('#vault-summary').textContent = `${v.email} — ${v.server}: ${v.count} logins. Última sincronização: ${sync}.`;
   const lock = $<HTMLSelectElement>('#vault-lock-after');
   if (document.activeElement !== lock) lock.value = String(v.lockAfterMin);
+  $<HTMLSelectElement>('#gen-length').value = String(s.generator.length);
+  $<HTMLInputElement>('#gen-symbols').checked = s.generator.symbols;
 
   const err = $('#vault-error');
   err.hidden = !v.error;
@@ -484,6 +505,21 @@ function openVault(): void {
 }
 
 $('#vault-btn').onclick = openVault;
+$('#gen-length').replaceChildren(...GENERATOR_LENGTHS.map((n) => el('option', { value: String(n), textContent: `${n} caracteres` })));
+const sendGenerator = () => send({ type: 'vault:generator', length: Number($<HTMLSelectElement>('#gen-length').value),
+  symbols: $<HTMLInputElement>('#gen-symbols').checked });
+$<HTMLSelectElement>('#gen-length').onchange = sendGenerator;
+$<HTMLInputElement>('#gen-symbols').onchange = sendGenerator;
+const answerSave = (action: 'save' | 'dismiss' | 'never') => {
+  const promptId = $('#save-bar').dataset.promptId;
+  if (promptId) send({ type: 'vault:save-answer', promptId, action });
+};
+$('#save-yes').onclick = () => {
+  if (state?.savePrompt?.mode === 'locked') openVault(); // depois de desbloquear, a barra vira "Salvar"
+  else answerSave('save');
+};
+$('#save-no').onclick = () => answerSave('dismiss');
+$('#save-never').onclick = () => answerSave('never');
 vaultDialog.addEventListener('close', () => {
   send({ type: 'layout:overlay', open: false });
   for (const sel of ['#vault-client-secret', '#vault-connect-password', '#vault-password']) $<HTMLInputElement>(sel).value = '';

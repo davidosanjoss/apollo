@@ -77,6 +77,51 @@ for (const [label, kdf] of [
   });
 }
 
+describe('gravação: o CLI oficial lê o que o Apollo grava', () => {
+  const email = 'grava@apollo.local';
+  const password = 'senha mestra de gravação 789';
+  const kdf: Kdf = { type: 0, iterations: 600_000 };
+  let bw: BwCli;
+  let token: string;
+  let masterKey: Buffer;
+
+  const openVault = async () => UnlockedVault.open(await api().sync(token), masterKey, null);
+
+  it('login novo criado pelo Apollo aparece certo no CLI oficial', async () => {
+    const created = await registerAccount(server, email, password, kdf);
+    masterKey = created.masterKey;
+    token = (await api().loginPassword(email, hashMasterPassword(masterKey, password))).accessToken;
+    bw = new BwCli(bwBin, server);
+    bw.login(email, password);
+
+    const vault = await openVault();
+    await api().createCipher(token, vault.newLoginRequest({ name: 'portal.ufmg.br', username: 'matricula', password: 'nova-s3nha!', uri: 'https://portal.ufmg.br' }));
+    const item = bw.listItems().find((i) => i.name === 'portal.ufmg.br')!;
+    expect(item.login).toMatchObject({ username: 'matricula', password: 'nova-s3nha!', uris: [{ uri: 'https://portal.ufmg.br' }] });
+    // Item com chave própria (a saída do CLI não mostra o campo: confere no /sync cru).
+    const raw = ((await api().sync(token)) as { ciphers: { id: string; key?: string }[] }).ciphers.find((c) => c.id === item.id)!;
+    expect(raw.key).toMatch(/^2\./);
+  });
+
+  it('atualizar a senha preserva notas, campos, TOTP e guarda a antiga no histórico', async () => {
+    bw.createItem({ type: 1, name: 'Banco', notes: 'agência 1234', fields: [{ name: 'PIN', value: '9876', type: 1 }],
+      login: { username: 'eu', password: 'senha-velha', totp: 'JBSWY3DPEHPK3PXP', uris: [{ uri: 'https://banco.com.br' }] } });
+    const vault = await openVault();
+    const banco = vault.logins.find((l) => l.name === 'Banco')!;
+    await api().updateCipher(token, banco.id, vault.passwordUpdateRequest(banco.id, 'senha-nova')!);
+
+    const item = bw.getItem(banco.id);
+    expect(item.login.password).toBe('senha-nova');
+    expect(item.login.username).toBe('eu');
+    expect(item.login.totp).toBe('JBSWY3DPEHPK3PXP');
+    expect(item.notes).toBe('agência 1234');
+    expect(item.fields).toMatchObject([{ name: 'PIN', value: '9876', type: 1 }]);
+    expect(item.passwordHistory?.[0]?.password).toBe('senha-velha');
+    // E o próprio Apollo lê o resultado.
+    expect((await openVault()).password(banco.id)).toBe('senha-nova');
+  });
+});
+
 describe('organização (chave RSA)', () => {
   it('item de organização criado pelo CLI oficial abre no Apollo', async () => {
     const email = 'org@apollo.local';

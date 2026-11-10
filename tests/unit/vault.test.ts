@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { encrypt, makeAccountKeys, makeMasterKey, rsaEncrypt, symKeyFrom } from '../../src/main/vault/crypto';
+import { decrypt, decryptString, encrypt, makeAccountKeys, makeMasterKey, rsaEncrypt, stretchMasterKey, symKeyFrom } from '../../src/main/vault/crypto';
 import { UnlockedVault } from '../../src/main/vault/vault';
 
 /** Monta um /sync sintético cifrado como o Bitwarden faz. */
@@ -70,5 +70,24 @@ describe('UnlockedVault', () => {
     v.lock();
     expect(v.logins).toEqual([]);
     expect(v.password(id)).toBeNull();
+  });
+
+  // Regressão: itens criados pelo Apollo saíam sem uriChecksum e os clientes oficiais
+  // descartavam a URL. E uma URL adulterada no servidor não pode valer.
+  it('uriChecksum: gravado ao criar; URL com checksum que não bate é ignorada', async () => {
+    const { sync, masterKey } = await fixture();
+    const v = UnlockedVault.open(sync, masterKey);
+    const body = v.newLoginRequest({ name: 'n', username: 'u', password: 'p', uri: 'https://banco.com' }) as any;
+    const uk = symKeyFrom(decrypt(sync.profile.key, stretchMasterKey(masterKey)));
+    const key = symKeyFrom(decrypt(body.key, uk));
+    expect(decryptString(body.login.uris[0].uriChecksum, key)).toBe(crypto.createHash('sha256').update('https://banco.com').digest('base64'));
+
+    const pessoal = sync.ciphers[0] as any;
+    pessoal.login.uris = [
+      { uri: encrypt('https://golpe.com', uk), uriChecksum: encrypt(crypto.createHash('sha256').update('https://pessoal.com').digest('base64'), uk), match: null },
+      { uri: encrypt('https://pessoal.com', uk), uriChecksum: encrypt(crypto.createHash('sha256').update('https://pessoal.com').digest('base64'), uk), match: null },
+    ];
+    const v2 = UnlockedVault.open(sync, masterKey);
+    expect(v2.logins.find((l) => l.id === 'c1')!.uris.map((u) => u.uri)).toEqual(['https://pessoal.com']);
   });
 });

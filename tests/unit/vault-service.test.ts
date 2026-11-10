@@ -31,6 +31,8 @@ function setup(opts: { box?: SecretBox | null; online?: boolean } = {}) {
       return { accessToken: 't', expiresIn: 3600, key: fx.token.Key, privateKey: fx.token.PrivateKey, kdf: { type: 0 as const, iterations: 5000 } };
     }),
     sync: vi.fn(async () => fx.sync),
+    createCipher: vi.fn(async (_t: string, _body: object) => ({})),
+    updateCipher: vi.fn(async (_t: string, _id: string, _body: object) => ({})),
   };
   const onChange = vi.fn();
   const make = () => new VaultService(storage, opts.box === undefined ? box : opts.box, () => api, onChange, () => 'device-1');
@@ -127,6 +129,38 @@ describe('VaultService', () => {
     const svc2 = new VaultService(s.storage, flaky, () => s.api, () => {}, () => 'device-1');
     expect(await svc2.unlock(FIXTURE_PASSWORD)).toBe(true);
     expect(s.api.sync).toHaveBeenCalledTimes(2); // conexão + este desbloqueio (cópia local ilegível)
+  });
+
+  it('salvar login: cria no servidor (cifrado) e sincroniza', async () => {
+    const s = setup();
+    await s.svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
+    expect(await s.svc.saveLogin({ name: 'site.com', username: 'eu', password: 'nova', uri: 'https://site.com' })).toBe(true);
+    const body = s.api.createCipher.mock.calls[0][1] as Record<string, any>;
+    expect(JSON.stringify(body)).not.toContain('nova'); // vai cifrado
+    expect(body.encryptedFor).toBe('user-1');
+    expect(s.api.sync).toHaveBeenCalledTimes(2);
+  });
+
+  it('atualizar senha: troca só a senha e guarda a antiga (cifrada) no histórico', async () => {
+    const s = setup();
+    await s.svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
+    const id = s.svc.unlocked!.logins[0].id;
+    expect(await s.svc.updatePassword(id, 'senha-nova')).toBe(true);
+    const [, sentId, body] = s.api.updateCipher.mock.calls[0] as [string, string, Record<string, any>];
+    expect(sentId).toBe(id);
+    expect(body.name).toBe(fx.sync.ciphers[0].name); // intocado, ainda cifrado
+    expect(body.login.username).toBe(fx.sync.ciphers[0].login.username);
+    expect(body.passwordHistory[0].password).toBe(fx.sync.ciphers[0].login.password);
+    expect(body.login.password).not.toBe(fx.sync.ciphers[0].login.password);
+  });
+
+  it('gravar com o cofre bloqueado: erro claro, nada enviado', async () => {
+    const s = setup();
+    await s.svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
+    s.svc.lock();
+    expect(await s.svc.saveLogin({ name: 'x', username: null, password: 'p', uri: 'https://x.com' })).toBeNull();
+    expect(s.svc.info().error).toBe('desbloqueie o cofre para salvar');
+    expect(s.api.createCipher).not.toHaveBeenCalled();
   });
 
   it('desconectar esquece tudo', async () => {

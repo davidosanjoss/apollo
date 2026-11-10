@@ -12,13 +12,28 @@ import type { MenuModelItem } from './menu-model';
 import { vaultMenu } from './vault/menu';
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
-import type { UnlockedVault } from './vault/vault';
+import type { NewLogin, UnlockedVault } from './vault/vault';
+import { decideSave, itemName, type SaveDecision } from './vault/save';
+import { DEFAULT_GENERATOR, generatePassword } from './vault/generator';
 
 /** O que o Browser precisa do cofre (o VaultService implementa). */
 export interface VaultProvider {
   status(): 'disconnected' | 'locked' | 'unlocked';
   vault(): UnlockedVault | null;
+  saveLogin(login: NewLogin): Promise<boolean | null>;
+  updatePassword(id: string, password: string): Promise<boolean | null>;
 }
+
+interface PendingSave {
+  id: string;
+  url: string;
+  username: string | null;
+  password: string;
+  at: number;
+  decision: SaveDecision | undefined; // undefined = ainda não decidido (cofre bloqueado)
+}
+
+const SAVE_PROMPT_TTL_MS = 5 * 60_000;
 
 const CLIPBOARD_CLEAR_MS = 30_000;
 import type { RequestContext } from './network';
@@ -653,6 +668,8 @@ export class Browser {
     this.unloadBlocked.delete(tabId);
     this.pausedTabs.delete(tabId);
     this.blocked.delete(tabId);
+    this.pendingSaves.delete(tabId);
+    this.usernameSteps.delete(tabId);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
       this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
@@ -988,6 +1005,9 @@ export class Browser {
       case 'vault:fill': this.fillLogin(cmd.itemId); break;
       case 'vault:copy': this.copyFromVault(cmd.itemId, cmd.what); break;
       case 'vault:open': this.emit({ type: 'open-vault' }); break;
+      case 'vault:save-answer': this.answerSave(cmd.promptId, cmd.action); break;
+      case 'vault:generate': this.generate(cmd.fill); break;
+      case 'vault:generator': this.store.setKv('vault.generator', JSON.stringify({ length: cmd.length, symbols: cmd.symbols })); break;
       case 'permission:menu': this.showPermissionsMenu(cmd.x, cmd.y); break;
       case 'settings:memory-limit':
         this.store.setKv('memoryLimitMb', String(cmd.mb));
@@ -1032,6 +1052,104 @@ export class Browser {
 
   private vaultProvider: VaultProvider | null = null;
   private clipboardTimer: NodeJS.Timeout | null = null;
+  /** Logins enviados aguardando "salvar?" (senha só aqui, em memória, por 5 min). */
+  private readonly pendingSaves = new Map<string, PendingSave>();
+  /** E-mail da 1ª etapa de logins em duas etapas, por aba. */
+  private readonly usernameSteps = new Map<string, { site: string | null; username: string; at: number }>();
+
+  /** Preload da aba: o usuário digitou o usuário numa 1ª etapa (sem senha). */
+  onUsernameStep(tabId: string, frameUrl: string, username: string): void {
+    this.usernameSteps.set(tabId, { site: siteOf(frameUrl), username, at: Date.now() });
+  }
+
+  /** Preload da aba: login enviado. A URL é a do frame (dada pelo main), nunca a da página. */
+  onLoginSubmitted(tabId: string, frameUrl: string, username: string | null, password: string): void {
+    const status = this.vaultProvider?.status() ?? 'disconnected';
+    const site = siteOf(frameUrl);
+    if (status === 'disconnected' || !site || !/^https?:/.test(frameUrl) || this.neverSaveSites().has(site)) return;
+    let user = username;
+    const step = this.usernameSteps.get(tabId);
+    if (!user && step && step.site === site && Date.now() - step.at < SAVE_PROMPT_TTL_MS) user = step.username;
+    const pending: PendingSave = { id: newId(), url: frameUrl, username: user, password, at: Date.now(), decision: undefined };
+    if (!this.decide(pending)) return; // já salvo exatamente assim
+    this.pendingSaves.set(tabId, pending);
+    this.push();
+  }
+
+  /** Decide (se o cofre está aberto). false = não há o que oferecer. */
+  private decide(p: PendingSave): boolean {
+    const v = this.vaultProvider?.vault();
+    if (!v) return true; // bloqueado: pergunta depois de desbloquear
+    if (p.decision === undefined) p.decision = decideSave(v.logins, (id) => v.password(id), p.url, p.username, p.password);
+    return p.decision !== null;
+  }
+
+  private neverSaveSites(): Set<string> {
+    try { return new Set(JSON.parse(this.store.getKv('vault.neverSave') ?? '[]') as string[]); } catch { return new Set(); }
+  }
+
+  private savePrompt(tabId: string | null): UiState['savePrompt'] {
+    const p = tabId ? this.pendingSaves.get(tabId) : undefined;
+    if (!p || !tabId) return null;
+    if (Date.now() - p.at > SAVE_PROMPT_TTL_MS || (this.vaultProvider?.status() ?? 'disconnected') === 'disconnected') {
+      this.pendingSaves.delete(tabId);
+      return null;
+    }
+    if (!this.decide(p)) { this.pendingSaves.delete(tabId); return null; }
+    const mode = p.decision === undefined ? 'locked' : p.decision!.mode;
+    return { id: p.id, site: siteOf(p.url) ?? p.url, username: p.username, mode };
+  }
+
+  answerSave(promptId: string, action: 'save' | 'dismiss' | 'never'): void {
+    const entry = [...this.pendingSaves].find(([, p]) => p.id === promptId);
+    if (!entry) return;
+    const [tabId, p] = entry;
+    if (action === 'never') {
+      const sites = this.neverSaveSites();
+      const site = siteOf(p.url);
+      if (site) sites.add(site);
+      this.store.setKv('vault.neverSave', JSON.stringify([...sites]));
+    }
+    if (action === 'save') {
+      if (!this.decide(p) || p.decision === undefined) return; // ainda bloqueado: barra continua
+      const d = p.decision!;
+      if (d.mode === 'save') {
+        void this.vaultProvider!.saveLogin({ name: itemName(p.url), username: p.username, password: p.password, uri: new URL(p.url).origin });
+      } else {
+        void this.vaultProvider!.updatePassword(d.itemId, p.password);
+      }
+    }
+    this.pendingSaves.delete(tabId);
+    this.push();
+  }
+
+  private generatorOptions(): { length: number; symbols: boolean } {
+    try {
+      const g = JSON.parse(this.store.getKv('vault.generator') ?? 'null') as { length: number; symbols: boolean } | null;
+      if (g && typeof g.length === 'number' && typeof g.symbols === 'boolean') return g;
+    } catch { /* padrão */ }
+    return { length: DEFAULT_GENERATOR.length, symbols: DEFAULT_GENERATOR.symbols };
+  }
+
+  /** Gera uma senha: preenche os campos de senha novos da página ou copia. */
+  generate(fill: boolean): void {
+    const password = generatePassword({ ...DEFAULT_GENERATOR, ...this.generatorOptions() });
+    const tab = this.activeTab();
+    const wc = tab && this.views.get(tab.id)?.webContents;
+    if (fill && wc && !wc.isDestroyed() && /^https?:/.test(wc.mainFrame.url)) {
+      wc.mainFrame.send('apollo:fill-new-password', password);
+    }
+    this.copySecret(password); // também na área de transferência (some em 30 s), para não perder a senha
+  }
+
+  private copySecret(value: string): void {
+    void clipboard.writeText(value);
+    if (this.clipboardTimer) clearTimeout(this.clipboardTimer);
+    this.clipboardTimer = setTimeout(() => {
+      void Promise.resolve(clipboard.readText()).then((now) => { if (now === value) clipboard.clear(); });
+    }, CLIPBOARD_CLEAR_MS);
+    this.clipboardTimer.unref();
+  }
 
   setVaultProvider(p: VaultProvider): void {
     this.vaultProvider = p;
@@ -1092,14 +1210,8 @@ export class Browser {
       try { value = secret ? totp(parseTotp(secret)).code : null; } catch { value = null; }
     }
     if (!value) return;
-    void clipboard.writeText(value);
-    if (what === 'username') return; // usuário não é segredo
-    if (this.clipboardTimer) clearTimeout(this.clipboardTimer);
-    const copied = value;
-    this.clipboardTimer = setTimeout(() => {
-      void Promise.resolve(clipboard.readText()).then((now) => { if (now === copied) clipboard.clear(); });
-    }, CLIPBOARD_CLEAR_MS);
-    this.clipboardTimer.unref();
+    if (what === 'username') { void clipboard.writeText(value); return; } // usuário não é segredo
+    this.copySecret(value);
   }
 
   setVault(info: VaultStatusInfo): void {
@@ -1175,6 +1287,8 @@ export class Browser {
       memory: this.memoryReport,
       vault: this.vaultInfo,
       vaultSite: this.vaultSite(active?.url),
+      savePrompt: this.savePrompt(ws.activeTabId),
+      generator: this.generatorOptions(),
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }

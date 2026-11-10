@@ -209,7 +209,29 @@ app.whenReady().then(async () => {
     () => randomUUID(),
   );
   browser.setVault(vault.info());
-  browser.setVaultProvider({ status: () => vault.status(), vault: () => vault.unlocked });
+  browser.setVaultProvider({
+    status: () => vault.status(),
+    vault: () => vault.unlocked,
+    saveLogin: (l) => vault.saveLogin(l),
+    updatePassword: (id, p) => vault.updatePassword(id, p),
+  });
+  // Logins enviados nas abas (preload): só do frame principal de uma aba; URL do próprio frame.
+  const fromTabFrame = (event: Electron.IpcMainEvent) => {
+    const tabId = browser.tabIdOf(event.sender);
+    const frame = event.senderFrame;
+    return tabId && frame && frame === event.sender.mainFrame ? { tabId, url: frame.url } : null;
+  };
+  const text = (v: unknown, max = 1024) => (typeof v === 'string' && v.length > 0 && v.length <= max ? v : null);
+  ipcMain.on('apollo:login-submitted', (event, data: { username?: unknown; password?: unknown }) => {
+    const src = fromTabFrame(event);
+    const password = text(data?.password);
+    if (src && password) browser.onLoginSubmitted(src.tabId, src.url, text(data?.username), password);
+  });
+  ipcMain.on('apollo:username-step', (event, username: unknown) => {
+    const src = fromTabFrame(event);
+    const u = text(username);
+    if (src && u) browser.onUsernameStep(src.tabId, src.url, u);
+  });
   // Bloqueio automático: tela bloqueada, suspensão e tempo ocioso do sistema.
   powerMonitor.on('lock-screen', () => vault.lock());
   powerMonitor.on('suspend', () => vault.lock());

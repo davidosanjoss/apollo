@@ -25,7 +25,9 @@ export async function startVaultwarden(): Promise<Server> {
   if (!dir) throw new Error('rode com vitest.interop.config.ts (global-setup)');
   const id = execFileSync('docker', ['run', '-d', '--rm', '-p', '127.0.0.1::80', '-v', `${dir}:/ssl:ro`,
     '-e', 'I_REALLY_WANT_VOLATILE_STORAGE=true', '-e', 'ROCKET_TLS={certs="/ssl/cert.pem",key="/ssl/key.pem"}',
-    '-e', 'SIGNUPS_ALLOWED=true', '-e', 'DISABLE_ICON_DOWNLOAD=true', '-e', 'LOG_LEVEL=warn', VAULTWARDEN_IMAGE], { encoding: 'utf8' }).trim();
+    '-e', 'SIGNUPS_ALLOWED=true', '-e', 'DISABLE_ICON_DOWNLOAD=true', '-e', `LOG_LEVEL=${process.env.APOLLO_VW_LOG ?? 'warn'}`,
+    // Os testes fazem muitos logins seguidos: sem isso o Vaultwarden limita (HTTP 429).
+    '-e', 'LOGIN_RATELIMIT_MAX_BURST=1000', '-e', 'LOGIN_RATELIMIT_SECONDS=1', VAULTWARDEN_IMAGE], { encoding: 'utf8' }).trim();
   const port = execFileSync('docker', ['port', id, '80/tcp'], { encoding: 'utf8' }).split('\n')[0].split(':').pop()!.trim();
   const url = `https://127.0.0.1:${port}`;
   const stop = () => { spawnSync('docker', ['rm', '-f', id], { stdio: 'ignore' }); };
@@ -126,6 +128,17 @@ export class BwCli {
   createItem(item: object): void {
     this.run(['sync']);
     this.run(['create', 'item'], Buffer.from(JSON.stringify(item)).toString('base64'));
+  }
+
+  /** Item decifrado pelo CLI oficial. */
+  getItem(id: string): Record<string, any> {
+    this.run(['sync']);
+    return JSON.parse(this.run(['get', 'item', id]));
+  }
+
+  listItems(): Record<string, any>[] {
+    this.run(['sync']);
+    return JSON.parse(this.run(['list', 'items']));
   }
 
   collections(orgId: string): { id: string }[] {

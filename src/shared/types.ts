@@ -164,7 +164,13 @@ export interface UiState {
   vault: VaultStatusInfo;
   /** Logins do Bitwarden para o site da aba ativa (null = página não é web ou cofre desconectado). */
   vaultSite: { status: 'locked' | 'unlocked'; count: number } | null;
+  /** Barra "salvar/atualizar senha" para a aba ativa (a senha nunca vem para a UI). */
+  savePrompt: { id: string; site: string; username: string | null; mode: 'save' | 'update' | 'locked' } | null;
+  generator: { length: number; symbols: boolean };
 }
+
+/** Tamanhos oferecidos pelo gerador de senhas. */
+export const GENERATOR_LENGTHS = [12, 16, 20, 24, 32, 48, 64] as const;
 
 export type UiCommand =
   | { type: 'tab:new'; url?: string }
@@ -206,6 +212,10 @@ export type UiCommand =
   | { type: 'vault:fill'; itemId: string }
   | { type: 'vault:copy'; itemId: string; what: 'username' | 'password' | 'totp' }
   | { type: 'vault:open' }
+  | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
+  /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
+  | { type: 'vault:generate'; fill: boolean }
+  | { type: 'vault:generator'; length: number; symbols: boolean }
   | { type: 'settings:test-dns' }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }

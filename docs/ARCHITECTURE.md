@@ -90,6 +90,7 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - Compatibilidade provada contra Vaultwarden + CLI oficial (`tests/interop`).
 - Preenchimento: o main confere `mainFrame.url` contra as URIs do login no momento do pedido e envia só para o frame principal (`mainFrame.send`); o preload da aba preenche (`src/preload/fill.ts`). Regras de correspondência do Bitwarden (`vault/match.ts`), mais: login https nunca em página http.
 - TOTP (RFC 6238) gerado localmente; área de transferência limpa em 30 s.
+- Salvar senhas: o preload percebe o envio do login (submit, clique em botão, Enter) e manda usuário+senha ao main, que usa a URL do frame (nunca a da página) e guarda a senha só em memória por 5 min; a UI recebe só site e usuário. Itens novos com chave própria, `encryptedFor` e `uriChecksum` (exigidos pelos clientes/servidores atuais). Atualização copia o item cifrado como veio e troca só a senha (`vault.ts: passwordUpdateRequest`).
 
 ### D7: DNS via Cloudflare Zero Trust Gateway
 - DoH em modo `secure`. O endereço do Gateway fica em `settings.json` local, nunca no repositório.

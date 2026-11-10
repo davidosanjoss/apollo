@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
@@ -94,6 +94,11 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:fill': return id(c.itemId) ? (c as UiCommand) : null;
     case 'vault:copy': return id(c.itemId) && ['username', 'password', 'totp'].includes(c.what as string) ? (c as UiCommand) : null;
     case 'vault:open': return { type: c.type } as UiCommand;
+    case 'vault:save-answer':
+      return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
+    case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;
+    case 'vault:generator':
+      return (GENERATOR_LENGTHS as readonly unknown[]).includes(c.length) && typeof c.symbols === 'boolean' ? (c as UiCommand) : null;
     case 'vault:lock-after': return (LOCK_OPTIONS_MIN as readonly unknown[]).includes(c.minutes) ? (c as UiCommand) : null;
     case 'memory:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'settings:memory-limit': return (MEMORY_LIMIT_OPTIONS_MB as readonly unknown[]).includes(c.mb) ? (c as UiCommand) : null;

@@ -139,6 +139,18 @@ export class BitwardenApi {
     return this.token({ grant_type: 'client_credentials', scope: 'api', client_id: clientId, client_secret: clientSecret });
   }
 
+  createCipher(accessToken: string, body: object): Promise<unknown> {
+    return this.request(`${this.urls.api}/ciphers`, {
+      method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+  }
+
+  updateCipher(accessToken: string, id: string, body: object): Promise<unknown> {
+    return this.request(`${this.urls.api}/ciphers/${encodeURIComponent(id)}`, {
+      method: 'PUT', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+  }
+
   sync(accessToken: string): Promise<unknown> {
     return this.request(`${this.urls.api}/sync?excludeDomains=true`, { headers: { authorization: `Bearer ${accessToken}` } });
   }

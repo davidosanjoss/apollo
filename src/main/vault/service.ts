@@ -4,7 +4,7 @@
 import type { VaultStatusInfo } from '../../shared/types';
 import { BitwardenError, type BitwardenApi, type ServerChoice } from './api';
 import { makeMasterKey, VaultCryptoError, wipe, type Kdf } from './crypto';
-import { UnlockedVault } from './vault';
+import { UnlockedVault, type NewLogin } from './vault';
 
 export type { SecretBox } from '../secret-box';
 import type { SecretBox } from '../secret-box';
@@ -26,7 +26,7 @@ export interface Account {
   lastSync: number | null;
 }
 
-export type ApiFactory = (server: ServerChoice, deviceId: string) => Pick<BitwardenApi, 'loginApiKey' | 'sync'>;
+export type ApiFactory = (server: ServerChoice, deviceId: string) => Pick<BitwardenApi, 'loginApiKey' | 'sync' | 'createCipher' | 'updateCipher'>;
 
 export const LOCK_OPTIONS_MIN = [1, 5, 15, 30, 60, 240] as const;
 const DEFAULT_LOCK_MIN = 15;
@@ -140,6 +140,32 @@ export class VaultService {
     });
   }
 
+  /** Cria um login no cofre e sincroniza. */
+  saveLogin(login: NewLogin): Promise<boolean | null> {
+    return this.write((api, token, vault) => api.createCipher(token, vault.newLoginRequest(login)));
+  }
+
+  /** Troca só a senha de um login existente (o resto do item fica intacto) e sincroniza. */
+  updatePassword(id: string, password: string): Promise<boolean | null> {
+    return this.write(async (api, token, vault) => {
+      const body = vault.passwordUpdateRequest(id, password);
+      if (!body) throw new BitwardenError('unexpected', 'login não encontrado no cofre');
+      return api.updateCipher(token, id, body);
+    });
+  }
+
+  private write(fn: (api: ReturnType<ApiFactory>, token: string, vault: UnlockedVault) => Promise<unknown>): Promise<boolean | null> {
+    return this.run(async () => {
+      if (!this.vault || !this.masterKey) throw new BitwardenError('unexpected', 'desbloqueie o cofre para salvar');
+      const { api, token } = await this.login();
+      await fn(api, token, this.vault);
+      const sync = await api.sync(token);
+      this.replaceVault(UnlockedVault.open(sync, this.masterKey), this.masterKey);
+      await this.saveSync(sync);
+      return true;
+    });
+  }
+
   lock(): void {
     if (!this.vault && !this.masterKey) return;
     this.vault?.lock();
@@ -181,19 +207,24 @@ export class VaultService {
     this.masterKey = masterKey;
   }
 
-  private async fetchSync(): Promise<unknown> {
+  /** Token novo pela chave de API salva (cifrada no chaveiro). */
+  private async login(): Promise<{ api: ReturnType<ApiFactory>; token: string }> {
     const a = this.account!;
     const secret = this.box && this.storage.getSecret('clientSecret');
     if (!secret || !this.box) throw new BitwardenError('unexpected', 'chave de API não salva neste computador: conecte de novo');
     const api = this.apiFor(a.server, a.deviceId);
     const clientSecret = await this.box.decrypt(secret);
     const token = await api.loginApiKey(a.clientId, clientSecret);
-    const sync = await api.sync(token.accessToken);
     this.account = { ...a, lastSync: Date.now(), ...(token.kdf ? { kdf: token.kdf } : {}) };
     this.storage.setAccount(JSON.stringify(this.account));
     // Regrava com a chave atual do chaveiro (se ela foi trocada, o segredo não fica preso na antiga).
     this.storage.setSecret('clientSecret', await this.box.encrypt(clientSecret));
-    return sync;
+    return { api, token: token.accessToken };
+  }
+
+  private async fetchSync(): Promise<unknown> {
+    const { api, token } = await this.login();
+    return api.sync(token);
   }
 
   private async persist(clientSecret: string, sync: unknown): Promise<void> {

@@ -6,13 +6,21 @@ const login = (over: Partial<VaultLogin> = {}): VaultLogin =>
   ({ id: 'i1', name: 'Outlook', username: 'eu@empresa.com', uris: [], hasTotp: false, organizationId: null, ...over });
 
 describe('vaultMenu', () => {
+  it('gerar senha em todos os estados (não precisa do cofre)', () => {
+    for (const st of ['disconnected', 'locked', 'unlocked'] as const) {
+      const cmds = vaultMenu(st, [], 'x.com').flatMap((i) => (i.kind === 'action' ? [i.command] : []));
+      expect(cmds).toContainEqual({ type: 'vault:generate', fill: true });
+      expect(cmds).toContainEqual({ type: 'vault:generate', fill: false });
+    }
+  });
+
   it('desconectado / bloqueado: leva ao diálogo do cofre', () => {
-    expect(vaultMenu('disconnected', [], 'office.com')).toMatchObject([{ kind: 'action', command: { type: 'vault:open' } }]);
-    expect(vaultMenu('locked', [login()], 'office.com')).toMatchObject([{ kind: 'info' }, { kind: 'action', label: 'Desbloquear…' }]);
+    expect(vaultMenu('disconnected', [], 'office.com')[0]).toMatchObject({ kind: 'action', command: { type: 'vault:open' } });
+    expect(vaultMenu('locked', [login()], 'office.com').slice(0, 2)).toMatchObject([{ kind: 'info' }, { kind: 'action', label: 'Desbloquear…' }]);
   });
 
   it('sem login para o site', () => {
-    expect(vaultMenu('unlocked', [], 'office.com')).toEqual([{ kind: 'info', label: 'Nenhum login salvo para office.com' }]);
+    expect(vaultMenu('unlocked', [], 'office.com')[0]).toEqual({ kind: 'info', label: 'Nenhum login salvo para office.com' });
   });
 
   it('um submenu por login: preencher, copiar usuário/senha; TOTP só se houver', () => {

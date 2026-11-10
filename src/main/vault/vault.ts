@@ -2,8 +2,9 @@
 // decifrados (para listar e casar com o site). Senha e TOTP são decifrados na
 // hora do uso. lock() zera as chaves.
 import { field } from './api';
+import crypto from 'node:crypto';
 import {
-  decrypt, decryptString, rsaDecrypt, stretchMasterKey, symKeyFrom, wipe, VaultCryptoError, type SymKey,
+  decrypt, decryptString, encrypt, rsaDecrypt, stretchMasterKey, symKeyFrom, wipe, VaultCryptoError, type SymKey,
 } from './crypto';
 
 export interface LoginUri { uri: string; match: number | null }
@@ -21,12 +22,25 @@ interface StoredCipher {
   key: SymKey;
   password: string | null;
   totp: string | null;
+  /** Item como veio do servidor (cifrado): base para atualizar sem perder nada. */
+  raw: unknown;
 }
+
+export interface NewLogin { name: string; username: string | null; password: string; uri: string }
+
+const PASSWORD_HISTORY_MAX = 5;
+
+/** SHA-256 da URL, em base64 (cifrado, vai em "uriChecksum": detecta URL adulterada). */
+const uriChecksum = (uri: string) => crypto.createHash('sha256').update(uri, 'utf8').digest('base64');
+const KEEP_ON_UPDATE = ['type', 'organizationId', 'folderId', 'favorite', 'reprompt', 'key', 'name', 'notes', 'fields',
+  'secureNote', 'card', 'identity', 'sshKey'];
 
 const CIPHER_LOGIN = 1;
 
 export class UnlockedVault {
   private constructor(
+    /** Id do usuário (vai em "encryptedFor" ao gravar: o servidor confere quem cifrou). */
+    private readonly userId: string | null,
     private readonly keys: SymKey[],
     private readonly secrets: Map<string, StoredCipher>,
     readonly logins: VaultLogin[],
@@ -94,17 +108,21 @@ export class UnlockedVault {
           username: dec(field(login, 'username')),
           uris: (field<unknown[]>(login, 'uris') ?? []).flatMap((u) => {
             const uri = dec(field(u, 'uri'));
-            return uri ? [{ uri, match: field<number | null>(u, 'match') ?? null }] : [];
+            if (!uri) return [];
+            // Como os clientes oficiais: com checksum, a URL só vale se ele bater.
+            const sum = dec(field(u, 'uriChecksum'));
+            if (sum !== null && sum !== uriChecksum(uri)) return [];
+            return [{ uri, match: field<number | null>(u, 'match') ?? null }];
           }),
           hasTotp: Boolean(field(login, 'totp')),
           organizationId: orgId,
         });
-        secrets.set(id, { key, password: field<string>(login, 'password') ?? null, totp: field<string>(login, 'totp') ?? null });
+        secrets.set(id, { key, password: field<string>(login, 'password') ?? null, totp: field<string>(login, 'totp') ?? null, raw: c });
       } catch {
         skipped++;
       }
     }
-    return new UnlockedVault(keys, secrets, logins, skipped);
+    return new UnlockedVault(field<string>(profile, 'id') ?? null, keys, secrets, logins, skipped);
   }
 
   /** Decifra a senha na hora (não fica guardada em texto). */
@@ -116,6 +134,56 @@ export class UnlockedVault {
   totpSecret(id: string): string | null {
     const s = this.secrets.get(id);
     return s?.totp ? decryptString(s.totp, s.key) : null;
+  }
+
+  /**
+   * Corpo para criar um login (POST /ciphers), cifrado como os clientes atuais:
+   * cada item tem a própria chave, cifrada com a chave do usuário.
+   */
+  newLoginRequest(login: NewLogin): object {
+    const userKey = this.keys[0];
+    const raw = crypto.randomBytes(64);
+    const key = symKeyFrom(raw);
+    try {
+      const enc = (v: string | null) => (v === null || v === '' ? null : encrypt(v, key));
+      return {
+        type: 1, organizationId: null, folderId: null, favorite: false, reprompt: 0, notes: null, fields: null,
+        encryptedFor: this.userId,
+        key: encrypt(raw, userKey),
+        name: encrypt(login.name, key),
+        login: { username: enc(login.username), password: enc(login.password), totp: null,
+          uris: [{ uri: encrypt(login.uri, key), uriChecksum: encrypt(uriChecksum(login.uri), key), match: null }] },
+      };
+    } finally {
+      wipe(key);
+      raw.fill(0);
+    }
+  }
+
+  /**
+   * Corpo para trocar SÓ a senha (PUT /ciphers/{id}). O resto do item vai exatamente
+   * como veio do servidor, sem ser decifrado (notas, campos, passkeys não se perdem);
+   * a senha antiga (já cifrada) vai para o histórico.
+   */
+  passwordUpdateRequest(id: string, newPassword: string, now = new Date()): object | null {
+    const s = this.secrets.get(id);
+    if (!s) return null;
+    const raw = s.raw as Record<string, unknown>;
+    const body: Record<string, unknown> = {};
+    for (const k of KEEP_ON_UPDATE) {
+      const v = field(raw, k);
+      if (v !== undefined) body[k] = v;
+    }
+    const iso = now.toISOString();
+    const login = { ...(field<Record<string, unknown>>(raw, 'login') ?? {}) };
+    body.login = { ...login, password: encrypt(newPassword, s.key), passwordRevisionDate: iso };
+    const history = (field<unknown[]>(raw, 'passwordHistory') ?? []) as unknown[];
+    body.passwordHistory = s.password
+      ? [{ password: s.password, lastUsedDate: iso }, ...history].slice(0, PASSWORD_HISTORY_MAX)
+      : history;
+    body.lastKnownRevisionDate = field(raw, 'revisionDate') ?? null;
+    body.encryptedFor = this.userId;
+    return body;
   }
 
   lock(): void {
