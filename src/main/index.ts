@@ -1,5 +1,6 @@
 import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
@@ -19,6 +20,7 @@ import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
 import { SyncService } from './sync/service';
 import { cleanUserAgent } from './user-agent';
+import { isDefaultBrowser, launchCommand, makeDefaultLinux, urlFromArgv } from './default-browser';
 import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
@@ -344,6 +346,7 @@ app.whenReady().then(async () => {
     if (cmd.type === 'update:check') return void updateCheck.check(true);
     if (cmd.type === 'sync:connect') return void sync.connect({ provider: cmd.provider, clientId: cmd.clientId.trim(), clientSecret: cmd.clientSecret?.trim() || null, passphrase: cmd.passphrase });
     if (cmd.type === 'sync:now') return void sync.syncNow();
+    if (cmd.type === 'default-browser:set') return void makeDefault();
     if (cmd.type === 'sync:cancel') return sync.cancelConnect();
     if (cmd.type === 'sync:disconnect') return sync.disconnect();
     if (cmd.type === 'update:dismiss') return updateCheck.dismiss();
@@ -367,10 +370,39 @@ app.whenReady().then(async () => {
     browser.handleCommand(cmd);
   };
 
-  app.on('second-instance', () => {
+  // Outra chamada do Apollo (clicar num link em outro app, com o Apollo já aberto).
+  app.on('second-instance', (_e, argv) => {
+    const url = urlFromArgv(argv);
+    if (url) return browser.openExternalUrl(url);
     if (win.isMinimized()) win.restore();
     win.focus();
   });
+  // Aberto já com um link.
+  const startUrl = urlFromArgv(process.argv);
+  if (startUrl) win.webContents.once('did-finish-load', () => browser.openExternalUrl(startUrl));
+
+  // Navegador padrão: estado e o botão nas Configurações.
+  const refreshDefault = () => void isDefaultBrowser().then((v) => { browser.defaultBrowser = v; browser.push(); });
+  refreshDefault();
+  const makeDefault = async () => {
+    try {
+      if (process.platform === 'linux') {
+        const icon = path.join(app.getAppPath(), 'assets', 'icon.svg');
+        await makeDefaultLinux({
+          exec: launchCommand({ appImage: process.env.APPIMAGE, execPath: process.execPath, packaged: app.isPackaged, appPath: app.getAppPath() }),
+          iconSvg: fs.existsSync(icon) ? fs.readFileSync(icon, 'utf8') : null,
+        });
+      } else {
+        // Windows/macOS: registra e abre a tela do sistema (a escolha final é do usuário).
+        app.setAsDefaultProtocolClient('http');
+        app.setAsDefaultProtocolClient('https');
+        if (process.platform === 'win32') void shell.openExternal('ms-settings:defaultapps');
+      }
+    } catch (err) {
+      console.warn('[apollo] não foi possível tornar o navegador padrão:', (err as Error).message);
+    }
+    refreshDefault();
+  };
 
   // Cookies de sessão: a cada 5 min (protege contra queda) e ao fechar.
   setInterval(() => void browser.saveSessionCookies(), 5 * 60_000).unref();

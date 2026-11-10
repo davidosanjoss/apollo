@@ -197,6 +197,10 @@ export interface SettingsInfo {
   autoPip: boolean;
   /** Vídeo flutuante sempre por cima das outras janelas (KDE Wayland: via KWin). */
   pipOnTop: boolean;
+  /** Login do Google: identificar como Firefox em accounts.google.com (compatibilidade). */
+  googleCompat: boolean;
+  /** O Apollo é o navegador padrão do sistema (null = não dá para saber, ex.: Windows). */
+  defaultBrowser: boolean | null;
   /** Senhas: logins sem regra própria valem no subdomínio exato (host) ou no domínio base. */
   vaultMatch: 'host' | 'domain';
   sync: SyncInfo;
@@ -424,6 +428,9 @@ export type UiCommand =
   | { type: 'tab:pip' }
   | { type: 'settings:auto-pip'; on: boolean }
   | { type: 'settings:pip-on-top'; on: boolean }
+  | { type: 'settings:google-compat'; on: boolean }
+  /** Tornar o Apollo o navegador padrão do sistema. */
+  | { type: 'default-browser:set' }
   | { type: 'settings:vault-match'; match: 0 | 1 }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }

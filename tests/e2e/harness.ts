@@ -413,6 +413,13 @@ export function tempProfile(): { dir: string; cleanup: () => void } {
 const running = new Set<ChildProcess>();
 process.once('exit', () => { for (const p of running) p.kill('SIGKILL'); });
 
+/** Chama o Apollo de novo (como um link clicado em outro programa): a cópia nova entrega o link e sai. */
+export function launchSecond(userData: string, args: string[]): Promise<number | null> {
+  const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
+  const p = spawn(electronBin, [ROOT, ...headless, ...args], { env: { ...process.env, APOLLO_USER_DATA: userData }, stdio: 'ignore' });
+  return new Promise((resolve) => p.once('exit', resolve));
+}
+
 export class Apollo {
   ui!: Cdp;
   private mainCdp: Cdp | null = null;
@@ -435,7 +442,7 @@ export class Apollo {
   }
 
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
-  static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
+  static async launch(userData: string, env: Record<string, string> = {}, args: string[] = []): Promise<Apollo> {
     const port = await freePort();
     // Sem janelas na tela (Linux): o Chromium desenha em memória. APOLLO_E2E_SHOW=1 mostra as janelas.
     // Tela virtual do tamanho de um monitor comum (o padrão do modo headless é pequeno demais).
@@ -443,7 +450,7 @@ export class Apollo {
       ? ['--ozone-platform=headless', '--ozone-override-screen-size=1600,1000'] : [];
     const inspectPort = env.APOLLO_TEST_HOOKS ? await freePort() : null;
     const inspect = inspectPort ? [`--inspect=127.0.0.1:${inspectPort}`] : [];
-    const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless], {
+    const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless, ...args], {
       env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });

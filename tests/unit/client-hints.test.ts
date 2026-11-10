@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { clientHintsModule, hintValues, parseAcceptCh, secureUrl } from '../../src/main/client-hints';
-import { cleanUserAgent, uaMetadata } from '../../src/main/user-agent';
+import { cleanUserAgent, firefoxUserAgent, needsFirefoxIdentity, setGoogleCompat, uaMetadata } from '../../src/main/user-agent';
 
 const CHROME = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.75 Safari/537.36';
 const send = (m: ReturnType<typeof clientHintsModule>, url: string, headers: Record<string, string>) => {
@@ -48,5 +48,27 @@ describe('client hints nas requisições', () => {
     expect(secureUrl('http://192.168.0.1/')).toBe(false);
     expect(parseAcceptCh('Sec-CH-UA-Model, DPR')).toEqual(['sec-ch-ua-model']);
     expect(hintValues(uaMetadata('1.2.3.4', false))['sec-ch-ua-wow64']).toBe('?0');
+  });
+});
+
+describe('compatibilidade: login do Google como Firefox', () => {
+  it('só accounts.google.com, só com a opção ligada', () => {
+    setGoogleCompat(true);
+    expect(needsFirefoxIdentity('https://accounts.google.com/v3/signin/identifier')).toBe(true);
+    expect(needsFirefoxIdentity('https://mail.google.com/')).toBe(false);
+    setGoogleCompat(false);
+    expect(needsFirefoxIdentity('https://accounts.google.com/')).toBe(false);
+    setGoogleCompat(true);
+  });
+
+  it('navegação para o login sai como Firefox, sem client hints; outros pedidos não mudam', () => {
+    const m = clientHintsModule('156.0.8078.75');
+    const nav = { 'User-Agent': CHROME, 'sec-ch-ua': 'x', 'Sec-CH-UA-Platform': '"Linux"' };
+    m.onBeforeSendHeaders!({ url: 'https://accounts.google.com/signin', resourceType: 'mainFrame' } as never, nav, {} as never);
+    expect(nav).toEqual({ 'User-Agent': firefoxUserAgent() });
+    const xhr = { 'User-Agent': CHROME };
+    m.onBeforeSendHeaders!({ url: 'https://accounts.google.com/ListAccounts', resourceType: 'xhr' } as never, xhr, {} as never);
+    expect(xhr['User-Agent']).toBe(CHROME);
+    expect(firefoxUserAgent('linux')).toMatch(/^Mozilla\/5\.0 \(X11; Linux x86_64; rv:\d+\.0\) Gecko\/20100101 Firefox\/\d+\.0$/);
   });
 });

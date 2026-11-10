@@ -1114,6 +1114,7 @@ $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });
+$('#default-set').onclick = () => send({ type: 'default-browser:set' });
 
 // --- sincronização
 
@@ -1162,6 +1163,7 @@ $('#sync-now').onclick = () => send({ type: 'sync:now' });
 $('#sync-cancel').onclick = () => send({ type: 'sync:cancel' });
 $('#sync-disconnect').onclick = () => send({ type: 'sync:disconnect' });
 $<HTMLSelectElement>('#vault-match').onchange = (e) => send({ type: 'settings:vault-match', match: (e.target as HTMLSelectElement).value === '0' ? 0 : 1 });
+$<HTMLInputElement>('#google-compat').onchange = (e) => send({ type: 'settings:google-compat', on: (e.target as HTMLInputElement).checked });
 $<HTMLInputElement>('#pip-on-top').onchange = (e) => send({ type: 'settings:pip-on-top', on: (e.target as HTMLInputElement).checked });
 $<HTMLInputElement>('#auto-pip').onchange = (e) => send({ type: 'settings:auto-pip', on: (e.target as HTMLInputElement).checked });
 
@@ -1171,6 +1173,7 @@ function renderSettings(s: UiState): void {
   $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
   $<HTMLInputElement>('#auto-pip').checked = s.settings.autoPip;
   $<HTMLInputElement>('#pip-on-top').checked = s.settings.pipOnTop;
+  $<HTMLInputElement>('#google-compat').checked = s.settings.googleCompat;
   $<HTMLSelectElement>('#vault-match').value = s.settings.vaultMatch === 'domain' ? '0' : '1';
   renderSync(s);
   $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
@@ -1184,6 +1187,10 @@ function renderSettings(s: UiState): void {
     : a.checked ? `Você está na versão mais recente (verificado às ${new Date(a.checked).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`
     : 'Verificação automática a cada 6 horas.';
   $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
+  const d = s.settings.defaultBrowser;
+  $('#default-status').textContent = d === true ? 'O Apollo é o seu navegador padrão: links de outros programas abrem aqui.'
+    : d === false ? 'Outro navegador é o padrão hoje.' : 'Links de outros programas abrem no navegador escolhido pelo sistema.';
+  $('#default-set').hidden = d === true;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
   const dd = $<HTMLSelectElement>('#download-days');
   if (document.activeElement !== dd) dd.value = String(s.settings.downloadKeepDays);

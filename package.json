@@ -49,7 +49,8 @@
     },
     "files": [
       "build/**/*",
-      "package.json"
+      "package.json",
+      "assets/**/*"
     ],
     "afterPack": "scripts/after-pack.cjs",
     "linux": {

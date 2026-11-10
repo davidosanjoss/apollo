@@ -54,7 +54,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
-import { applyUserAgent } from './user-agent';
+import { applyUserAgent, setGoogleCompat } from './user-agent';
 import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
 import { KdePipKeeper } from './kde-pip';
@@ -128,7 +128,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'sync'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -169,6 +169,7 @@ export class Browser {
     // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
     store.deleteTemporaryWorkspaces();
     store.pruneHistory();
+    setGoogleCompat(store.getKv('google-compat') !== '0');
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -2085,6 +2086,7 @@ export class Browser {
       case 'split:swap': this.swapSplit(); break;
       case 'split:ratio': this.setSplitRatio(cmd.ratio); break;
       case 'reader:style': this.setReaderStyle(cmd.style); break;
+      case 'settings:google-compat': this.store.setKv('google-compat', cmd.on ? '1' : '0'); setGoogleCompat(cmd.on); break;
       case 'settings:vault-match': this.store.setKv('vault-match', String(cmd.match)); break;
       case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
       case 'settings:pip-on-top':
@@ -2353,9 +2355,22 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'sync'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
+  }
+
+  /** Navegador padrão do sistema (index atualiza). */
+  defaultBrowser: boolean | null = null;
+
+  /** Link vindo de fora (outro app, linha de comando): abre numa aba e traz a janela. */
+  openExternalUrl(url: string): void {
+    const tab = this.activeTab();
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) this.navigate(url); // aba vazia: usa ela
+    else this.createTab(this.activeWorkspaceId, url, { activate: true });
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
   }
 
   /** Verificação de versões (index liga depois de criar o Browser). */
@@ -2456,7 +2471,7 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(), vaultMatch: this.vaultMatch() === MATCH.Domain ? 'domain' : 'host',
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(), vaultMatch: this.vaultMatch() === MATCH.Domain ? 'domain' : 'host', defaultBrowser: this.defaultBrowser, googleCompat: this.store.getKv('google-compat') !== '0',
         sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),

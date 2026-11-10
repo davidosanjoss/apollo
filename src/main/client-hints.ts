@@ -3,7 +3,7 @@
 // nenhuma (ver user-agent.ts). Mesmas regras do Chromium: só em conexão segura; as de
 // "alta entropia" só para quem pediu (Accept-CH).
 import type { NetworkModule } from './network';
-import { uaMetadata, type UaMetadata } from './user-agent';
+import { firefoxUserAgent, needsFirefoxIdentity, uaMetadata, type UaMetadata } from './user-agent';
 
 const brandList = (list: { brand: string; version: string }[]) => list.map((b) => `"${b.brand}";v="${b.version}"`).join(', ');
 const q = (s: string) => `"${s}"`;
@@ -50,6 +50,12 @@ export function clientHintsModule(chromeVersion = process.versions.chrome): Netw
   return {
     name: 'client-hints',
     onBeforeSendHeaders(details, headers) {
+      // Página de login do Google: a própria navegação já sai como Firefox (sem hints).
+      if ((details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') && needsFirefoxIdentity(details.url)) {
+        for (const k of Object.keys(headers)) if (/^(user-agent|sec-ch-ua)/i.test(k)) delete headers[k];
+        headers['User-Agent'] = firefoxUserAgent();
+        return;
+      }
       if (!secureUrl(details.url)) return;
       const keys = new Set(Object.keys(headers).map((k) => k.toLowerCase()));
       if (keys.has('sec-ch-ua')) return; // o Chromium já mandou: não mexe

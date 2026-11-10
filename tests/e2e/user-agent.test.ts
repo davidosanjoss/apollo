@@ -46,3 +46,30 @@ describe('identificação do navegador', () => {
     expect(r.ua).toContain('Android');
   });
 });
+
+describe('compatibilidade: login do Google como Firefox', () => {
+  it('entra como Firefox na página de login (aqui: localhost no lugar do Google) e volta a Chromium ao sair', async () => {
+    await app.quit();
+    app = await Apollo.launch(profile.dir, { APOLLO_TEST_COMPAT_HOST: 'localhost' });
+    const login = site.url.replace('127.0.0.1', 'localhost');
+    await app.send({ type: 'tab:navigate', url: `${login}/headers?login=1` });
+    await app.until((s) => app.activeTab(s).url.includes('login=1') && !app.activeTab(s).loading, 'login');
+    let page = await app.page(`${login}/headers`);
+    const ff = await page.eval<{ ua: string; header: string }>(`({ ua: navigator.userAgent, header: JSON.parse(document.body.innerText)['user-agent'] })`);
+    page.close();
+    expect(ff.ua).toMatch(/Firefox\/\d+/);
+    expect(ff.header).toMatch(/Firefox\/\d+/);
+    await app.send({ type: 'tab:navigate', url: `${site.url}/headers?depois=1` });
+    await app.until((s) => app.activeTab(s).url.includes('depois=1') && !app.activeTab(s).loading, 'saiu');
+    page = await app.page(`${site.url}/headers?depois=1`);
+    expect(await page.eval<string>('navigator.userAgent')).toMatch(/Chrome\/\d+/);
+    page.close();
+    await app.send({ type: 'settings:google-compat', on: false });
+    await app.until((s) => !s.settings.googleCompat, 'desligado');
+    await app.send({ type: 'tab:navigate', url: `${login}/headers?off=1` });
+    await app.until((s) => app.activeTab(s).url.includes('off=1') && !app.activeTab(s).loading, 'login sem compat');
+    page = await app.page(`${login}/headers?off=1`);
+    expect(await page.eval<string>('navigator.userAgent')).toMatch(/Chrome\/\d+/);
+    page.close();
+  });
+});

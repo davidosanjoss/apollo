@@ -116,6 +116,9 @@
             <h2>Privacidade</h2>
             <p class="hint">Padrão de todos os workspaces. Cada workspace e cada site podem mudar isso (escudo na barra de endereço).</p>
             <div id="global-privacy"></div>
+            <h3>Compatibilidade</h3>
+            <label class="remember"><input type="checkbox" id="google-compat"> Login do Google: identificar o Apollo como Firefox na página de login</label>
+            <p class="hint">O Google recusa navegadores feitos com Electron ("This browser or app may not be secure"). Com isto ligado, só em accounts.google.com o Apollo se apresenta como Firefox; nos outros sites, como Chromium.</p>
           </div>
 
           <div class="settings-section" data-section="dns" hidden>
@@ -261,6 +264,9 @@
             <p id="about-version"></p>
             <p class="hint" id="about-status"></p>
             <p><button type="button" id="about-check">Verificar atualizações</button></p>
+            <h3>Navegador padrão</h3>
+            <p class="hint" id="default-status"></p>
+            <p><button type="button" id="default-set">Tornar o Apollo o navegador padrão</button></p>
             <p class="hint">O Apollo consulta só a página pública de versões (no GitHub), sem nenhum dado seu. Nada é baixado sem você aceitar.</p>
           </div>
         </div>

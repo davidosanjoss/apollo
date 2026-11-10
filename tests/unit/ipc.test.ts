@@ -62,6 +62,7 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'reader:style', style: { size: 21, font: 'sans', theme: 'dark' } },
       { type: 'settings:auto-pip', on: true },
       { type: 'settings:pip-on-top', on: false },
+      { type: 'default-browser:set' },
       { type: 'settings:download-days', days: 30 },
       { type: 'settings:download-days', days: 0 },
       { type: 'update:dismiss' },
