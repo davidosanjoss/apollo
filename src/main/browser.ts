@@ -56,6 +56,7 @@ import { DownloadManager } from './downloads';
 import { applyUserAgent } from './user-agent';
 import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
+import { KdePipKeeper } from './kde-pip';
 import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
 import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
@@ -126,7 +127,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'sync'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -735,6 +736,7 @@ export class Browser {
     if (!tabId) return;
     if (r === 'opened') {
       this.pipTabs.add(tabId);
+      if (this.pipOnTop()) void this.pipKeeper.ensure(true);
       // Quando o vídeo flutuante fechar (pelo ✕ dele também), o botão volta ao normal.
       void wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_WAIT_CLOSE }], false)
         .catch(() => {}).finally(() => { this.pipTabs.delete(tabId); this.push(); });
@@ -751,6 +753,13 @@ export class Browser {
       if (has) this.videoTabs.add(tabId); else this.videoTabs.delete(tabId);
       if (had !== Boolean(has)) this.push();
     }).catch(() => {});
+  }
+
+  /** KDE Wayland: mantém o vídeo flutuante por cima (script do KWin). */
+  readonly pipKeeper = new KdePipKeeper();
+
+  private pipOnTop(): boolean {
+    return this.store.getKv('pip-on-top') !== '0';
   }
 
   private autoPipOn(): boolean {
@@ -2076,6 +2085,11 @@ export class Browser {
       case 'split:ratio': this.setSplitRatio(cmd.ratio); break;
       case 'reader:style': this.setReaderStyle(cmd.style); break;
       case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
+      case 'settings:pip-on-top':
+        this.store.setKv('pip-on-top', cmd.on ? '1' : '0');
+        // Já carregado: troca para o modo escolhido (desligar devolve o vídeo ao normal).
+        void this.pipKeeper.ensure(cmd.on);
+        break;
       case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
@@ -2332,7 +2346,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'sync'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'sync'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -2435,7 +2449,7 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(),
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(),
         sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),

@@ -195,6 +195,8 @@ export interface SettingsInfo {
   downloadKeepDays: number;
   /** Vídeo flutuante automático ao trocar de aba com um vídeo tocando. */
   autoPip: boolean;
+  /** Vídeo flutuante sempre por cima das outras janelas (KDE Wayland: via KWin). */
+  pipOnTop: boolean;
   sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
@@ -419,6 +421,7 @@ export type UiCommand =
   /** Vídeo flutuante (picture-in-picture) da aba ativa: abre/fecha. */
   | { type: 'tab:pip' }
   | { type: 'settings:auto-pip'; on: boolean }
+  | { type: 'settings:pip-on-top'; on: boolean }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }
   /** Zoom da aba ativa (guardado por site, em cada workspace). */

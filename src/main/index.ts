@@ -148,6 +148,8 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
   );
   browser = new Browser(win, store, pipeline, box);
   const b = browser;
+  // Script do KWin (vídeo flutuante por cima) não fica para trás quando o Apollo fecha.
+  app.on('will-quit', () => { void b.pipKeeper.unload(); });
 
   // Antes de a janela (e as abas) sumirem: grava histórico e posição.
   win.on('close', () => {

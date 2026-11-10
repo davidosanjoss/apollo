@@ -1161,6 +1161,7 @@ $('#sync-form').addEventListener('submit', (e) => {
 $('#sync-now').onclick = () => send({ type: 'sync:now' });
 $('#sync-cancel').onclick = () => send({ type: 'sync:cancel' });
 $('#sync-disconnect').onclick = () => send({ type: 'sync:disconnect' });
+$<HTMLInputElement>('#pip-on-top').onchange = (e) => send({ type: 'settings:pip-on-top', on: (e.target as HTMLInputElement).checked });
 $<HTMLInputElement>('#auto-pip').onchange = (e) => send({ type: 'settings:auto-pip', on: (e.target as HTMLInputElement).checked });
 
 function renderSettings(s: UiState): void {
@@ -1168,6 +1169,7 @@ function renderSettings(s: UiState): void {
   if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
   $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
   $<HTMLInputElement>('#auto-pip').checked = s.settings.autoPip;
+  $<HTMLInputElement>('#pip-on-top').checked = s.settings.pipOnTop;
   renderSync(s);
   $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
     : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
