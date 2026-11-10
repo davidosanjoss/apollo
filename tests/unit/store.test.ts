@@ -547,3 +547,21 @@ describe('v11: pastas de favoritos', () => {
     expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['fora']);
   });
 });
+
+describe('v12: lista de downloads', () => {
+  const d = (id: string, startedAt: number, state: 'completed' | 'progressing' = 'completed') =>
+    ({ id, filename: `${id}.pdf`, url: `https://x.com/${id}`, path: `/tmp/${id}.pdf`, state, received: 10, total: 10, startedAt });
+  it('grava, atualiza, lista desde uma data (recentes primeiro), poda e apaga', () => {
+    store.saveDownload(d('a', 100));
+    store.saveDownload(d('b', 200, 'progressing'));
+    store.saveDownload({ ...d('b', 200), filename: 'b (1).pdf' });
+    expect(store.listDownloads(0).map((x) => [x.id, x.state, x.filename])).toEqual([['b', 'completed', 'b (1).pdf'], ['a', 'completed', 'a.pdf']]);
+    expect(store.listDownloads(150).map((x) => x.id)).toEqual(['b']);
+    store.pruneDownloads(150);
+    expect(store.listDownloads(0).map((x) => x.id)).toEqual(['b']);
+    store.deleteDownload('b');
+    store.saveDownload(d('c', 1));
+    store.pruneDownloads(Infinity);
+    expect(store.listDownloads(0)).toEqual([]);
+  });
+});

@@ -152,6 +152,20 @@ const MIGRATIONS: string[] = [
   ALTER TABLE bookmarks ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX bookmarks_by_parent ON bookmarks(workspace_id, parent_id, position);
   `,
+
+  /* v12: lista de downloads (guardada pelo período escolhido) */ `
+  CREATE TABLE downloads (
+    id         TEXT PRIMARY KEY,
+    filename   TEXT NOT NULL,
+    url        TEXT NOT NULL,
+    path       TEXT NOT NULL,
+    state      TEXT NOT NULL,
+    received   INTEGER NOT NULL,
+    total      INTEGER NOT NULL,
+    started_at INTEGER NOT NULL
+  );
+  CREATE INDEX downloads_recent ON downloads(started_at);
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

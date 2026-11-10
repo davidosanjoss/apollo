@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { DOWNLOAD_KEEP_DAYS, GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
@@ -123,10 +123,12 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'settings:auto-pip': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
     case 'update:check':
     case 'update:dismiss':
     case 'update:skip':
     case 'update:open-page':
+    case 'tab:pip':
     case 'view:fullscreen':
     case 'tab:print':
     case 'tab:devtools': return { type: c.type } as UiCommand;
@@ -134,6 +136,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'download:action':
       return id(c.downloadId) && ['pause', 'resume', 'cancel', 'open', 'show', 'remove'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'settings:download-ask': return typeof c.ask === 'boolean' ? (c as UiCommand) : null;
+    case 'settings:download-days': return (DOWNLOAD_KEEP_DAYS as readonly unknown[]).includes(c.days) ? (c as UiCommand) : null;
     case 'download:clear':
     case 'find:close':
     case 'bookmark:add': return { type: c.type } as UiCommand;

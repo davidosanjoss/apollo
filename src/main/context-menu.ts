@@ -36,6 +36,7 @@ export type ContextAction =
   | { kind: 'nav'; op: 'back' | 'forward' | 'reload' }
   | { kind: 'view-source' }
   | { kind: 'print' }
+  | { kind: 'pip' }
   | { kind: 'inspect' }
   | { kind: 'vault'; op: 'autofill' | 'generate' };
 
@@ -80,7 +81,11 @@ export function buildContextMenu(p: ContextInfo, s: ContextState): ContextItem[]
       item('Copiar endereço da imagem', { kind: 'copy-text', text: p.srcURL }),
       item('Salvar imagem como…', { kind: 'save-url', url: p.srcURL }),
     ]);
-  } else if ((p.mediaType === 'video' || p.mediaType === 'audio') && p.srcURL && NAVIGABLE.test(p.srcURL) && !p.srcURL.startsWith('blob:')) {
+  } else if (p.mediaType === 'video') {
+    // Vídeo flutuante vale até para streaming (blob:), como YouTube e Netflix.
+    groups.push([item('Vídeo flutuante (picture-in-picture)', { kind: 'pip' })]);
+  }
+  if ((p.mediaType === 'video' || p.mediaType === 'audio') && p.srcURL && NAVIGABLE.test(p.srcURL) && !p.srcURL.startsWith('blob:')) {
     const what = p.mediaType === 'video' ? 'vídeo' : 'áudio';
     groups.push([
       item(`Abrir ${what} em nova aba`, { kind: 'open-link', url: p.srcURL, background: false }),

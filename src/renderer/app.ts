@@ -81,6 +81,10 @@ function render(): void {
 
   renderHome(s);
   renderFullscreen(s);
+  const pipBtn = $('#pip-btn');
+  pipBtn.hidden = !s.pip.available;
+  pipBtn.classList.toggle('on', s.pip.active);
+  pipBtn.title = s.pip.active ? 'Fechar o vídeo flutuante' : 'Vídeo flutuante (picture-in-picture)';
   const zoomBtn = $('#zoom-btn');
   zoomBtn.hidden = s.zoom === 100;
   zoomBtn.textContent = `${s.zoom}%`;
@@ -336,7 +340,7 @@ function renderDownloadList(s: UiState): void {
     return b;
   };
   if (!s.downloads.length) {
-    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download nesta sessão.' }));
+    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download recente.' }));
     return;
   }
   $('#downloads-list').replaceChildren(...s.downloads.map((d) => {
@@ -345,10 +349,12 @@ function renderDownloadList(s: UiState): void {
     const done = d.state === 'completed';
     const name = el('span', { className: `name${done ? ' done' : ''}`, textContent: d.filename, title: d.url });
     if (done) name.onclick = act(d.id, 'open');
-    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`, textContent: downloadStatus(d) });
+    const day = dayLabel(d.startedAt, Date.now());
+    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`,
+      textContent: day === 'Hoje' ? downloadStatus(d) : `${downloadStatus(d)} · ${day}` });
     const actions = el('span', { className: 'actions' });
     if (d.state === 'progressing') actions.append(button('⏸', 'Pausar', act(d.id, 'pause')));
-    if (d.state === 'paused' || d.state === 'interrupted') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
+    if (d.state === 'paused') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
     if (d.state === 'progressing' || d.state === 'paused') actions.append(button('✕', 'Cancelar', act(d.id, 'cancel')));
     if (done) actions.append(button('📂', 'Mostrar na pasta', act(d.id, 'show')));
     if (!(d.state === 'progressing' || d.state === 'paused')) actions.append(button('🗑', 'Tirar da lista', act(d.id, 'remove')));
@@ -480,6 +486,7 @@ function bookmarkCurrent(): void {
 
 $('#bookmark-btn').onclick = bookmarkCurrent;
 $('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
+$('#pip-btn').onclick = () => send({ type: 'tab:pip' });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
   if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });
@@ -993,8 +1000,8 @@ $('#ws-delete').onclick = () => {
 // ------------------------------------------------------------ configurações
 
 const settingsPage = $('#settings-page');
-type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'languages' | 'vault' | 'modules' | 'about';
-const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'languages', 'vault', 'modules', 'about'];
+type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'media' | 'languages' | 'vault' | 'modules' | 'about';
+const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'media', 'languages', 'vault', 'modules', 'about'];
 let settingsSection: SettingsSection = 'privacy';
 /** Aba ativa quando a página abriu: trocar de aba fecha as configurações. */
 let settingsTabId: string | null = null;
@@ -1043,11 +1050,13 @@ $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });
+$<HTMLInputElement>('#auto-pip').onchange = (e) => send({ type: 'settings:auto-pip', on: (e.target as HTMLInputElement).checked });
 
 function renderSettings(s: UiState): void {
   if (!settingsOpen()) return;
   if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
   $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
+  $<HTMLInputElement>('#auto-pip').checked = s.settings.autoPip;
   $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
     : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
   const a = s.updateAbout;
@@ -1060,6 +1069,8 @@ function renderSettings(s: UiState): void {
     : 'Verificação automática a cada 6 horas.';
   $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
+  const dd = $<HTMLSelectElement>('#download-days');
+  if (document.activeElement !== dd) dd.value = String(s.settings.downloadKeepDays);
   $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
@@ -1090,6 +1101,7 @@ $('#history-clear').onclick = () => {
   $('#history-clear').textContent = 'Histórico apagado';
   setTimeout(() => { $('#history-clear').textContent = 'Apagar todo o histórico'; }, 2500);
 };
+$<HTMLSelectElement>('#download-days').onchange = (e) => send({ type: 'settings:download-days', days: Number((e.target as HTMLSelectElement).value) });
 $<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
 $<HTMLSelectElement>('#spellcheck').onchange = (e) =>
   send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });

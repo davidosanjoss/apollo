@@ -388,6 +388,9 @@ body.fullscreen #bookmark-bar { display: none !important; }
   color: var(--text); font: inherit; font-size: 15px; outline: none; }
 #home-q:focus { border-color: var(--accent); }
 #bookmark-btn.on { color: #f5b301; }
+#pip-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#pip-btn.on { color: var(--accent); }
+#pip-btn.on svg rect:last-child { fill: currentColor; }
 #zoom-btn { background: var(--panel-2); color: var(--text); border: 0; border-radius: 10px; padding: 2px 8px; font: inherit;
   font-size: 12px; cursor: pointer; }
 #home-bookmarks { list-style: none; margin: 26px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center;

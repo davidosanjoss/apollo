@@ -182,6 +182,10 @@ export interface SettingsInfo {
   spellcheck: SpellcheckMode;
   /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
   downloadAsk: boolean;
+  /** Dias que a lista de downloads fica guardada (0 = só nesta sessão). */
+  downloadKeepDays: number;
+  /** Vídeo flutuante automático ao trocar de aba com um vídeo tocando. */
+  autoPip: boolean;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
@@ -229,6 +233,8 @@ export interface UiState {
   activeBookmarkId: string | null;
   /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
   fullscreen: 'window' | 'page' | null;
+  /** Vídeo flutuante na aba ativa: available = tem vídeo; active = está flutuando. */
+  pip: { available: boolean; active: boolean };
   /** Zoom da aba ativa, em % (100 = padrão). */
   zoom: number;
   /** Downloads desta sessão do Apollo (mais recente primeiro). */
@@ -245,7 +251,12 @@ export interface DownloadInfo {
   received: number;
   /** 0 = tamanho desconhecido. */
   total: number;
+  startedAt: number;
 }
+
+/** Por quantos dias a lista de downloads fica guardada (0 = só enquanto o Apollo está aberto). */
+export const DOWNLOAD_KEEP_DAYS = [0, 1, 7, 30, 90] as const;
+export const DEFAULT_DOWNLOAD_KEEP_DAYS = 7;
 
 export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove';
 
@@ -378,6 +389,9 @@ export type UiCommand =
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
   /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
   | { type: 'view:fullscreen' }
+  /** Vídeo flutuante (picture-in-picture) da aba ativa: abre/fecha. */
+  | { type: 'tab:pip' }
+  | { type: 'settings:auto-pip'; on: boolean }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }
   /** Zoom da aba ativa (guardado por site, em cada workspace). */
@@ -386,6 +400,7 @@ export type UiCommand =
   /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
   | { type: 'download:clear' }
   | { type: 'settings:download-ask'; ask: boolean }
+  | { type: 'settings:download-days'; days: number }
   /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
   | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
   | { type: 'find:close' }
