@@ -167,6 +167,8 @@ export interface UiState {
   /** Barra "salvar/atualizar senha" para a aba ativa (a senha nunca vem para a UI). */
   savePrompt: { id: string; site: string; username: string | null; mode: 'save' | 'update' | 'locked' } | null;
   generator: { length: number; symbols: boolean };
+  /** Abas de todos os workspaces, só enquanto a paleta está aberta (fechada = custo zero). */
+  paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
 }
 
 /** Tamanhos oferecidos pelo gerador de senhas. */
@@ -212,6 +214,8 @@ export type UiCommand =
   | { type: 'vault:fill'; itemId: string }
   | { type: 'vault:copy'; itemId: string; what: 'username' | 'password' | 'totp' }
   | { type: 'vault:open' }
+  | { type: 'vault:autofill' }
+  | { type: 'palette:toggle'; open: boolean }
   | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
   /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
   | { type: 'vault:generate'; fill: boolean }
@@ -247,6 +251,8 @@ export type UiCommand =
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
 export type UiEvent =
   | { type: 'focus-address' }
+  /** Abrir a paleta de comandos (Ctrl+K com o foco na página). */
+  | { type: 'open-palette' }
   /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
   | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */

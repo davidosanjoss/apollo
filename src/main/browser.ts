@@ -657,6 +657,11 @@ export class Browser {
     view.setBounds(this.bounds);
   }
 
+  /** Foco na interface do navegador (para a paleta/diálogos receberem o teclado). */
+  private focusUi(): void {
+    this.win.webContents.focus();
+  }
+
   private focusAddress(): void {
     this.win.webContents.focus();
     this.emit({ type: 'focus-address' });
@@ -977,6 +982,7 @@ export class Browser {
       case 'prev-tab': this.cycleTab(-1); break;
       case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
       case 'autofill': this.autofill(); break;
+      case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
       default: {
         const ws = this.store.listWorkspaces()[Number(action.split('-')[1]) - 1];
         if (ws) this.switchWorkspace(ws.id);
@@ -1011,6 +1017,8 @@ export class Browser {
       case 'vault:fill': this.fillLogin(cmd.itemId); break;
       case 'vault:copy': this.copyFromVault(cmd.itemId, cmd.what); break;
       case 'vault:open': this.emit({ type: 'open-vault' }); break;
+      case 'vault:autofill': this.autofill(); break;
+      case 'palette:toggle': this.paletteOpen = cmd.open; break;
       case 'vault:save-answer': this.answerSave(cmd.promptId, cmd.action); break;
       case 'vault:generate': this.generate(cmd.fill); break;
       case 'vault:generator': this.store.setKv('vault.generator', JSON.stringify({ length: cmd.length, symbols: cmd.symbols })); break;
@@ -1056,6 +1064,7 @@ export class Browser {
     status: 'disconnected', email: null, server: null, count: 0, lastSync: null, lockAfterMin: 15, busy: false, error: null, canRemember: false,
   };
 
+  private paletteOpen = false;
   private vaultProvider: VaultProvider | null = null;
   private clipboardTimer: NodeJS.Timeout | null = null;
   /** Logins enviados aguardando "salvar?" (senha só aqui, em memória, por 5 min). */
@@ -1295,6 +1304,9 @@ export class Browser {
       vaultSite: this.vaultSite(active?.url),
       savePrompt: this.savePrompt(ws.activeTabId),
       generator: this.generatorOptions(),
+      paletteTabs: this.paletteOpen
+        ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
+        : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
     };
   }

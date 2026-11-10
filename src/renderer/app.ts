@@ -7,6 +7,7 @@ import { normalizeUrl } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
+import { buildItems, type PaletteItem } from './palette';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -82,6 +83,7 @@ function render(): void {
   renderMemory(s);
   renderSettings(s);
   renderVault(s);
+  renderPalette();
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -559,6 +561,76 @@ $('#vault-form').addEventListener('submit', (e) => {
   }
 });
 
+// ------------------------------------------------------------ paleta de comandos (Ctrl+K)
+
+const palette = $<HTMLDialogElement>('#palette');
+const paletteInput = $<HTMLInputElement>('#palette-input');
+let paletteItems: PaletteItem[] = [];
+let paletteSel = 0;
+
+function renderPalette(): void {
+  if (!palette.open || !state) return;
+  const query = paletteInput.value;
+  paletteItems = buildItems({ state, query, openUrl: query.trim() ? normalizeUrl(query) : null });
+  paletteSel = Math.min(paletteSel, Math.max(0, paletteItems.length - 1));
+  const list = $('#palette-list');
+  const nodes: HTMLElement[] = [];
+  let group = '';
+  paletteItems.forEach((it, i) => {
+    if (it.group !== group) { group = it.group; nodes.push(el('li', { className: 'group', textContent: group })); }
+    const li = el('li', { className: `item${i === paletteSel ? ' selected' : ''}` });
+    li.setAttribute('role', 'option');
+    li.dataset.index = String(i);
+    li.append(el('span', { className: 'title', textContent: it.title }), el('span', { className: 'detail', textContent: it.detail }));
+    li.onmousemove = () => { if (paletteSel !== i) { paletteSel = i; renderPalette(); } };
+    li.onclick = () => runPalette(i);
+    nodes.push(li);
+  });
+  list.replaceChildren(...nodes);
+  list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openPalette(): void {
+  if (palette.open) { paletteInput.select(); return; }
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  paletteInput.value = '';
+  paletteSel = 0;
+  send({ type: 'layout:overlay', open: true });
+  send({ type: 'palette:toggle', open: true });
+  palette.showModal();
+  paletteInput.focus();
+  renderPalette();
+}
+
+function runPalette(index: number): void {
+  const it = paletteItems[index];
+  if (!it) return;
+  palette.close();
+  const a = it.action;
+  if (a.kind === 'command') send(a.command);
+  else if (a.action === 'settings') openSettings();
+  else if (a.action === 'vault') openVault();
+  else openWorkspaceDialog();
+}
+
+palette.addEventListener('close', () => {
+  send({ type: 'palette:toggle', open: false });
+  if (!document.querySelector('dialog[open]')) send({ type: 'layout:overlay', open: false });
+});
+paletteInput.addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+$('#palette-btn').onclick = openPalette;
+paletteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = paletteItems.length;
+    if (n) paletteSel = (paletteSel + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderPalette();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    runPalette(paletteSel);
+  }
+});
+
 // ------------------------------------------------------------ diálogo de grupo
 
 const groupDialog = $<HTMLDialogElement>('#group-dialog');
@@ -652,7 +724,9 @@ window.apollo.onState((next) => {
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'open-vault') {
+  if (event.type === 'open-palette') {
+    openPalette();
+  } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
   } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);

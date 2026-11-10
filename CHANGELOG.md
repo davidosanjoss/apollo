@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Paleta de comandos (Ctrl+K ou a lupa na barra): busca abas de todos os workspaces, troca de workspace, ações (nova aba, reabrir, fixar, duplicar, agrupar, hibernar, monitor de memória, pausar proteção, Bitwarden, gerar senha, configurações) e abre endereços ou pesquisas. Busca tolerante, sem se importar com acentos.
+
 ## [0.5.0] - 2026-11-10
 
 ### Adicionado

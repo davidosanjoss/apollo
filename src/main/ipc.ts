@@ -93,7 +93,9 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:menu': return num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'vault:fill': return id(c.itemId) ? (c as UiCommand) : null;
     case 'vault:copy': return id(c.itemId) && ['username', 'password', 'totp'].includes(c.what as string) ? (c as UiCommand) : null;
-    case 'vault:open': return { type: c.type } as UiCommand;
+    case 'vault:open':
+    case 'vault:autofill': return { type: c.type } as UiCommand;
+    case 'palette:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;
