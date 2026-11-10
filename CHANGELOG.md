@@ -11,6 +11,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Paleta de comandos (Ctrl+K ou a lupa na barra): busca abas de todos os workspaces, troca de workspace, ações (nova aba, reabrir, fixar, duplicar, agrupar, hibernar, monitor de memória, pausar proteção, Bitwarden, gerar senha, configurações) e abre endereços ou pesquisas. Busca tolerante, sem se importar com acentos.
 
 ### Corrigido
+- Linux/Wayland: o log não se enche mais de "Unable to set image transfer function" (gerenciamento de cor do Wayland desligado; sem efeito em imagem SDR).
+- `npm run diagnose` não mostra mais como erro o cookie de sessão (o Apollo o restaura por conta própria).
 - ⚙ → "Módulos e personalizações…" deixava a tela escura sem mostrar o diálogo (a página voltava por cima ao trocar de um diálogo para outro).
 
 ## [0.5.0] - 2026-11-10

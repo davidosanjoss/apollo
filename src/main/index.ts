@@ -46,6 +46,11 @@ if (process.platform === 'linux') {
     'AcceleratedVideoDecodeLinuxZeroCopyGL',
     'AcceleratedVideoEncoder',
   ].join(','));
+  // Gerenciamento de cor do Wayland (wp_color_manager_v1): compositores como o KWin
+  // recusam a função de transferência que o Chromium pede e o log se enche de
+  // "Unable to set image transfer function". Sem ele, a janela fica em sRGB (como já
+  // estava na prática); só HDR no Wayland deixaria de ser descrito ao compositor.
+  app.commandLine.appendSwitch('disable-features', 'WaylandWpColorManagerV1');
 }
 
 // Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
