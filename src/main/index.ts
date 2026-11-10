@@ -18,6 +18,8 @@ import { loadSettings, applyDns, saveSettings, type Settings } from './settings'
 import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
 import { SyncService } from './sync/service';
+import { cleanUserAgent } from './user-agent';
+import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
@@ -59,7 +61,8 @@ if (process.platform === 'linux') {
 
 // Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
 // tratam UA de Electron como navegador desconhecido/inseguro.
-const cleanUA = app.userAgentFallback.replace(/\sElectron\/\S+/i, '').replace(/\sapollo\/\S+/i, '');
+// (Os metadados — client hints — são aplicados por página: ver user-agent.ts.)
+const cleanUA = cleanUserAgent(app.userAgentFallback);
 app.userAgentFallback = cleanUA;
 
 // Erro não tratado no processo principal: o Electron abriria uma caixa de diálogo que
@@ -136,6 +139,7 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
       urlCleaningModule(togglesFor),
       blockerModule(blocker, { togglesFor, onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind) }),
       thirdPartyCookiesModule(togglesFor),
+      clientHintsModule(),
       // GPC obedece ao gerenciador de módulos.
       { ...gpcModule, onBeforeSendHeaders: (d, h, c) => { if (browser?.isModuleOn('gpc') !== false) gpcModule.onBeforeSendHeaders!(d, h, c); } },
     ],

@@ -53,6 +53,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { applyUserAgent } from './user-agent';
 import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
 import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
@@ -298,6 +299,7 @@ export class Browser {
     this.views.set(tab.id, view);
     this.tabByWebContents.set(wc.id, tab.id);
     this.wireTab(tab.id, tab.workspaceId, wc);
+    applyUserAgent(wc, app.userAgentFallback); // antes de carregar: com as client hints
     void this.loadTab(tab, wc);
     return view;
   }
@@ -443,6 +445,8 @@ export class Browser {
       this.runShortcut(action);
     });
     wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, workspaceId, tabId));
+    // Popups (login "Entrar com o Google" etc.): a mesma identificação das abas.
+    wc.on('did-create-window', (popup) => applyUserAgent(popup.webContents, app.userAgentFallback));
 
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // "Abrir em nova aba" → aba no mesmo workspace.
@@ -1159,7 +1163,7 @@ export class Browser {
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
-    if (p.mobile) wc.setUserAgent(Browser.mobileUA());
+    applyUserAgent(wc, p.mobile ? Browser.mobileUA() : app.userAgentFallback, p.mobile);
     wc.on('page-title-updated', (_e, title) => { this.store.updatePanel(id, { title }); this.push(); });
     wc.on('page-favicon-updated', (_e, icons) => { this.store.updatePanel(id, { favicon: icons[0] ?? null }); this.push(); });
     wc.on('render-process-gone', () => this.destroyPanelView(id));
