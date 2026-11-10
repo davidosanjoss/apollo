@@ -6,8 +6,10 @@ export interface WorkspaceInfo {
   name: string;
   color: string;
   home: string;
-  /** Minutos sem uso para hibernar abas (0 = nunca). */
+  /** Minutos sem uso para hibernar abas (0 = nunca, -1 = ao sair da aba). */
   hibernateAfterMin: number;
+  /** Quando o workspace não está na tela (null = mesma regra, -1 = ao sair dele). */
+  hiddenHibernateMin: number | null;
   /** Padrões do workspace (null = segue o global). */
   privacy: Record<PrivacyFeature, boolean | null>;
   /** Sessão só em memória; some ao fechar o Apollo. */
@@ -15,7 +17,12 @@ export interface WorkspaceInfo {
 }
 
 /** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
-export const HIBERNATE_OPTIONS_MIN = [0, 5, 15, 30, 60, 120, 240] as const;
+/** Hibernar abas paradas após (min): 0 = nunca, -1 = ao sair da aba. */
+export const HIBERNATE_OPTIONS_MIN = [-1, 0, 5, 15, 30, 60, 120, 240] as const;
+/** Workspace fora da tela (min): null = mesma regra, -1 = ao sair do workspace. */
+export const HIDDEN_HIBERNATE_OPTIONS_MIN = [null, -1, 5, 10, 30, 60] as const;
+/** Painel fechado (min): null = sempre ativo, 0 = ao fechar. */
+export const PANEL_HIBERNATE_OPTIONS_MIN = [null, 0, 30, 120, 480] as const;
 
 export interface TabInfo {
   id: string;
@@ -25,8 +32,10 @@ export interface TabInfo {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
-  /** Ainda sem página carregada (será carregada ao ativar). */
+  /** Ainda sem página carregada (será carregada ao ativar). Página inicial nunca conta como "dormindo". */
   dormant: boolean;
+  /** Tem página (processo) carregada. Página inicial sem página = desenhada pela própria interface. */
+  live: boolean;
   pinned: boolean;
   /** Nunca hiberna. */
   keepAwake: boolean;
@@ -74,13 +83,35 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface UpdateNotice {
+  /** available = versão nova; whats-new = acabou de atualizar (mostra uma vez). */
+  kind: 'available' | 'whats-new';
+  version: string;
+  notes: import('./release-notes').NoteBlock[];
+  /** Página da release (oficial). */
+  url: string;
+  /** Esta instalação baixa e instala sozinha (senão: abrir a página de download). */
+  canInstall: boolean;
+}
+
+export interface UpdateAbout {
+  version: string;
+  latest: string | null;
+  checking: boolean;
+  checked: number | null;
+  failed: boolean;
+  /** false no desenvolvimento (sem verificação). */
+  enabled: boolean;
+}
+
 export interface MemoryTab {
   id: string;
   workspaceId: string;
   title: string;
   favicon: string | null;
-  /** null = sem página carregada (hibernada). */
+  /** null = sem página carregada (hibernada, ou página inicial desenhada pela interface). */
   mb: number | null;
+  home: boolean;
   visible: boolean;
   keepAwake: boolean;
   playing: boolean;
@@ -141,11 +172,20 @@ export interface VaultStatusInfo {
 
 export type DnsMode = 'secure' | 'automatic' | 'off';
 
+export type SpellcheckMode = 'pt-en' | 'pt' | 'off';
+
 export interface SettingsInfo {
   dns: { mode: DnsMode; dohUrl: string | null; provider: string | null };
   dnsTest: { status: 'idle' | 'testing' | 'ok' | 'fail'; ms?: number; error?: string };
   /** Camada global de privacidade (null = padrão do Apollo). */
   privacy: Record<PrivacyFeature, boolean | null>;
+  spellcheck: SpellcheckMode;
+  /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
+  downloadAsk: boolean;
+  /** Guardar histórico de visitas (nunca nos workspaces temporários). */
+  historyOn: boolean;
+  /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
+  bookmarkBar: boolean;
 }
 
 export interface UiState {
@@ -159,6 +199,9 @@ export interface UiState {
   sitePermissions: SitePermissions | null;
   sitePrivacy: SitePrivacy | null;
   update: UpdateStatus | null;
+  /** Janela de versão nova / novidades (null = nada a mostrar). */
+  updateNotice: UpdateNotice | null;
+  updateAbout: UpdateAbout;
   memory: MemoryReport | null;
   settings: SettingsInfo;
   vault: VaultStatusInfo;
@@ -169,11 +212,75 @@ export interface UiState {
   generator: { length: number; symbols: boolean };
   /** Abas de todos os workspaces, só enquanto a paleta está aberta (fechada = custo zero). */
   paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
+  /** Histórico do workspace que casa com o que foi digitado na paleta (null = paleta fechada ou vazia). */
+  paletteHistory: { url: string; title: string }[] | null;
   panels: PanelInfo[];
   /** Painel aberto (só um por vez). */
   activePanelId: string | null;
   modules: ModuleInfo[];
   customizations: CustomizationInfo[];
+  /** Pedido de compartilhar tela aguardando a escolha do usuário. */
+  screenPicker: ScreenPickerInfo | null;
+  /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
+  bookmarks: BookmarkInfo[];
+  /** Janela de histórico aberta (null = fechada). */
+  historyView: HistoryViewInfo | null;
+  /** Favorito da página da aba ativa (estrela acesa), ou null. */
+  activeBookmarkId: string | null;
+  /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
+  fullscreen: 'window' | 'page' | null;
+  /** Zoom da aba ativa, em % (100 = padrão). */
+  zoom: number;
+  /** Downloads desta sessão do Apollo (mais recente primeiro). */
+  downloads: DownloadInfo[];
+  /** Busca na página (Ctrl+F) da aba ativa: resultado atual / total. */
+  find: { text: string; active: number; matches: number } | null;
+}
+
+export interface DownloadInfo {
+  id: string;
+  filename: string;
+  url: string;
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted';
+  received: number;
+  /** 0 = tamanho desconhecido. */
+  total: number;
+}
+
+export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove';
+
+export interface BookmarkInfo {
+  id: string;
+  title: string;
+  /** '' nas pastas. */
+  url: string;
+  favicon: string | null;
+  /** Pasta onde está (null = na barra de favoritos). */
+  parentId: string | null;
+  folder: boolean;
+}
+
+export interface HistoryViewInfo {
+  query: string;
+  entries: { url: string; title: string; lastVisit: number }[];
+}
+
+export interface ScreenSource {
+  id: string;
+  name: string;
+  /** system = seletor do próprio sistema (Wayland: tela ou janela). */
+  kind: 'screen' | 'window' | 'tab' | 'system';
+  /** Miniatura (data: URL) ou null. */
+  thumbnail: string | null;
+}
+
+export interface ScreenPickerInfo {
+  id: string;
+  origin: string;
+  audioRequested: boolean;
+  /** Áudio do sistema (loopback) só existe no Windows; áudio de aba em qualquer sistema. */
+  systemAudio: boolean;
+  sources: ScreenSource[];
 }
 
 export interface PanelInfo {
@@ -186,6 +293,8 @@ export interface PanelInfo {
   mobile: boolean;
   /** Já carregado (continua vivo mesmo fechado, para mensagens chegarem). */
   loaded: boolean;
+  /** Hibernar quando fechado: null = sempre ativo, 0 = ao fechar, N min. */
+  hibernateMin: number | null;
 }
 
 export type ModuleId = 'gpc' | 'cosmetics' | 'vaultSave' | 'hibernation' | 'customizations';
@@ -254,13 +363,58 @@ export type UiCommand =
   | { type: 'vault:open' }
   | { type: 'vault:autofill' }
   | { type: 'palette:toggle'; open: boolean }
+  /** Texto digitado na paleta (para buscar no histórico). */
+  | { type: 'palette:query'; text: string }
+  | { type: 'settings:history'; on: boolean }
+  /** Apaga o histórico de visitas de todos os workspaces. */
+  | { type: 'history:clear' }
   | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
   | { type: 'panel:toggle'; panelId: string }
   | { type: 'panel:remove'; panelId: string }
-  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean }
+  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean; hibernateMin?: number | null }
+  | { type: 'panel:hibernate'; panelId: string }
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
+  | { type: 'view:fullscreen' }
+  | { type: 'tab:print' }
+  | { type: 'tab:devtools' }
+  /** Zoom da aba ativa (guardado por site, em cada workspace). */
+  | { type: 'zoom:set'; dir: 'in' | 'out' | 'reset' }
+  | { type: 'download:action'; downloadId: string; action: DownloadAction }
+  /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
+  | { type: 'download:clear' }
+  | { type: 'settings:download-ask'; ask: boolean }
+  /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
+  | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
+  | { type: 'find:close' }
+  /** Verificar versão agora (Configurações → Sobre). */
+  | { type: 'update:check' }
+  | { type: 'update:dismiss' }
+  | { type: 'update:skip' }
+  | { type: 'update:open-page' }
+  /** Marca a página da aba ativa como favorita (no workspace dela). */
+  | { type: 'bookmark:add' }
+  /** Edita o favorito; parentId (se vier) move para o fim daquela pasta (null = barra). */
+  | { type: 'bookmark:update'; bookmarkId: string; title: string; url: string; parentId?: string | null }
+  | { type: 'bookmark:rename'; bookmarkId: string; title: string }
+  | { type: 'bookmark:add-folder'; title: string; parentId: string | null }
+  | { type: 'bookmark:remove'; bookmarkId: string }
+  /** Move para a pasta (null = barra), na posição final `index` entre os filhos dela. */
+  | { type: 'bookmark:move'; bookmarkId: string; parentId: string | null; index: number }
+  /** Conteúdo de uma pasta como menu nativo (por cima da página); folderId null + from = sobra da barra. */
+  | { type: 'bookmark:menu'; folderId: string | null; x: number; y: number; from?: number }
+  /** Botão direito num favorito/pasta da barra (null = na barra vazia). */
+  | { type: 'bookmark:context'; bookmarkId: string | null; x: number; y: number }
+  | { type: 'settings:bookmark-bar'; show: boolean }
+  /** Janela de histórico (abrir/fechar e o filtro digitado). */
+  | { type: 'history:view'; open: boolean; query: string }
+  | { type: 'history:delete'; url: string }
+  /** Abrir o favorito: na aba ativa se ela estiver na página inicial, senão numa nova aba. */
+  | { type: 'bookmark:open'; bookmarkId: string; newTab?: boolean }
+  /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
+  | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
   /** Cria (sem id) ou edita uma personalização. */
   | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
   | { type: 'custom:delete'; id: string }
@@ -269,6 +423,7 @@ export type UiCommand =
   | { type: 'vault:generate'; fill: boolean }
   | { type: 'vault:generator'; length: number; symbols: boolean }
   | { type: 'settings:test-dns' }
+  | { type: 'settings:spellcheck'; mode: SpellcheckMode }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }
@@ -284,8 +439,8 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; temporary?: boolean }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }
@@ -304,7 +459,15 @@ export type UiEvent =
   /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
   | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
-  | { type: 'edit-group'; groupId: string };
+  | { type: 'edit-group'; groupId: string }
+  /** Abrir a barra de busca na página (Ctrl+F). */
+  | { type: 'open-find' }
+  /** Abrir o diálogo do favorito (Ctrl+D: acabou de marcar ou já estava marcado). */
+  | { type: 'edit-bookmark'; bookmarkId: string }
+  /** Pedir o nome de uma pasta nova (no menu do botão direito da barra). */
+  | { type: 'new-bookmark-folder'; parentId: string | null }
+  | { type: 'manage-bookmarks' }
+  | { type: 'open-history' };
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

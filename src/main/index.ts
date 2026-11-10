@@ -1,4 +1,4 @@
-import { app, BrowserWindow, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db';
@@ -13,13 +13,16 @@ import { DEFAULT_TOGGLES } from './privacy/rules';
 import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
+import type { UiCommand } from '../shared/types';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
-import { setupUpdater } from './updater';
+import { canSelfUpdate, setupUpdater } from './updater';
+import { RELEASES_API, UpdateCheck } from './update-check';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
 import { BitwardenApi, serverUrls } from './vault/api';
 import { VaultService } from './vault/service';
+import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 
 // ------------------------------------------------------------ perfil
 // App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
@@ -57,6 +60,11 @@ if (process.platform === 'linux') {
 // tratam UA de Electron como navegador desconhecido/inseguro.
 const cleanUA = app.userAgentFallback.replace(/\sElectron\/\S+/i, '').replace(/\sapollo\/\S+/i, '');
 app.userAgentFallback = cleanUA;
+
+// Erro não tratado no processo principal: o Electron abriria uma caixa de diálogo que
+// trava o navegador inteiro. Registra e segue (um módulo com bug não derruba tudo).
+process.on('uncaughtException', (err) => console.error('[apollo] erro não tratado:', err));
+process.on('unhandledRejection', (err) => console.error('[apollo] promessa rejeitada sem tratamento:', err));
 
 registerApolloScheme();
 
@@ -174,6 +182,19 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
   });
   ipcMain.handle('apollo:cosmetics-dom', (event, features) => { cosmeticsFor(event, features); });
 
+  // Notificações: o que o site enxerga (só o frame principal de uma aba ou painel).
+  ipcMain.on('apollo:notification-state', (event) => {
+    try {
+      const frame = event.senderFrame;
+      event.returnValue = frame && frame === event.sender.mainFrame ? b.notificationState(event.sender, frame.url) : null;
+    } catch {
+      event.returnValue = null;
+    }
+  });
+  ipcMain.on('apollo:notification-click', (event) => {
+    if (event.senderFrame === event.sender.mainFrame) b.showFromNotification(event.sender);
+  });
+
   win.once('ready-to-show', () => {
     if (state.maximized) win.maximize();
     win.show();
@@ -203,8 +224,17 @@ app.whenReady().then(async () => {
     console.log('[apollo] estado da v0.1 migrado para o banco (backup: state.json.migrated)');
   }
 
+  // Corretor da sessão padrão (interface) conforme a escolha salva, antes de a janela
+  // carregar: senão o Chromium baixa o dicionário em inglês mesmo com o corretor desligado.
+  {
+    const langs = spellcheckLanguages(parseSpellcheck(store.getKv('spellcheck')));
+    session.defaultSession.setSpellCheckerLanguages(langs);
+    session.defaultSession.setSpellCheckerEnabled(langs.length > 0);
+  }
   const box = await systemSecretBox();
   const { win, browser } = createWindow(store, box);
+  // Só nos testes de integração (com o inspetor do Node ligado pelo harness).
+  if (process.env.APOLLO_TEST_HOOKS) Object.assign(globalThis, { __apolloTest: { browser, clipboard: () => clipboard.readText() } });
 
   // Bitwarden: requisições pela rede do Chromium (respeita o DNS seguro/Zero Trust).
   const vault = new VaultService(
@@ -264,13 +294,36 @@ app.whenReady().then(async () => {
     (status) => browser.setUpdate(status),
     () => db.exec('PRAGMA wal_checkpoint(TRUNCATE)'),
   );
+  // Versão nova / novidades: em qualquer instalação empacotada (ou numa API de teste).
+  const updateCheck = new UpdateCheck({
+    current: app.getVersion(),
+    store,
+    api: process.env.APOLLO_UPDATES_API || (app.isPackaged ? RELEASES_API : null),
+    canInstall: canSelfUpdate(),
+    onChange: () => browser.push(),
+  });
+  browser.updateCheck = updateCheck;
+  updateCheck.start();
 
   ipcMain.on('ui:command', (event, raw) => {
     if (!isTrustedSender(event, win.webContents)) return;
     const cmd = parseCommand(raw);
     if (!cmd) return console.warn('[apollo] comando inválido da UI ignorado');
+    try {
+      runCommand(cmd);
+    } catch (err) {
+      // Um comando com bug nunca derruba o navegador (nem os dados no log: só o tipo).
+      console.error(`[apollo] comando "${cmd.type}" falhou:`, err);
+    }
+  });
+
+  const runCommand = (cmd: UiCommand): void => {
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
+    if (cmd.type === 'update:check') return void updateCheck.check(true);
+    if (cmd.type === 'update:dismiss') return updateCheck.dismiss();
+    if (cmd.type === 'update:skip') return updateCheck.skip();
+    if (cmd.type === 'update:open-page') { updateCheck.openPage(); return updateCheck.dismiss(); }
     if (cmd.type === 'settings:dns') {
       settings = { ...settings, dns: { mode: cmd.mode, dohUrl: cmd.dohUrl } };
       saveSettings(settings);
@@ -287,7 +340,7 @@ app.whenReady().then(async () => {
       case 'vault:lock-after': return vault.setLockAfter(cmd.minutes);
     }
     browser.handleCommand(cmd);
-  });
+  };
 
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();

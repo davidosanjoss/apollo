@@ -68,6 +68,17 @@ export async function startSite(): Promise<TestSite> {
         return html(`<form onsubmit="return false"><input id="email" type="email" name="loginfmt"><button id="avancar">Avançar</button></form>`, 'Etapa 1');
       case '/step2':
         return html(`<form onsubmit="return false"><input id="senha" type="password" name="passwd"><button id="entrar">Entrar</button></form>`, 'Etapa 2');
+      case '/share':
+        // Como o Teams/Meet: botão chama getDisplayMedia (precisa de clique do usuário).
+        return html(`<button id="compartilhar" style="width:200px;height:60px">Compartilhar</button><script>
+          window.resultado = 'nada';
+          document.getElementById('compartilhar').onclick = async () => {
+            try {
+              const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+              window.resultado = 'ok:' + s.getTracks().map((t) => t.kind).sort().join('+');
+              s.getTracks().forEach((t) => t.stop());
+            } catch (e) { window.resultado = 'erro:' + e.name; }
+          };</script>`, 'Reunião');
       case '/custom':
         // A página tem uma variável própria: a personalização (mundo isolado) não pode vê-la.
         return html(`<p id="alvo">texto</p><script>window.segredoDaPagina = 'só da página';</script>`, 'Custom');
@@ -90,6 +101,28 @@ export async function startSite(): Promise<TestSite> {
           'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
         });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/notify':
+        // Como o WhatsApp: consulta a permissão, pede no clique e mostra notificações.
+        return html(`<button id="pedir" style="width:200px;height:50px">Ativar notificações</button>
+          <button id="simular" style="width:200px;height:50px">clique real</button><script>
+          window.log = [];
+          document.getElementById('pedir').onclick = async () => { window.log.push('pedido:' + await Notification.requestPermission()); };
+          // Simula o clique na notificação: o Chromium dá ativação ao clicar nela; aqui, um clique real na página.
+          document.getElementById('simular').onclick = () => document.dispatchEvent(new CustomEvent('apollo-notification-click'));
+          </script>`, u.searchParams.get('title') ?? 'Mensagens');
+      case '/fs':
+        // Como o player do YouTube: botão põe um elemento em tela cheia.
+        return html(`<div id="player" style="background:#000;color:#fff;height:200px">vídeo</div>
+          <button id="cheia" style="width:200px;height:50px">Tela cheia</button><script>
+          document.getElementById('cheia').onclick = () => document.getElementById('player').requestFullscreen();</script>`, 'Player');
+      case '/find':
+        return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
+      case '/ctx':
+        // Menu de contexto: link, imagem, campo com palavra errada, texto.
+        return html(`<p id="texto">Universidade Federal</p>
+          <p><a id="link" href="/page?title=Destino">Ir ao destino</a></p>
+          <p><img id="img" src="/pixel" width="60" height="60" style="background:#c33"></p>
+          <p><input id="campo" spellcheck="true" value="xyzzyq" style="width:300px"></p>`, 'Contexto');
       case '/pixel':
         res.writeHead(200, { 'content-type': 'image/gif' });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
@@ -102,6 +135,29 @@ export async function startSite(): Promise<TestSite> {
       case '/track/pixel.gif':
         res.writeHead(200, { 'content-type': 'image/gif' });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/file': {
+        // Download: anexo pequeno com o nome pedido.
+        const name = u.searchParams.get('name') ?? 'arquivo.txt';
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': '2048',
+          'content-disposition': `attachment; filename="${name}"` });
+        return res.end(Buffer.alloc(2048, 65));
+      }
+      case '/slow-file': {
+        // Download lento (1 MB em ~6 s): dá tempo de pausar/cancelar.
+        const total = 1024 * 1024;
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(total),
+          'content-disposition': 'attachment; filename="grande.bin"' });
+        let sent = 0;
+        const timer = setInterval(() => {
+          if (res.destroyed) { clearInterval(timer); return; }
+          const n = Math.min(16 * 1024, total - sent);
+          sent += n;
+          res.write(Buffer.alloc(n, 66));
+          if (sent >= total) { clearInterval(timer); res.end(); }
+        }, 100);
+        req.on('close', () => clearInterval(timer));
+        return;
+      }
       case '/slow': {
         // Página lenta: responde depois de ?ms (simula rede/CI lentos).
         const ms = Number(u.searchParams.get('ms') ?? 1500);
@@ -163,6 +219,11 @@ export class Cdp {
       this.pending.get(msg.id)?.(msg);
       this.pending.delete(msg.id);
     };
+    // Conexão caiu (app fechou/travou): falha as chamadas pendentes em vez de esperar para sempre.
+    ws.onclose = () => {
+      for (const resolve of this.pending.values()) resolve({ error: 'conexão de depuração fechada' });
+      this.pending.clear();
+    };
   }
 
   static async connect(url: string): Promise<Cdp> {
@@ -187,7 +248,7 @@ export class Cdp {
   }
 
   /** Clique real do mouse (mousedown + mouseup), não element.click(). */
-  async mouseClick(selector: string): Promise<void> {
+  async mouseClick(selector: string, button: 'left' | 'right' = 'left'): Promise<void> {
     const p = await this.eval<{ x: number; y: number } | null>(`(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return null;
@@ -197,7 +258,7 @@ export class Cdp {
     })()`);
     if (!p) throw new Error(`elemento não encontrado: ${selector}`);
     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
-      await this.call('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', clickCount: 1 });
+      await this.call('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button, clickCount: 1 });
     }
   }
 
@@ -343,7 +404,24 @@ process.once('exit', () => { for (const p of running) p.kill('SIGKILL'); });
 
 export class Apollo {
   ui!: Cdp;
+  private mainCdp: Cdp | null = null;
+  private inspectPort: number | null = null;
   private constructor(private proc: ChildProcess, private port: number, readonly userData: string) {}
+
+  /**
+   * Processo principal (inspetor do Node). Só com env APOLLO_TEST_HOOKS=1 no launch:
+   * `globalThis.__apolloTest.browser` é o Browser (ex.: o último menu de contexto).
+   */
+  async main(): Promise<Cdp> {
+    if (!this.inspectPort) throw new Error('lance com { APOLLO_TEST_HOOKS: "1" }');
+    if (this.mainCdp) return this.mainCdp;
+    const t = await waitFor(async () => {
+      const list = await (await fetch(`http://127.0.0.1:${this.inspectPort}/json/list`)).json() as Target[];
+      return list[0];
+    }, 'inspetor do processo principal');
+    this.mainCdp = await Cdp.connect(t.webSocketDebuggerUrl);
+    return this.mainCdp;
+  }
 
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
   static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
@@ -352,11 +430,14 @@ export class Apollo {
     // Tela virtual do tamanho de um monitor comum (o padrão do modo headless é pequeno demais).
     const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW
       ? ['--ozone-platform=headless', '--ozone-override-screen-size=1600,1000'] : [];
-    const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`, ...headless], {
+    const inspectPort = env.APOLLO_TEST_HOOKS ? await freePort() : null;
+    const inspect = inspectPort ? [`--inspect=127.0.0.1:${inspectPort}`] : [];
+    const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless], {
       env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });
     const app = new Apollo(proc, port, userData);
+    app.inspectPort = inspectPort;
     running.add(proc);
     proc.once('exit', () => running.delete(proc));
     try {
@@ -419,6 +500,8 @@ export class Apollo {
 
   /** Fecha como o usuário fecharia (grava cookies e banco). */
   async quit(): Promise<void> {
+    this.mainCdp?.close();
+    this.mainCdp = null;
     if (this.proc.exitCode !== null) return;
     const exited = new Promise((r) => this.proc.once('exit', r));
     // Se não fechar sozinho em 10 s, mata (e o teste que depende disso falha depois).

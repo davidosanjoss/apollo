@@ -1,11 +1,12 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
 import { validVaultServer } from './vault/api';
 import { MODULES } from './modules';
+import { SPELLCHECK_MODES } from './spellcheck';
 import { MAX_CODE } from './customizations';
 
 /**
@@ -26,6 +27,7 @@ const decision = (v: unknown) => v === 'allow' || v === 'deny';
 const id = (v: unknown): v is string => str(v, 64) && (v as string).length > 0;
 const groupColor = (v: unknown) => typeof v === 'string' && (GROUP_COLORS as readonly string[]).includes(v);
 const hibernate = (v: unknown) => v === undefined || (HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
+const hiddenHibernate = (v: unknown) => v === undefined || (HIDDEN_HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
 const password = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 1024;
 const url = (v: unknown): v is string => str(v, 8192) && /^(https?|apollo|file|about|data|view-source):/i.test(v as string);
 
@@ -48,10 +50,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'workspace:delete': return str(c.workspaceId, 64) ? (c as UiCommand) : null;
     case 'workspace:create':
       return str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192) && hibernate(c.hibernateAfterMin)
-        && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
+        && hiddenHibernate(c.hiddenHibernateMin) && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
     case 'workspace:update':
       return str(c.workspaceId, 64) && str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192)
-        && hibernate(c.hibernateAfterMin) ? (c as UiCommand) : null;
+        && hibernate(c.hibernateAfterMin) && hiddenHibernate(c.hiddenHibernateMin) ? (c as UiCommand) : null;
     case 'tab:move':
       return id(c.tabId) && num(c.index) && Number.isInteger(c.index)
         && (c.groupId === undefined || c.groupId === null || id(c.groupId)) ? (c as UiCommand) : null;
@@ -85,6 +87,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return ['secure', 'automatic', 'off'].includes(c.mode as string) && (c.dohUrl === null || validDohUrl(c.dohUrl))
         ? (c as UiCommand) : null;
     case 'settings:test-dns': return { type: c.type } as UiCommand;
+    case 'settings:spellcheck': return (SPELLCHECK_MODES as unknown[]).includes(c.mode) ? (c as UiCommand) : null;
     case 'vault:connect':
       return validVaultServer(c.server) && typeof c.clientId === 'string' && /^(user|organization)\.[\w-]{1,100}$/.test(c.clientId.trim())
         && str(c.clientSecret, 256) && (c.clientSecret as string).trim() && password(c.password) ? (c as UiCommand) : null;
@@ -98,13 +101,18 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:open':
     case 'vault:autofill': return { type: c.type } as UiCommand;
     case 'palette:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
+    case 'palette:query': return str(c.text, 500) ? (c as UiCommand) : null;
+    case 'settings:history': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
+    case 'history:clear': return { type: c.type } as UiCommand;
     case 'panel:add':
       return str(c.url, 2048) && /^https?:\/\//i.test(c.url as string) && id(c.workspaceId) && typeof c.mobile === 'boolean' ? (c as UiCommand) : null;
     case 'panel:toggle':
     case 'panel:remove': return id(c.panelId) ? (c as UiCommand) : null;
     case 'panel:set':
       return id(c.panelId) && (c.width === undefined || (Number.isInteger(c.width) && (c.width as number) >= PANEL_MIN_WIDTH && (c.width as number) <= PANEL_MAX_WIDTH))
-        && (c.mobile === undefined || typeof c.mobile === 'boolean') ? (c as UiCommand) : null;
+        && (c.mobile === undefined || typeof c.mobile === 'boolean')
+        && (c.hibernateMin === undefined || (PANEL_HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(c.hibernateMin)) ? (c as UiCommand) : null;
+    case 'panel:hibernate': return id(c.panelId) ? (c as UiCommand) : null;
     case 'panel:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;
     case 'panel:menu': return id(c.panelId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'module:set': return MODULES.some((m) => m.id === c.moduleId) && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
@@ -113,6 +121,41 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && typeof c.css === 'string' && c.css.length <= MAX_CODE && typeof c.js === 'string' && c.js.length <= MAX_CODE
         && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
+    case 'find:query':
+      return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'update:check':
+    case 'update:dismiss':
+    case 'update:skip':
+    case 'update:open-page':
+    case 'view:fullscreen':
+    case 'tab:print':
+    case 'tab:devtools': return { type: c.type } as UiCommand;
+    case 'zoom:set': return ['in', 'out', 'reset'].includes(c.dir as string) ? (c as UiCommand) : null;
+    case 'download:action':
+      return id(c.downloadId) && ['pause', 'resume', 'cancel', 'open', 'show', 'remove'].includes(c.action as string) ? (c as UiCommand) : null;
+    case 'settings:download-ask': return typeof c.ask === 'boolean' ? (c as UiCommand) : null;
+    case 'download:clear':
+    case 'find:close':
+    case 'bookmark:add': return { type: c.type } as UiCommand;
+    case 'bookmark:update':
+      return id(c.bookmarkId) && str(c.title, 300) && url(c.url) && (c.parentId === undefined || c.parentId === null || id(c.parentId)) ? (c as UiCommand) : null;
+    case 'bookmark:rename': return id(c.bookmarkId) && str(c.title, 300) && (c.title as string).trim() ? (c as UiCommand) : null;
+    case 'bookmark:add-folder':
+      return str(c.title, 300) && (c.title as string).trim() && (c.parentId === null || id(c.parentId)) ? (c as UiCommand) : null;
+    case 'bookmark:remove': return id(c.bookmarkId) ? (c as UiCommand) : null;
+    case 'bookmark:move':
+      return id(c.bookmarkId) && (c.parentId === null || id(c.parentId)) && num(c.index) && Number.isInteger(c.index) ? (c as UiCommand) : null;
+    case 'bookmark:menu':
+      return (c.folderId === null || id(c.folderId)) && num(c.x) && num(c.y)
+        && (c.from === undefined || (num(c.from) && Number.isInteger(c.from))) ? (c as UiCommand) : null;
+    case 'bookmark:context': return (c.bookmarkId === null || id(c.bookmarkId)) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'settings:bookmark-bar': return typeof c.show === 'boolean' ? (c as UiCommand) : null;
+    case 'history:view': return typeof c.open === 'boolean' && str(c.query, 500) ? (c as UiCommand) : null;
+    case 'history:delete': return url(c.url) ? (c as UiCommand) : null;
+    case 'bookmark:open':
+      return id(c.bookmarkId) && (c.newTab === undefined || typeof c.newTab === 'boolean') ? (c as UiCommand) : null;
+    case 'screen:pick':
+      return id(c.requestId) && (c.sourceId === null || str(c.sourceId, 256)) && typeof c.audio === 'boolean' ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

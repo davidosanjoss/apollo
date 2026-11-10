@@ -15,6 +15,8 @@
     <button id="settings-btn" class="ws-btn add" title="Configurações">⚙</button>
   </aside>
 
+  <div id="fullscreen-hint" hidden>Tela cheia — aperte <kbd>F11</kbd> para sair</div>
+
   <main id="main">
     <header id="toolbar">
       <div id="tabs"></div>
@@ -25,13 +27,28 @@
       <button id="forward" class="icon-btn" title="Avançar (Alt+→)">→</button>
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
-      <button id="palette-btn" class="icon-btn" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-      <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
-      <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg></button>
       <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
       <button id="shield-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg><span id="blocked-count" hidden></span></button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
+      <button id="zoom-btn" title="Zoom deste site — clique para voltar a 100% (Ctrl+0)" hidden></button>
+      <button id="bookmark-btn" class="icon-btn" title="Adicionar aos favoritos (Ctrl+D)" hidden>☆</button>
     </nav>
+
+    <!-- Barra de favoritos do workspace (pastas abrem como menu nativo, por cima da página). -->
+    <div id="bookmark-bar" hidden>
+      <div id="bookmark-items"></div>
+      <button id="bookmark-more" class="bm" title="Mais favoritos" hidden>»</button>
+    </div>
+
+    <div id="find-bar" class="bar" hidden>
+      <input id="find-input" type="search" spellcheck="false" placeholder="Localizar na página" aria-label="Localizar na página">
+      <span id="find-count" aria-live="polite"></span>
+      <button id="find-prev" class="icon-btn" title="Anterior (Shift+Enter)">↑</button>
+      <button id="find-next" class="icon-btn" title="Próximo (Enter)">↓</button>
+      <span class="spacer"></span>
+      <button id="find-close" class="icon-btn" title="Fechar (Esc)">✕</button>
+    </div>
 
     <div id="permission-bar" class="bar" hidden>
       <span id="permission-text"></span>
@@ -57,8 +74,136 @@
     </div>
 
     <div id="content">
+      <!-- Configurações: página com navegação lateral (cobre o conteúdo; a página do site fica escondida). -->
+      <section id="settings-page" hidden aria-label="Configurações">
+        <nav id="settings-nav">
+          <h2>Configurações</h2>
+          <button type="button" data-section="privacy">Privacidade</button>
+          <button type="button" data-section="dns">DNS seguro</button>
+          <button type="button" data-section="history">Histórico</button>
+          <button type="button" data-section="downloads">Downloads</button>
+          <button type="button" data-section="bookmarks">Favoritos</button>
+          <button type="button" data-section="languages">Idiomas</button>
+          <button type="button" data-section="vault">Bitwarden</button>
+          <button type="button" data-section="modules">Módulos e personalizações</button>
+          <button type="button" data-section="about">Sobre o Apollo</button>
+        </nav>
+        <div id="settings-body">
+          <button type="button" id="settings-close" class="icon-btn" title="Fechar (Esc)">✕</button>
+
+          <div class="settings-section" data-section="privacy" hidden>
+            <h2>Privacidade</h2>
+            <p class="hint">Padrão de todos os workspaces. Cada workspace e cada site podem mudar isso (escudo na barra de endereço).</p>
+            <div id="global-privacy"></div>
+          </div>
+
+          <div class="settings-section" data-section="dns" hidden>
+            <h2>DNS seguro</h2>
+      <label>Modo
+        <select id="dns-mode">
+          <option value="secure">Seguro (DNS sobre HTTPS, sempre)</option>
+          <option value="automatic">Automático (HTTPS quando possível)</option>
+          <option value="off">Desligado (DNS do sistema)</option>
+        </select>
+      </label>
+      <label>Endereço DoH (ex.: Cloudflare Zero Trust Gateway)
+        <input id="dns-url" autocomplete="off" spellcheck="false" placeholder="Vazio = Cloudflare público (https://cloudflare-dns.com/dns-query)">
+      </label>
+      <div class="settings-row">
+        <span id="dns-status"></span>
+        <span class="spacer"></span>
+        <button type="button" id="dns-test">Testar</button>
+        <button type="button" id="dns-save" class="primary">Aplicar</button>
+      </div>
+          </div>
+
+          <div class="settings-section" data-section="history" hidden>
+            <h2>Histórico</h2>
+      <label class="remember"><input type="checkbox" id="history-on"> Guardar as páginas visitadas (para achar no Ctrl+K)</label>
+      <p class="hint">Fica só neste computador, separado por workspace; nunca nos temporários. Guarda os últimos 90 dias.</p>
+      <button type="button" id="history-clear">Apagar todo o histórico</button>
+            <p><button type="button" id="settings-open-history">Ver o histórico (Ctrl+H)</button></p>
+          </div>
+
+          <div class="settings-section" data-section="downloads" hidden>
+            <h2>Downloads</h2>
+      <label class="remember"><input type="checkbox" id="download-ask"> Perguntar onde salvar cada arquivo</label>
+      <p class="hint">Desmarcado: vai direto para a pasta Downloads (com "(1)", "(2)"… se o nome já existir). "Salvar como…" no botão direito sempre pergunta.</p>
+          </div>
+
+          <div class="settings-section" data-section="bookmarks" hidden>
+            <h2>Favoritos</h2>
+            <label class="remember"><input type="checkbox" id="settings-bookmark-bar"> Mostrar a barra de favoritos (Ctrl+Shift+B)</label>
+            <p class="hint">Cada workspace tem os próprios favoritos, com pastas e subpastas.</p>
+            <p><button type="button" id="settings-manage-bookmarks">Gerenciar favoritos…</button></p>
+          </div>
+
+          <div class="settings-section" data-section="languages" hidden>
+            <h2>Idiomas</h2>
+            <h3>Corretor ortográfico</h3>
+      <label>Idiomas <select id="spellcheck">
+        <option value="pt-en">Português (Brasil) e inglês</option>
+        <option value="pt">Só português (Brasil)</option>
+        <option value="off">Desligado</option>
+      </select></label>
+      <p class="hint">O dicionário é baixado uma vez dos servidores do Google, sem nenhum dado seu. "Desligado" evita até isso.</p>
+          </div>
+
+          <div class="settings-section" data-section="vault" hidden>
+            <h2>Bitwarden</h2>
+            <p class="hint" id="settings-vault-status"></p>
+            <p><button type="button" id="settings-open-vault">Abrir o Bitwarden…</button></p>
+          </div>
+
+          <div class="settings-section" data-section="modules" hidden>
+            <h2>Módulos e personalizações</h2>
+            <div id="modules-main">
+        <div id="modules-list"></div>
+        <h3>Personalizações por site</h3>
+        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
+        <ul id="custom-list"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="custom-new">Nova personalização</button>
+        </div>
+            </div>
+            <div id="custom-editor" hidden>
+        <h2 id="custom-title">Personalização</h2>
+        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
+        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
+        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
+        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
+        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
+        <div class="dialog-actions">
+          <button type="button" id="custom-delete" class="danger">Apagar</button>
+          <span class="spacer"></span>
+          <button type="button" id="custom-cancel">Voltar</button>
+          <button type="button" id="custom-save" class="primary">Salvar</button>
+        </div>
+      </div>
+          </div>
+
+          <div class="settings-section" data-section="about" hidden>
+            <h2>Sobre o Apollo</h2>
+            <p id="about-version"></p>
+            <p class="hint" id="about-status"></p>
+            <p><button type="button" id="about-check">Verificar atualizações</button></p>
+            <p class="hint">O Apollo consulta só a página pública de versões (no GitHub), sem nenhum dado seu. Nada é baixado sem você aceitar.</p>
+          </div>
+        </div>
+      </section>
       <!-- Área onde o processo principal posiciona a página da aba ativa. -->
-      <div id="views"></div>
+      <div id="views">
+        <!-- Página inicial desenhada pela interface (sem processo próprio). -->
+        <section id="home-view" hidden>
+          <p id="home-greeting"></p>
+          <h1 id="home-clock"></h1>
+          <p id="home-date"></p>
+          <form id="home-search" role="search">
+            <input id="home-q" type="search" placeholder="Pesquisar no Google ou digitar um endereço" autocomplete="off" aria-label="Pesquisar">
+          </form>
+          <ul id="home-bookmarks" aria-label="Favoritos"></ul>
+        </section>
+      </div>
 
       <aside id="memory-panel" hidden>
         <header>
@@ -79,6 +224,12 @@
       <nav id="panel-rail">
         <div id="panel-list"></div>
         <button id="panel-add" class="rail-btn add" title="Adicionar painel lateral">+</button>
+        <span class="spacer"></span>
+        <!-- Ferramentas (rodapé da barra direita) -->
+        <button id="palette-btn" class="rail-btn tool" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+        <button id="history-btn" class="rail-btn tool" title="Histórico (Ctrl+H)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3 2"/></svg></button>
+        <button id="downloads-btn" class="rail-btn tool" title="Downloads"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg><span id="downloads-active" class="badge" hidden></span></button>
+        <button id="memory-btn" class="rail-btn tool" title="Monitor de memória (Shift+Esc)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="1.5"/><path d="M8 7V4M12 7V4M16 7V4M8 20v-3M12 20v-3M16 20v-3"/></svg></button>
       </nav>
     </div>
   </main>
@@ -90,6 +241,7 @@
       <label>Cor <input id="ws-color" type="color" value="#7c5cff"></label>
       <label>Página inicial <input id="ws-home" placeholder="Vazio = página inicial do Apollo" autocomplete="off"></label>
       <label>Hibernar abas paradas após <select id="ws-hibernate"></select></label>
+      <label>Quando este workspace não está na tela, hibernar as abas dele <select id="ws-hidden-hibernate"></select></label>
       <div id="ws-privacy"></div>
       <label class="remember" id="ws-temporary-row"><input type="checkbox" id="ws-temporary">
         Temporário: logins e dados só na memória; apagado ao fechar o Apollo</label>
@@ -115,42 +267,6 @@
     </form>
   </dialog>
 
-  <dialog id="settings-dialog">
-    <form method="dialog" id="settings-form">
-      <h2>Configurações</h2>
-
-      <h3>DNS</h3>
-      <label>Modo
-        <select id="dns-mode">
-          <option value="secure">Seguro (DNS sobre HTTPS, sempre)</option>
-          <option value="automatic">Automático (HTTPS quando possível)</option>
-          <option value="off">Desligado (DNS do sistema)</option>
-        </select>
-      </label>
-      <label>Endereço DoH (ex.: Cloudflare Zero Trust Gateway)
-        <input id="dns-url" autocomplete="off" spellcheck="false" placeholder="Vazio = Cloudflare público (https://cloudflare-dns.com/dns-query)">
-      </label>
-      <div class="settings-row">
-        <span id="dns-status"></span>
-        <span class="spacer"></span>
-        <button type="button" id="dns-test">Testar</button>
-        <button type="button" id="dns-save" class="primary">Aplicar</button>
-      </div>
-
-      <h3>Privacidade (padrão de todos os workspaces)</h3>
-      <div id="global-privacy"></div>
-
-      <h3>Módulos</h3>
-      <div class="settings-row"><span class="hint">Ligar/desligar partes do navegador e criar personalizações por site.</span>
-        <span class="spacer"></span><button type="button" id="open-modules">Módulos e personalizações…</button></div>
-
-      <div class="dialog-actions">
-        <span class="spacer"></span>
-        <button type="submit">Fechar</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="panel-dialog">
     <form method="dialog" id="panel-form">
       <h2>Novo painel lateral</h2>
@@ -166,35 +282,85 @@
     </form>
   </dialog>
 
-  <dialog id="modules-dialog">
-    <form method="dialog" id="modules-form">
-      <!-- Lista -->
-      <div id="modules-main">
-        <h2>Módulos</h2>
-        <div id="modules-list"></div>
-        <h3>Personalizações por site</h3>
-        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
-        <ul id="custom-list"></ul>
-        <div class="dialog-actions">
-          <button type="button" id="custom-new">Nova personalização</button>
-          <span class="spacer"></span>
-          <button type="submit">Fechar</button>
-        </div>
+  <dialog id="downloads-dialog">
+    <form method="dialog">
+      <h2>Downloads</h2>
+      <ul id="downloads-list"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="downloads-clear">Limpar a lista</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
       </div>
-      <!-- Editor -->
-      <div id="custom-editor" hidden>
-        <h2 id="custom-title">Personalização</h2>
-        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
-        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
-        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
-        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
-        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
-        <div class="dialog-actions">
-          <button type="button" id="custom-delete" class="danger">Apagar</button>
-          <span class="spacer"></span>
-          <button type="button" id="custom-cancel">Voltar</button>
-          <button type="button" id="custom-save" class="primary">Salvar</button>
-        </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookmark-dialog">
+    <form method="dialog" id="bookmark-form">
+      <h2 id="bookmark-dialog-title">Favorito</h2>
+      <label>Nome <input id="bookmark-title" maxlength="300" required></label>
+      <label id="bookmark-url-row">Endereço <input id="bookmark-url" maxlength="8192" required spellcheck="false"></label>
+      <label id="bookmark-folder-row">Pasta <select id="bookmark-folder"></select></label>
+      <p class="hint" id="bookmark-hint">Favoritos são de cada workspace: aparecem na barra de favoritos, na página inicial e no Ctrl+K.</p>
+      <div class="dialog-actions">
+        <button type="button" id="bookmark-remove" class="danger">Remover</button>
+        <span class="spacer"></span>
+        <button type="button" id="bookmark-cancel">Cancelar</button>
+        <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="update-dialog">
+    <form method="dialog">
+      <h2 id="update-dialog-title"></h2>
+      <p class="hint" id="update-dialog-sub"></p>
+      <div id="update-notes"></div>
+      <div class="dialog-actions">
+        <button type="button" id="update-skip">Pular esta versão</button>
+        <span class="spacer"></span>
+        <button type="button" id="update-dismiss">Depois</button>
+        <button type="button" id="update-go" class="primary"></button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookmarks-manager">
+    <form method="dialog">
+      <h2>Favoritos deste workspace</h2>
+      <p class="hint">Arraste para reordenar ou para dentro de uma pasta. Botão direito também funciona na barra de favoritos.</p>
+      <ul id="bm-tree" role="tree"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="bm-new-folder">Nova pasta</button>
+        <label class="remember"><input type="checkbox" id="bm-show-bar"> Mostrar a barra (Ctrl+Shift+B)</label>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="history-dialog">
+    <form method="dialog" id="history-form">
+      <h2>Histórico deste workspace</h2>
+      <input id="history-q" type="search" placeholder="Buscar no histórico" autocomplete="off" spellcheck="false">
+      <ul id="history-list"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="history-clear-all" class="danger">Apagar todo o histórico</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="screen-dialog">
+    <form method="dialog" id="screen-form">
+      <h2>Compartilhar a tela</h2>
+      <p class="hint" id="screen-origin"></p>
+      <div id="screen-sources"></div>
+      <label class="remember" id="screen-audio-row"><input type="checkbox" id="screen-audio"> <span id="screen-audio-label">Compartilhar o áudio</span></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="screen-cancel">Cancelar</button>
+        <button type="submit" id="screen-share" class="primary" disabled>Compartilhar</button>
       </div>
     </form>
   </dialog>

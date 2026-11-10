@@ -104,6 +104,54 @@ const MIGRATIONS: string[] = [
     position INTEGER NOT NULL
   );
   `,
+
+  /* v7: hibernação mais agressiva (workspace fora da tela) e hibernação de painéis */ `
+  -- Abas de um workspace que não está na tela: NULL = mesma regra, -1 = ao sair, N min.
+  ALTER TABLE workspaces ADD COLUMN hidden_hibernate_min INTEGER DEFAULT 10;
+  -- Painel fechado: NULL = sempre ativo (mensageiros), 0 = ao fechar, N min fechado.
+  ALTER TABLE panels ADD COLUMN hibernate_min INTEGER;
+  `,
+
+  /* v8: favoritos (por workspace) */ `
+  CREATE TABLE bookmarks (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    favicon      TEXT,
+    position     INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX bookmarks_by_workspace ON bookmarks(workspace_id, position);
+  `,
+
+  /* v9: zoom por site (por workspace) */ `
+  CREATE TABLE site_zoom (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    host         TEXT NOT NULL,
+    factor       REAL NOT NULL,
+    PRIMARY KEY (workspace_id, host)
+  );
+  `,
+
+  /* v10: histórico de visitas (por workspace) */ `
+  CREATE TABLE history (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    url          TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    search       TEXT NOT NULL,
+    visits       INTEGER NOT NULL DEFAULT 1,
+    last_visit   INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, url)
+  );
+  CREATE INDEX history_recent ON history(workspace_id, last_visit);
+  `,
+
+  /* v11: pastas de favoritos (subpastas por parent_id) */ `
+  ALTER TABLE bookmarks ADD COLUMN parent_id TEXT;
+  ALTER TABLE bookmarks ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX bookmarks_by_parent ON bookmarks(workspace_id, parent_id, position);
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

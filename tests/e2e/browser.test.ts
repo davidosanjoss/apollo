@@ -135,10 +135,13 @@ describe('segurança da página', () => {
 });
 
 describe('permissões', () => {
-  it('notificações começam negadas', async () => {
+  // Antes o site via "denied" e nunca pedia; agora vê "perguntar", mas nada é concedido
+  // sem pedir (notificação criada sem permissão não aparece).
+  it('notificações começam sem permissão ("perguntar", não concedidas)', async () => {
     await navigate(`${site.url}/page?title=Perm`);
     const page = await app.page(`${site.url}/page?title=Perm`);
-    expect(await page.eval('Notification.permission')).toBe('denied');
+    expect(await page.eval('Notification.permission')).toBe('default');
+    expect(await page.eval(`new Promise((r) => { const n = new Notification('x'); n.onshow = () => r('mostrou'); n.onerror = () => r('bloqueada'); })`)).toBe('bloqueada');
     page.close();
   });
 

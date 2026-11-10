@@ -4,6 +4,7 @@ import { ipcRenderer, webFrame } from 'electron';
 import { DOMMonitor } from '@ghostery/adblocker-content';
 import { fillLogin, fillNewPassword } from './fill';
 import { watchLogins } from './capture';
+import { NOTIFICATION_CLICK_EVENT, notificationShim } from './notifications';
 
 // Preenchimento do Bitwarden: só o processo principal envia (mainFrame.send), e só
 // depois de conferir que a URL desta página casa com o login.
@@ -30,6 +31,15 @@ if (window === window.top) {
  */
 export function combineScriptlets(scripts: string[]): string {
   return scripts.map((s) => `try {\n${s}\n} catch (e) {}`).join('\n');
+}
+
+if (window === window.top && /^https?:/.test(location.href) && typeof Notification === 'function') {
+  const state = ipcRenderer.sendSync('apollo:notification-state') as 'ask' | 'allow' | 'deny' | null;
+  if (state) void webFrame.executeJavaScript(notificationShim(state === 'ask')).catch(() => {});
+  // Só um clique de verdade (ativação do usuário) leva o Apollo para esta aba.
+  document.addEventListener(NOTIFICATION_CLICK_EVENT, () => {
+    if (navigator.userActivation?.isActive) ipcRenderer.send('apollo:notification-click');
+  });
 }
 
 if (window === window.top && /^https?:/.test(location.href)) {

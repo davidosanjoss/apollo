@@ -36,9 +36,9 @@ const probe = (page: Awaited<ReturnType<typeof open>>) => page.eval<{ color: str
 describe('personalizações por site', () => {
   it('criar pelo editor: CSS aplicado e JS roda isolado (não vê a página nem o Apollo)', async () => {
     await app.ui.mouseClick('#settings-btn');
-    await waitFor(() => app.ui.eval<boolean>(`document.getElementById('settings-dialog').open`), 'configurações');
-    await app.ui.mouseClick('#open-modules');
-    await waitFor(() => app.ui.eval<boolean>(`document.getElementById('modules-dialog').open`), 'módulos');
+    await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('settings-page').hidden`), 'configurações');
+    await app.ui.mouseClick('#settings-nav button[data-section="modules"]');
+    await waitFor(() => app.ui.eval<boolean>(`!document.querySelector('.settings-section[data-section="modules"]').hidden`), 'módulos');
     await app.ui.mouseClick('#custom-new');
     await app.ui.eval(`(() => {
       document.getElementById('custom-name').value = 'Teste';
@@ -48,7 +48,7 @@ describe('personalizações por site', () => {
       return true; })()`);
     await app.ui.mouseClick('#custom-save');
     await app.until((s) => s.customizations.length === 1, 'salva');
-    await app.ui.eval(`document.getElementById('modules-dialog').close(); true`);
+    await app.ui.mouseClick('#settings-close');
 
     const page = await open(site.url, '/custom');
     await waitFor(async () => (await probe(page)).marca !== null, 'JS rodou');

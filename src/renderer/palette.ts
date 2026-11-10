@@ -3,19 +3,22 @@ import type { UiCommand, UiState } from '../shared/types';
 
 export type PaletteAction =
   | { kind: 'command'; command: UiCommand }
-  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' };
+  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' | 'bookmark' | 'bookmarks-manager' | 'history' };
 
 export interface PaletteItem {
   id: string;
   title: string;
   /** Texto menor (URL, workspace…). */
   detail: string;
-  group: 'Abas' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
+  group: 'Abas' | 'Favoritos' | 'Histórico' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
   action: PaletteAction;
+  /** Já filtrado pela busca em outro lugar (histórico: palavras em qualquer ordem): nunca descartar. */
+  prematched?: boolean;
 }
 
-/** Minúsculas e sem acentos: "Configurações" ≈ "configuracoes". */
-export const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+import { fold } from '../shared/text';
+import { folderPath } from './bookmark-tree';
+export { fold };
 
 /**
  * Pontua `text` para a busca `query` (letras em ordem, não precisam ser contíguas).
@@ -45,7 +48,8 @@ export function rank(items: PaletteItem[], query: string): PaletteItem[] {
   if (!query.trim()) return items;
   return items
     .map((item, i) => {
-      const s = Math.max(fuzzyScore(query, item.title) ?? -Infinity, (fuzzyScore(query, item.detail) ?? -Infinity) - 3);
+      let s = Math.max(fuzzyScore(query, item.title) ?? -Infinity, (fuzzyScore(query, item.detail) ?? -Infinity) - 3);
+      if (item.prematched && s === -Infinity) s = 0; // casou por palavras, fora de ordem
       return { item, i, s };
     })
     .filter((x) => x.s > -Infinity)
@@ -83,6 +87,22 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
       action: cmd({ type: 'tab:reveal', tabId: t.id }),
     })));
 
+  const bms = s.bookmarks ?? [];
+  items.push(...bms.filter((b) => !b.folder).map((b): PaletteItem => ({
+    id: `bm:${b.id}`, title: b.title, group: 'Favoritos',
+    detail: [...folderPath(bms, b.id), readableUrl(b.url)].join(' › '),
+    action: cmd({ type: 'bookmark:open', bookmarkId: b.id }),
+  })));
+
+  // Histórico (já filtrado pelo main com o que foi digitado). Sem repetir abas abertas e favoritos.
+  // Abre na própria aba se ela estiver na página inicial, senão numa nova.
+  const shown = new Set([...(s.paletteTabs ?? []).map((t) => t.url), ...(s.bookmarks ?? []).map((b) => b.url)]);
+  const onHome = Boolean(active && active.url.startsWith('apollo://home') && !active.live);
+  items.push(...(s.paletteHistory ?? []).filter((h) => !shown.has(h.url)).map((h): PaletteItem => ({
+    id: `hist:${h.url}`, title: h.title || readableUrl(h.url), detail: readableUrl(h.url), group: 'Histórico', prematched: true,
+    action: cmd(onHome ? { type: 'tab:navigate', url: h.url } : { type: 'tab:new', url: h.url }),
+  })));
+
   items.push(...s.workspaces.filter((w) => w.id !== s.activeWorkspaceId).map((w): PaletteItem => ({
     id: `ws:${w.id}`, title: `Ir para o workspace ${w.name}`, detail: w.temporary ? 'temporário' : '', group: 'Workspaces',
     action: cmd({ type: 'workspace:switch', workspaceId: w.id }),
@@ -103,6 +123,22 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
     a('close', 'Fechar esta aba', cmd({ type: 'tab:close', tabId: active.id }), 'Ctrl+W');
     a('hibernate-others', 'Hibernar as outras abas', cmd({ type: 'tab:hibernate-others', tabId: active.id }));
   }
+  if (active && !active.url.startsWith('apollo:')) {
+    a('bookmark', s.activeBookmarkId ? 'Editar o favorito desta página' : 'Adicionar esta página aos favoritos',
+      { kind: 'ui', action: 'bookmark' }, 'Ctrl+D');
+  }
+  a('fullscreen', s.fullscreen === 'window' ? 'Sair da tela cheia' : 'Tela cheia', cmd({ type: 'view:fullscreen' }), 'F11');
+  if (active?.live) {
+    a('print', 'Imprimir esta página', cmd({ type: 'tab:print' }), 'Ctrl+P');
+    a('devtools', 'Ferramentas do desenvolvedor', cmd({ type: 'tab:devtools' }), 'F12');
+    a('zoom-in', 'Aumentar o zoom', cmd({ type: 'zoom:set', dir: 'in' }), 'Ctrl+=');
+    a('zoom-out', 'Diminuir o zoom', cmd({ type: 'zoom:set', dir: 'out' }), 'Ctrl+-');
+    if (s.zoom !== 100) a('zoom-reset', `Voltar o zoom a 100% (está em ${s.zoom}%)`, cmd({ type: 'zoom:set', dir: 'reset' }), 'Ctrl+0');
+  }
+  a('bookmarks-manager', 'Gerenciar favoritos (pastas)', { kind: 'ui', action: 'bookmarks-manager' });
+  a('bookmark-bar', s.settings?.bookmarkBar === false ? 'Mostrar a barra de favoritos' : 'Esconder a barra de favoritos',
+    cmd({ type: 'settings:bookmark-bar', show: s.settings?.bookmarkBar === false }), 'Ctrl+Shift+B');
+  a('history', 'Histórico', { kind: 'ui', action: 'history' }, 'Ctrl+H');
   a('memory', s.memory ? 'Fechar o monitor de memória' : 'Monitor de memória', cmd({ type: 'memory:toggle', open: !s.memory }), 'Shift+Esc');
   if (s.sitePrivacy) {
     a('pause', s.sitePrivacy.tabPaused ? 'Retomar a proteção nesta aba' : 'Pausar a proteção nesta aba',

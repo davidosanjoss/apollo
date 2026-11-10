@@ -1,13 +1,16 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
+import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
+import { compareVersions } from '../shared/release-notes';
+import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
-import { buildItems, type PaletteItem } from './palette';
+import { buildItems, readableUrl, type PaletteItem } from './palette';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -76,15 +79,26 @@ function render(): void {
   }
   addressTabId = tab?.id ?? null;
 
+  renderHome(s);
+  renderFullscreen(s);
+  const zoomBtn = $('#zoom-btn');
+  zoomBtn.hidden = s.zoom === 100;
+  zoomBtn.textContent = `${s.zoom}%`;
+  renderDownloads(s);
+  renderFind(s);
+  renderBookmarks(s);
+  renderHistory(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
+  renderUpdateNotice(s);
   renderMemory(s);
   renderSettings(s);
   renderVault(s);
   renderPanels(s);
   renderModules(s);
+  renderScreenPicker(s);
   renderPalette();
 }
 
@@ -126,7 +140,7 @@ function renderMemory(s: UiState): void {
     li.querySelector<HTMLElement>('.ws-dot')!.style.background = wsColor.get(t.workspaceId) ?? 'transparent';
     li.querySelector('.name')!.textContent = t.title;
     li.querySelector('.tag')!.textContent = t.visible ? 'na tela' : t.playing ? '♪' : t.keepAwake ? 'sempre ativa' : '';
-    li.querySelector('.mb')!.textContent = t.mb === null ? 'hibernada' : fmtMb(t.mb);
+    li.querySelector('.mb')!.textContent = t.home ? 'página inicial' : t.mb === null ? 'hibernada' : fmtMb(t.mb);
     li.querySelector('button')!.disabled = t.mb === null || t.visible;
   });
 }
@@ -238,6 +252,519 @@ tabsBar.addEventListener('drop', (e) => {
   dragging = null;
 });
 
+// ------------------------------------------------------------ página inicial (sem processo)
+
+let homeTimer: ReturnType<typeof setTimeout> | null = null;
+function homeTick(): void {
+  const now = new Date();
+  const h = now.getHours();
+  $('#home-greeting').textContent = h < 5 ? 'Boa noite' : h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  $('#home-clock').textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  $('#home-date').textContent = now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  // Próxima virada de minuto (sem timer a cada segundo; parado quando a página inicial some).
+  homeTimer = setTimeout(homeTick, (60 - now.getSeconds()) * 1000);
+}
+
+function renderHome(s: UiState): void {
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const show = Boolean(tab && isHomeUrl(tab.url) && !tab.live);
+  const view = $('#home-view');
+  if (show === !view.hidden) return;
+  view.hidden = !show;
+  if (show) homeTick();
+  else if (homeTimer) { clearTimeout(homeTimer); homeTimer = null; }
+}
+
+$('#home-search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $<HTMLInputElement>('#home-q');
+  const url = normalizeUrl(q.value);
+  if (!url) return;
+  q.value = '';
+  send({ type: 'tab:navigate', url });
+});
+
+// ------------------------------------------------------------ tela cheia (F11)
+
+let lastFullscreen: UiState['fullscreen'] = null;
+let hintTimer: ReturnType<typeof setTimeout> | null = null;
+function renderFullscreen(s: UiState): void {
+  document.body.classList.toggle('fullscreen', s.fullscreen !== null);
+  if (s.fullscreen === lastFullscreen) return;
+  lastFullscreen = s.fullscreen;
+  // Aviso de como sair (só no F11; vídeo tem o próprio Esc). A página fica por cima do HTML,
+  // então o aviso aparece na faixa da interface por 2,5 s.
+  const hint = $('#fullscreen-hint');
+  hint.hidden = s.fullscreen !== 'window';
+  if (hintTimer) clearTimeout(hintTimer);
+  if (!hint.hidden) hintTimer = setTimeout(() => { hint.hidden = true; }, 2500);
+}
+
+// ------------------------------------------------------------ downloads
+
+const downloadsDialog = $<HTMLDialogElement>('#downloads-dialog');
+let knownDownloads = new Set<string>();
+
+function renderDownloads(s: UiState): void {
+  const btn = $('#downloads-btn');
+  const running = s.downloads.filter((d) => d.state === 'progressing' || d.state === 'paused');
+  // Anel de progresso: soma de tudo o que está baixando (tamanho conhecido).
+  const known = running.filter((d) => d.total > 0);
+  const p = known.length ? known.reduce((a, d) => a + d.received, 0) / known.reduce((a, d) => a + d.total, 0) : 0;
+  btn.classList.toggle('running', running.length > 0);
+  btn.style.setProperty('--p', String(p));
+  const badge = $('#downloads-active');
+  badge.hidden = running.length === 0;
+  badge.textContent = String(running.length);
+  btn.title = running.length ? `Downloads: ${running.length} em andamento` : 'Downloads';
+  // Download novo: o botão pisca (sem abrir nada por cima da página).
+  const ids = new Set(s.downloads.map((d) => d.id));
+  if ([...ids].some((id) => !knownDownloads.has(id)) && knownDownloads.size + ids.size > 0) {
+    btn.classList.remove('pulse');
+    void btn.offsetWidth; // reinicia a animação
+    btn.classList.add('pulse');
+  }
+  knownDownloads = ids;
+  if (downloadsDialog.open) renderDownloadList(s);
+}
+
+function renderDownloadList(s: UiState): void {
+  const act = (id: string, action: DownloadAction) => () => send({ type: 'download:action', downloadId: id, action });
+  const button = (label: string, title: string, onclick: () => void) => {
+    const b = el('button', { type: 'button', className: 'icon-btn', textContent: label, title });
+    b.onclick = onclick;
+    return b;
+  };
+  if (!s.downloads.length) {
+    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download nesta sessão.' }));
+    return;
+  }
+  $('#downloads-list').replaceChildren(...s.downloads.map((d) => {
+    const li = el('li');
+    li.dataset.downloadId = d.id;
+    const done = d.state === 'completed';
+    const name = el('span', { className: `name${done ? ' done' : ''}`, textContent: d.filename, title: d.url });
+    if (done) name.onclick = act(d.id, 'open');
+    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`, textContent: downloadStatus(d) });
+    const actions = el('span', { className: 'actions' });
+    if (d.state === 'progressing') actions.append(button('⏸', 'Pausar', act(d.id, 'pause')));
+    if (d.state === 'paused' || d.state === 'interrupted') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
+    if (d.state === 'progressing' || d.state === 'paused') actions.append(button('✕', 'Cancelar', act(d.id, 'cancel')));
+    if (done) actions.append(button('📂', 'Mostrar na pasta', act(d.id, 'show')));
+    if (!(d.state === 'progressing' || d.state === 'paused')) actions.append(button('🗑', 'Tirar da lista', act(d.id, 'remove')));
+    li.append(name, actions, status);
+    const f = downloadFraction(d);
+    if ((d.state === 'progressing' || d.state === 'paused') && f !== null) {
+      const bar = el('progress');
+      bar.max = 1;
+      bar.value = f;
+      li.append(bar);
+    }
+    return li;
+  }));
+}
+
+$('#downloads-btn').onclick = () => {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  renderDownloadList(state);
+  downloadsDialog.showModal();
+};
+$('#downloads-clear').onclick = () => send({ type: 'download:clear' });
+
+// ------------------------------------------------------------ localizar na página (Ctrl+F)
+
+const findBar = $('#find-bar');
+const findInput = $<HTMLInputElement>('#find-input');
+let findTabId: string | null = null;
+
+function openFind(): void {
+  const tab = state?.tabs.find((t) => t.id === state?.activeTabId);
+  if (!tab?.live) return; // página inicial / aba sem página: nada para buscar
+  findTabId = tab.id;
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  if (findInput.value) send({ type: 'find:query', text: findInput.value, forward: true, findNext: false });
+}
+
+function closeFind(focusPage = true): void {
+  if (findBar.hidden) return;
+  findBar.hidden = true;
+  findTabId = null;
+  send({ type: 'find:close' });
+  if (focusPage) send({ type: 'tab:focus' });
+}
+
+function renderFind(s: UiState): void {
+  if (findBar.hidden) return;
+  if (s.activeTabId !== findTabId) { closeFind(false); return; } // trocou de aba
+  const f = s.find;
+  const count = $('#find-count');
+  if (!f || !f.text) { count.textContent = ''; findInput.classList.remove('none'); return; }
+  count.textContent = f.matches ? `${f.active} de ${f.matches}` : 'Nenhum resultado';
+  findInput.classList.toggle('none', f.matches === 0);
+}
+
+const findStep = (forward: boolean) => {
+  if (findInput.value) send({ type: 'find:query', text: findInput.value, forward, findNext: true });
+};
+findInput.addEventListener('input', () => send({ type: 'find:query', text: findInput.value, forward: true, findNext: false }));
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); findStep(!e.shiftKey); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+});
+$('#find-next').onclick = () => findStep(true);
+$('#find-prev').onclick = () => findStep(false);
+$('#find-close').onclick = () => closeFind();
+
+// ------------------------------------------------------------ favoritos (barra, pastas, gerenciador)
+
+const bookmarkDialog = $<HTMLDialogElement>('#bookmark-dialog');
+/** O que o diálogo está fazendo: editar favorito, renomear pasta ou criar pasta. */
+let bookmarkMode: { kind: 'edit'; id: string } | { kind: 'folder'; id: string } | { kind: 'new-folder'; parentId: string | null } | null = null;
+/** Esperando o favorito recém-criado aparecer no estado para abrir o diálogo. */
+let bookmarkPending = false;
+
+function fillFolderSelect(selected: string | null, exclude: string | null): void {
+  const sel = $<HTMLSelectElement>('#bookmark-folder');
+  sel.replaceChildren(...folderOptions(state?.bookmarks ?? [], exclude).map((o) => {
+    const opt = el('option', { value: o.id ?? '', textContent: o.label });
+    opt.selected = o.id === selected;
+    return opt;
+  }));
+}
+
+function showBookmarkDialog(title: string, name: string, opts: { url?: string; folder?: string | null; exclude?: string | null; removable: boolean; saveLabel?: string }): void {
+  $('#bookmark-dialog-title').textContent = title;
+  $<HTMLInputElement>('#bookmark-title').value = name;
+  const url = $<HTMLInputElement>('#bookmark-url');
+  $('#bookmark-url-row').hidden = opts.url === undefined;
+  url.required = opts.url !== undefined;
+  url.value = opts.url ?? '';
+  $('#bookmark-folder-row').hidden = opts.folder === undefined;
+  if (opts.folder !== undefined) fillFolderSelect(opts.folder, opts.exclude ?? null);
+  $('#bookmark-hint').hidden = opts.url === undefined;
+  $('#bookmark-remove').hidden = !opts.removable;
+  $<HTMLButtonElement>('#bookmark-form button[type="submit"]').textContent = opts.saveLabel ?? 'Salvar';
+  if (!bookmarkDialog.open) {
+    for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d.id !== 'bookmarks-manager') d.close();
+    bookmarkDialog.showModal();
+  }
+  $<HTMLInputElement>('#bookmark-title').select();
+}
+
+function openBookmarkDialog(id: string): void {
+  const b = state?.bookmarks.find((x) => x.id === id);
+  if (!b) return;
+  if (b.folder) {
+    bookmarkMode = { kind: 'folder', id };
+    showBookmarkDialog('Renomear pasta', b.title, { removable: true });
+  } else {
+    bookmarkMode = { kind: 'edit', id };
+    showBookmarkDialog('Favorito', b.title, { url: b.url, folder: b.parentId, removable: true });
+  }
+}
+
+function openNewFolderDialog(parentId: string | null): void {
+  bookmarkMode = { kind: 'new-folder', parentId };
+  showBookmarkDialog('Nova pasta', '', { folder: parentId, removable: false, saveLabel: 'Criar' });
+}
+
+/** Estrela / Ctrl+K: marca a página (se ainda não for) e abre o diálogo para editar. */
+function bookmarkCurrent(): void {
+  if (state?.activeBookmarkId) { openBookmarkDialog(state.activeBookmarkId); return; }
+  bookmarkPending = true;
+  send({ type: 'bookmark:add' });
+}
+
+$('#bookmark-btn').onclick = bookmarkCurrent;
+$('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
+$('#bookmark-cancel').onclick = () => bookmarkDialog.close();
+$('#bookmark-remove').onclick = () => {
+  if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });
+  bookmarkDialog.close();
+};
+$('#bookmark-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const title = $<HTMLInputElement>('#bookmark-title').value.trim();
+  const folder = $<HTMLSelectElement>('#bookmark-folder').value || null;
+  const m = bookmarkMode;
+  if (!m || !title) return;
+  if (m.kind === 'edit') {
+    const url = normalizeUrl($<HTMLInputElement>('#bookmark-url').value);
+    if (!url) return;
+    send({ type: 'bookmark:update', bookmarkId: m.id, title, url, parentId: folder });
+  } else if (m.kind === 'folder') {
+    send({ type: 'bookmark:rename', bookmarkId: m.id, title });
+  } else {
+    send({ type: 'bookmark:add-folder', title, parentId: folder });
+  }
+  bookmarkDialog.close();
+});
+bookmarkDialog.addEventListener('close', () => { bookmarkMode = null; });
+
+const initial = (b: { title: string; url: string }) => (b.title.trim()[0] ?? readableUrl(b.url)[0] ?? '?').toUpperCase();
+const clearDrop = () => {
+  for (const n of document.querySelectorAll('.drop-before, .drop-after, .drop-into')) n.classList.remove('drop-before', 'drop-after', 'drop-into');
+};
+let draggingBookmark: string | null = null;
+
+/**
+ * Arrastar e soltar entre favoritos (barra, gerenciador, página inicial): antes/depois
+ * do alvo ou dentro (pasta, pelo meio). `horizontal` = barra/página inicial.
+ */
+function makeDraggable(node: HTMLElement, b: BookmarkInfo, dropEl: HTMLElement, horizontal: boolean): void {
+  node.draggable = true;
+  node.addEventListener('dragstart', (e) => {
+    e.stopPropagation();
+    draggingBookmark = b.id;
+    node.classList.add('dragging');
+    e.dataTransfer?.setData('text/plain', b.id);
+  });
+  node.addEventListener('dragend', () => { draggingBookmark = null; node.classList.remove('dragging'); clearDrop(); });
+  const place = (e: DragEvent) => {
+    const r = dropEl.getBoundingClientRect();
+    return dropPlace(b.folder, horizontal ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height);
+  };
+  dropEl.addEventListener('dragover', (e) => {
+    if (!draggingBookmark || !state) return;
+    e.stopPropagation();
+    if (!dropTarget(state.bookmarks, draggingBookmark, b.id, place(e))) return;
+    e.preventDefault();
+    clearDrop();
+    dropEl.classList.add(`drop-${place(e)}`);
+  });
+  dropEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const t = draggingBookmark && state ? dropTarget(state.bookmarks, draggingBookmark, b.id, place(e)) : null;
+    if (t && draggingBookmark) send({ type: 'bookmark:move', bookmarkId: draggingBookmark, parentId: t.parentId, index: t.index });
+    clearDrop();
+  });
+}
+
+function bookmarkIcon(b: BookmarkInfo, cls: string): HTMLElement {
+  const icon = el('span', { className: cls });
+  if (b.folder) icon.textContent = '📁';
+  else if (b.favicon) {
+    const img = el('img', { src: b.favicon, alt: '' });
+    img.onerror = () => { img.remove(); icon.textContent = initial(b); };
+    icon.append(img);
+  } else icon.textContent = initial(b);
+  return icon;
+}
+
+const openBm = (b: BookmarkInfo, e: MouseEvent) => send({ type: 'bookmark:open', bookmarkId: b.id, newTab: e.ctrlKey || e.metaKey || e.button === 1 });
+
+// --- barra de favoritos
+
+let barKey = '';
+function renderBookmarkBar(s: UiState): void {
+  const bar = $('#bookmark-bar');
+  bar.hidden = !s.settings.bookmarkBar;
+  if (bar.hidden) return;
+  const key = JSON.stringify(s.bookmarks);
+  if (key === barKey) return;
+  barKey = key;
+  const roots = childrenOf(s.bookmarks, null);
+  const items = $('#bookmark-items');
+  if (!roots.length) {
+    items.replaceChildren(el('span', { className: 'empty', textContent: 'Seus favoritos aparecem aqui — clique na ☆ da barra de endereço, ou com o botão direito crie pastas.' }));
+  } else {
+    items.replaceChildren(...roots.map((b) => {
+      const btn = el('button', { type: 'button', className: 'bm', title: b.folder ? b.title : `${b.title}\n${b.url}` });
+      btn.dataset.bookmarkId = b.id;
+      btn.append(bookmarkIcon(b, 'i'), el('span', { className: 't', textContent: b.title || readableUrl(b.url) }));
+      if (b.folder) {
+        btn.onclick = () => {
+          const r = btn.getBoundingClientRect();
+          send({ type: 'bookmark:menu', folderId: b.id, x: r.left, y: r.bottom });
+        };
+      } else {
+        btn.onclick = (e) => openBm(b, e);
+        btn.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); openBm(b, e); } };
+      }
+      btn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); send({ type: 'bookmark:context', bookmarkId: b.id, x: e.clientX, y: e.clientY }); };
+      makeDraggable(btn, b, btn, true);
+      return btn;
+    }));
+  }
+  requestAnimationFrame(fitBookmarkBar);
+}
+
+/** O que não cabe na barra vai para o menu "»". */
+function fitBookmarkBar(): void {
+  const items = $('#bookmark-items');
+  const more = $<HTMLButtonElement>('#bookmark-more');
+  const buttons = [...items.querySelectorAll<HTMLElement>('.bm')];
+  for (const b of buttons) b.hidden = false;
+  more.hidden = true;
+  const limit = items.getBoundingClientRect().right;
+  const first = buttons.findIndex((b) => b.getBoundingClientRect().right > limit + 1);
+  if (first < 0) return;
+  more.hidden = false;
+  const limit2 = items.getBoundingClientRect().right; // com o "»" visível, sobra menos espaço
+  let cut = buttons.findIndex((b) => b.getBoundingClientRect().right > limit2 + 1);
+  if (cut < 0) cut = first;
+  buttons.slice(cut).forEach((b) => { b.hidden = true; });
+  more.dataset.from = String(cut);
+}
+new ResizeObserver(() => fitBookmarkBar()).observe($('#bookmark-items'));
+$('#bookmark-more').onclick = () => {
+  const r = $('#bookmark-more').getBoundingClientRect();
+  send({ type: 'bookmark:menu', folderId: null, x: r.left, y: r.bottom, from: Number($('#bookmark-more').dataset.from ?? 0) });
+};
+$('#bookmark-bar').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  send({ type: 'bookmark:context', bookmarkId: null, x: e.clientX, y: e.clientY });
+});
+// Soltar na barra vazia (fora de um item): vai para o fim da barra.
+$('#bookmark-bar').addEventListener('dragover', (e) => { if (draggingBookmark) e.preventDefault(); });
+$('#bookmark-bar').addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (draggingBookmark && state) {
+    send({ type: 'bookmark:move', bookmarkId: draggingBookmark, parentId: null, index: childrenOf(state.bookmarks, null).length });
+  }
+  clearDrop();
+});
+
+// --- gerenciador (árvore)
+
+const managerDialog = $<HTMLDialogElement>('#bookmarks-manager');
+const collapsedFolders = new Set<string>();
+
+function openBookmarkManager(): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  renderBookmarkManager(state);
+  managerDialog.showModal();
+}
+
+function renderBookmarkManager(s: UiState): void {
+  $<HTMLInputElement>('#bm-show-bar').checked = s.settings.bookmarkBar;
+  const build = (parentId: string | null): HTMLElement[] => childrenOf(s.bookmarks, parentId).map((b) => {
+    const li = el('li', { className: collapsedFolders.has(b.id) ? 'collapsed' : '' });
+    li.setAttribute('role', 'treeitem');
+    li.dataset.bookmarkId = b.id;
+    const row = el('div', { className: 'row' });
+    const toggle = el('button', { type: 'button', className: 'toggle', textContent: b.folder ? (collapsedFolders.has(b.id) ? '▸' : '▾') : '' });
+    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(s); };
+    const title = el('span', { className: 't', textContent: b.title || readableUrl(b.url) });
+    if (!b.folder) title.ondblclick = () => openBm(b, new MouseEvent('click'));
+    const act = (label: string, t: string, fn: () => void) => { const x = el('button', { type: 'button', className: 'icon-btn', textContent: label, title: t }); x.onclick = fn; return x; };
+    row.append(toggle, bookmarkIcon(b, 'i'), title, el('span', { className: 'u', textContent: b.folder ? '' : readableUrl(b.url) }),
+      ...(b.folder ? [act('＋', 'Nova subpasta', () => openNewFolderDialog(b.id))] : []),
+      act('✎', b.folder ? 'Renomear' : 'Editar', () => openBookmarkDialog(b.id)),
+      act('🗑', b.folder ? 'Excluir a pasta e o que tem dentro' : 'Excluir', () => send({ type: 'bookmark:remove', bookmarkId: b.id })));
+    makeDraggable(li, b, row, false);
+    li.append(row);
+    if (b.folder) {
+      const ul = el('ul', { role: 'group' } as Partial<HTMLUListElement>);
+      ul.append(...build(b.id));
+      li.append(ul);
+    }
+    return li;
+  });
+  const nodes = build(null);
+  $('#bm-tree').replaceChildren(...(nodes.length ? nodes : [el('li', { className: 'empty', textContent: 'Nenhum favorito neste workspace ainda.' })]));
+}
+$('#bm-new-folder').onclick = () => openNewFolderDialog(null);
+$<HTMLInputElement>('#bm-show-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
+
+// --- estrela e blocos da página inicial (só os favoritos soltos na barra)
+
+let homeBookmarksKey = '';
+function renderBookmarks(s: UiState): void {
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const btn = $<HTMLButtonElement>('#bookmark-btn');
+  btn.hidden = !tab || isHomeUrl(tab.url) || !/^(https?|file):/i.test(tab.url);
+  btn.textContent = s.activeBookmarkId ? '★' : '☆';
+  btn.classList.toggle('on', Boolean(s.activeBookmarkId));
+  btn.title = s.activeBookmarkId ? 'Editar o favorito (Ctrl+D)' : 'Adicionar aos favoritos (Ctrl+D)';
+  if (bookmarkPending && s.activeBookmarkId) { bookmarkPending = false; openBookmarkDialog(s.activeBookmarkId); }
+  renderBookmarkBar(s);
+  if (managerDialog.open) renderBookmarkManager(s);
+
+  const key = JSON.stringify(s.bookmarks);
+  if (key === homeBookmarksKey) return;
+  homeBookmarksKey = key;
+  $('#home-bookmarks').replaceChildren(...childrenOf(s.bookmarks, null).filter((b) => !b.folder).map((b) => {
+    const li = el('li');
+    li.dataset.bookmarkId = b.id;
+    const a = el('a', { href: b.url, title: `${b.title}\n${b.url}` });
+    a.draggable = false;
+    a.append(bookmarkIcon(b, 'icon'), el('span', { className: 'name', textContent: b.title }));
+    a.onclick = (e) => { e.preventDefault(); openBm(b, e); };
+    a.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); openBm(b, e); } };
+    a.oncontextmenu = (e) => { e.preventDefault(); openBookmarkDialog(b.id); };
+    makeDraggable(li, b, li, true);
+    li.append(a);
+    return li;
+  }));
+}
+
+// ------------------------------------------------------------ histórico (janela)
+
+const historyDialog = $<HTMLDialogElement>('#history-dialog');
+const historyQ = $<HTMLInputElement>('#history-q');
+
+function openHistory(): void {
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  historyQ.value = '';
+  send({ type: 'history:view', open: true, query: '' });
+  $('#history-list').replaceChildren();
+  historyDialog.showModal();
+  historyQ.focus();
+}
+
+function renderHistory(s: UiState): void {
+  $('#history-btn').classList.toggle('on', historyDialog.open);
+  if (!historyDialog.open || !s.historyView) return;
+  const now = Date.now();
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const onHome = Boolean(tab && isHomeUrl(tab.url) && !tab.live);
+  const nodes: HTMLElement[] = [];
+  let day = '';
+  for (const h of s.historyView.entries) {
+    const d = dayLabel(h.lastVisit, now);
+    if (d !== day) { day = d; nodes.push(el('li', { className: 'day', textContent: d })); }
+    const li = el('li', { className: 'entry', title: h.url });
+    li.dataset.url = h.url;
+    const del = el('button', { type: 'button', className: 'icon-btn', textContent: '✕', title: 'Apagar do histórico' });
+    del.onclick = (e) => { e.stopPropagation(); send({ type: 'history:delete', url: h.url }); };
+    li.append(el('span', { className: 'time', textContent: new Date(h.lastVisit).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }),
+      el('span', { className: 't', textContent: h.title || readableUrl(h.url) }),
+      el('span', { className: 'h', textContent: hostOf(h.url) }), del);
+    li.onclick = (e) => {
+      send(onHome && !(e.ctrlKey || e.metaKey) ? { type: 'tab:navigate', url: h.url } : { type: 'tab:new', url: h.url });
+      historyDialog.close();
+    };
+    nodes.push(li);
+  }
+  $('#history-list').replaceChildren(...(nodes.length ? nodes
+    : [el('li', { className: 'empty', textContent: s.historyView.query ? 'Nada encontrado.' : s.settings.historyOn ? 'Nenhuma página visitada ainda.' : 'O histórico está desligado (Configurações → Histórico).' })]));
+}
+
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
+historyQ.addEventListener('input', () => send({ type: 'history:view', open: true, query: historyQ.value.slice(0, 500) }));
+historyDialog.addEventListener('close', () => { send({ type: 'history:view', open: false, query: '' }); $('#history-btn').classList.remove('on'); });
+$('#history-btn').onclick = () => (historyDialog.open ? historyDialog.close() : openHistory());
+let clearArmed: ReturnType<typeof setTimeout> | null = null;
+$('#history-clear-all').onclick = () => {
+  const b = $('#history-clear-all');
+  if (!clearArmed) { // dois cliques: não apaga tudo sem querer
+    b.textContent = 'Clique de novo para confirmar';
+    clearArmed = setTimeout(() => { clearArmed = null; b.textContent = 'Apagar todo o histórico'; }, 3000);
+    return;
+  }
+  clearTimeout(clearArmed);
+  clearArmed = null;
+  b.textContent = 'Apagar todo o histórico';
+  send({ type: 'history:clear' });
+  send({ type: 'history:view', open: true, query: historyQ.value });
+};
+
 function renderPermissionPrompt(s: UiState): void {
   const bar = $('#permission-bar');
   const p = s.permissionPrompt;
@@ -315,19 +842,67 @@ function renderSavePrompt(s: UiState): void {
   $('#save-yes').textContent = p.mode === 'update' ? 'Atualizar' : p.mode === 'locked' ? 'Desbloquear…' : 'Salvar';
 }
 
+// ------------------------------------------------------------ versão nova / novidades
+
+const updateDialog = $<HTMLDialogElement>('#update-dialog');
+let shownNotice = '';
+
+function renderUpdateNotice(s: UiState): void {
+  const n = s.updateNotice;
+  if (!n) { shownNotice = ''; if (updateDialog.open) updateDialog.close(); return; }
+  const key = `${n.kind}:${n.version}`;
+  if (key === shownNotice) return;
+  shownNotice = key;
+  const fresh = n.kind === 'available';
+  $('#update-dialog-title').textContent = fresh ? `Apollo ${n.version} disponível` : `Novidades do Apollo ${n.version}`;
+  $('#update-dialog-sub').textContent = fresh
+    ? `Você está na versão ${s.updateAbout.version}. ${n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.'}`
+    : 'O Apollo foi atualizado. O que mudou:';
+  // Notas: só texto (textContent), agrupadas em listas.
+  const nodes: HTMLElement[] = [];
+  let list: HTMLElement | null = null;
+  for (const b of n.notes) {
+    if (b.type === 'item') {
+      if (!list) { list = el('ul'); nodes.push(list); }
+      list.append(el('li', { textContent: b.text }));
+    } else {
+      list = null;
+      nodes.push(el(b.type === 'heading' ? 'h4' : 'p', { textContent: b.text }));
+    }
+  }
+  $('#update-notes').replaceChildren(...(nodes.length ? nodes : [el('p', { textContent: 'Veja as mudanças na página da versão.' })]));
+  $('#update-skip').hidden = !fresh;
+  $('#update-dismiss').textContent = fresh ? 'Depois' : 'Fechar';
+  const go = $<HTMLButtonElement>('#update-go');
+  go.hidden = !fresh;
+  go.textContent = n.canInstall ? 'Baixar e instalar' : 'Abrir a página de download';
+  go.dataset.action = n.canInstall ? 'install' : 'page';
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== updateDialog) d.close();
+  if (!updateDialog.open) updateDialog.showModal();
+  (fresh ? go : $<HTMLButtonElement>('#update-dismiss')).focus(); // não a área das notas
+}
+
+$('#update-go').onclick = () => {
+  if ($('#update-go').dataset.action === 'install') { updateDismissed = false; send({ type: 'update:download' }); send({ type: 'update:dismiss' }); }
+  else send({ type: 'update:open-page' });
+  updateDialog.close();
+};
+$('#update-skip').onclick = () => { send({ type: 'update:skip' }); updateDialog.close(); };
+$('#update-dismiss').onclick = () => updateDialog.close();
+// Fechar de qualquer jeito (Esc também) = "Depois".
+updateDialog.addEventListener('close', () => { if (state?.updateNotice) send({ type: 'update:dismiss' }); });
+
 function renderUpdate(s: UiState): void {
   const bar = $('#update-bar');
   const u = s.update;
   const primary = $<HTMLButtonElement>('#update-primary');
-  if (!u || (updateDismissed && u.stage === 'available')) { bar.hidden = true; return; }
+  // "Disponível" é mostrado na janela de versão nova (com as notas); a barra só acompanha
+  // o download e o "reiniciar".
+  if (!u || u.stage === 'available' || updateDismissed) { bar.hidden = true; return; }
   bar.hidden = false;
   primary.hidden = u.stage === 'downloading' || u.stage === 'error';
   primary.disabled = false;
-  if (u.stage === 'available') {
-    $('#update-text').textContent = `Apollo ${u.version} disponível.`;
-    primary.textContent = 'Baixar e reiniciar';
-    primary.dataset.action = 'download';
-  } else if (u.stage === 'downloading') {
+  if (u.stage === 'downloading') {
     $('#update-text').textContent = `Baixando atualização… ${u.percent}%`;
   } else if (u.stage === 'downloaded') {
     $('#update-text').textContent = `Apollo ${u.version} pronto. Suas abas serão restauradas.`;
@@ -354,8 +929,11 @@ window.addEventListener('resize', sendBounds);
 const dialog = $<HTMLDialogElement>('#ws-dialog');
 let editing: WorkspaceInfo | null = null;
 
-const hibernateLabel = (m: number) => (m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
+const hibernateLabel = (m: number) => (m === -1 ? 'Ao sair da aba' : m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
 $('#ws-hibernate').replaceChildren(...HIBERNATE_OPTIONS_MIN.map((m) => el('option', { value: String(m), textContent: hibernateLabel(m) })));
+const hiddenLabel = (m: number | null) => (m === null ? 'Mesma regra de cima' : m === -1 ? 'Ao sair do workspace' : `Após ${hibernateLabel(m)}`);
+$('#ws-hidden-hibernate').replaceChildren(...HIDDEN_HIBERNATE_OPTIONS_MIN.map((m) =>
+  el('option', { value: m === null ? '' : String(m), textContent: hiddenLabel(m) })));
 
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
@@ -364,6 +942,8 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
+  const hidden = ws ? ws.hiddenHibernateMin : 10;
+  $<HTMLSelectElement>('#ws-hidden-hibernate').value = hidden === null ? '' : String(hidden);
   // Temporário só se escolhe ao criar.
   $('#ws-temporary-row').hidden = Boolean(ws);
   $<HTMLInputElement>('#ws-temporary').checked = false;
@@ -385,9 +965,11 @@ $('#ws-form').addEventListener('submit', () => {
   const color = $<HTMLInputElement>('#ws-color').value;
   const home = normalizeUrl($<HTMLInputElement>('#ws-home').value) ?? '';
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
+  const hiddenRaw = $<HTMLSelectElement>('#ws-hidden-hibernate').value;
+  const hiddenHibernateMin = hiddenRaw === '' ? null : Number(hiddenRaw);
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -410,10 +992,77 @@ $('#ws-delete').onclick = () => {
 
 // ------------------------------------------------------------ configurações
 
-const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
+const settingsPage = $('#settings-page');
+type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'languages' | 'vault' | 'modules' | 'about';
+const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'languages', 'vault', 'modules', 'about'];
+let settingsSection: SettingsSection = 'privacy';
+/** Aba ativa quando a página abriu: trocar de aba fecha as configurações. */
+let settingsTabId: string | null = null;
+const settingsOpen = () => !settingsPage.hidden;
+
+function showSettingsSection(section: SettingsSection): void {
+  settingsSection = section;
+  try { localStorage.setItem('settings-section', section); } catch { /* sem armazenamento: tudo bem */ }
+  for (const b of document.querySelectorAll<HTMLElement>('#settings-nav button')) b.classList.toggle('active', b.dataset.section === section);
+  for (const d of document.querySelectorAll<HTMLElement>('.settings-section')) d.hidden = d.dataset.section !== section;
+  if (section === 'modules') showModulesView(false);
+  $('#settings-body').scrollTop = 0;
+  if (state) { renderSettings(state); renderModules(state); }
+}
+
+function openSettings(section?: SettingsSection): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
+  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
+  let saved: string | null = null;
+  try { saved = localStorage.getItem('settings-section'); } catch { /* sem armazenamento */ }
+  settingsTabId = state.activeTabId;
+  settingsPage.hidden = false;
+  syncOverlay();
+  showSettingsSection(section ?? (SETTINGS_SECTIONS.includes(saved as SettingsSection) ? saved as SettingsSection : 'privacy'));
+  $<HTMLElement>(`#settings-nav button[data-section="${settingsSection}"]`).focus();
+}
+
+function closeSettings(): void {
+  if (!settingsOpen()) return;
+  settingsPage.hidden = true;
+  syncOverlay();
+  send({ type: 'tab:focus' });
+}
+
+for (const b of document.querySelectorAll<HTMLElement>('#settings-nav button')) {
+  b.onclick = () => showSettingsSection(b.dataset.section as SettingsSection);
+}
+$('#settings-close').onclick = closeSettings;
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsOpen() && !document.querySelector('dialog[open]')) { e.preventDefault(); closeSettings(); }
+});
+$('#settings-open-history').onclick = () => openHistory();
+$('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
+$('#settings-open-vault').onclick = () => openVault();
+$<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
+$('#about-check').onclick = () => send({ type: 'update:check' });
 
 function renderSettings(s: UiState): void {
-  if (!settingsDialog.open) return;
+  if (!settingsOpen()) return;
+  if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
+  $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
+  $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
+    : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
+  const a = s.updateAbout;
+  $('#about-version').textContent = `Apollo ${a.version}`;
+  $('#about-status').textContent = !a.enabled ? 'Verificação de versões desligada nesta cópia (desenvolvimento).'
+    : a.checking ? 'Verificando…'
+    : a.failed ? 'Não foi possível verificar agora (sem conexão?).'
+    : a.latest && compareVersions(a.latest, a.version) > 0 ? `Versão ${a.latest} disponível.`
+    : a.checked ? `Você está na versão mais recente (verificado às ${new Date(a.checked).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`
+    : 'Verificação automática a cada 6 horas.';
+  $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
+  $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
+  $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
+  const sc = $<HTMLSelectElement>('#spellcheck');
+  if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
   const t = s.settings.dnsTest;
   const status = $('#dns-status');
   status.className = t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : '';
@@ -434,15 +1083,16 @@ function renderSettings(s: UiState): void {
   }));
 }
 
-function openSettings(): void {
-  if (!state) return;
-  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
-  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
-  settingsDialog.showModal();
-  renderSettings(state);
-}
-
-$('#settings-btn').onclick = openSettings;
+$('#settings-btn').onclick = () => (settingsOpen() ? closeSettings() : openSettings());
+$<HTMLInputElement>('#history-on').onchange = (e) => send({ type: 'settings:history', on: (e.target as HTMLInputElement).checked });
+$('#history-clear').onclick = () => {
+  send({ type: 'history:clear' });
+  $('#history-clear').textContent = 'Histórico apagado';
+  setTimeout(() => { $('#history-clear').textContent = 'Apagar todo o histórico'; }, 2500);
+};
+$<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
+$<HTMLSelectElement>('#spellcheck').onchange = (e) =>
+  send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });
 $('#dns-save').onclick = () => {
   const url = $<HTMLInputElement>('#dns-url').value.trim();
   if (url && !/^https:\/\/[^\s]+$/.test(url)) {
@@ -573,6 +1223,7 @@ function renderPanels(s: UiState): void {
     return b;
   }, (b, p) => {
     b.classList.toggle('active', p.id === s.activePanelId);
+    b.classList.toggle('sleeping', !p.loaded);
     b.title = `${p.title || p.url}\nLogins do workspace ${wsName.get(p.workspaceId) ?? ''}\nBotão direito: opções`;
     const letter = (p.title || new URL(p.url).hostname.replace(/^www\./, '')).charAt(0).toUpperCase();
     const img = b.querySelector('img');
@@ -662,11 +1313,10 @@ $('#panel-form').addEventListener('submit', (e) => {
 
 // ------------------------------------------------------------ módulos e personalizações
 
-const modulesDialog = $<HTMLDialogElement>('#modules-dialog');
 let editingCustom: string | null = null; // id em edição (null = nova)
 
 function renderModules(s: UiState): void {
-  if (!modulesDialog.open) return;
+  if (!settingsOpen() || settingsSection !== 'modules') return;
   $('#modules-list').replaceChildren(...s.modules.map((m) => {
     const label = el('label', { className: 'module-row' });
     const cb = el('input', { type: 'checkbox', checked: m.enabled });
@@ -693,11 +1343,7 @@ function showModulesView(editor: boolean): void {
 }
 
 function openModules(): void {
-  if (!state) return;
-  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== modulesDialog) d.close();
-  showModulesView(false);
-  if (!modulesDialog.open) modulesDialog.showModal();
-  renderModules(state);
+  openSettings('modules');
 }
 
 function openCustomEditor(id: string | null): void {
@@ -714,7 +1360,6 @@ function openCustomEditor(id: string | null): void {
   $('#custom-name').focus();
 }
 
-$('#open-modules').onclick = openModules;
 $('#custom-new').onclick = () => openCustomEditor(null);
 $('#custom-cancel').onclick = () => showModulesView(false);
 $('#custom-save').onclick = () => {
@@ -730,6 +1375,76 @@ $('#custom-delete').onclick = () => {
   if (editingCustom) send({ type: 'custom:delete', id: editingCustom });
   showModulesView(false);
 };
+
+// ------------------------------------------------------------ compartilhar tela
+
+const screenDialog = $<HTMLDialogElement>('#screen-dialog');
+let screenRequestId: string | null = null;
+let screenSelected: string | null = null;
+
+const SCREEN_GROUPS: [ScreenSource['kind'], string][] = [
+  ['system', 'Tela ou janela'], ['screen', 'Tela inteira'], ['window', 'Janela'], ['tab', 'Aba do Apollo'],
+];
+
+function renderScreenPicker(s: UiState): void {
+  const p = s.screenPicker;
+  if (!p) {
+    if (screenDialog.open) { screenRequestId = null; screenDialog.close(); }
+    return;
+  }
+  if (screenRequestId === p.id) return; // já desenhado
+  screenRequestId = p.id;
+  screenSelected = null;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== screenDialog) d.close();
+  $('#screen-origin').textContent = `${new URL(p.origin).host} quer ver o que você escolher.`;
+  const select = (id: string, btn: HTMLElement) => {
+    screenSelected = id;
+    for (const b of document.querySelectorAll('.screen-src.selected')) b.classList.remove('selected');
+    btn.classList.add('selected');
+    $<HTMLButtonElement>('#screen-share').disabled = false;
+    // Áudio: da aba (qualquer sistema) ou do computador (só Windows).
+    const kind = p.sources.find((x) => x.id === id)!.kind;
+    const audioOk = p.audioRequested && (kind === 'tab' || (p.systemAudio && kind !== 'system'));
+    $('#screen-audio-row').hidden = !audioOk;
+    $('#screen-audio-label').textContent = kind === 'tab' ? 'Compartilhar o áudio da aba' : 'Compartilhar o som do computador';
+  };
+  $('#screen-sources').replaceChildren(...SCREEN_GROUPS.flatMap(([kind, title]) => {
+    const items = p.sources.filter((x) => x.kind === kind);
+    if (!items.length) return [];
+    const grid = el('div', { className: 'grid' });
+    grid.append(...items.map((src) => {
+      const b = el('button', { type: 'button', className: 'screen-src' });
+      b.dataset.sourceId = src.id;
+      b.append(src.thumbnail ? el('img', { src: src.thumbnail, alt: '' }) : el('div', { className: 'nothumb', textContent: kind === 'system' ? '🖥' : '▢' }),
+        el('span', { textContent: src.name, title: src.name }));
+      b.onclick = () => select(src.id, b);
+      b.ondblclick = () => { select(src.id, b); $<HTMLFormElement>('#screen-form').requestSubmit(); };
+      return b;
+    }));
+    const section = el('section');
+    section.append(el('h3', { textContent: title }), grid);
+    return [section];
+  }));
+  $('#screen-audio-row').hidden = true;
+  $<HTMLInputElement>('#screen-audio').checked = false;
+  $<HTMLButtonElement>('#screen-share').disabled = true;
+  if (!screenDialog.open) screenDialog.showModal();
+}
+
+const answerScreen = (sourceId: string | null) => {
+  const id = screenRequestId;
+  screenRequestId = null;
+  if (id) send({ type: 'screen:pick', requestId: id, sourceId, audio: $<HTMLInputElement>('#screen-audio').checked });
+};
+$('#screen-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!screenSelected) return;
+  answerScreen(screenSelected);
+  screenDialog.close();
+});
+$('#screen-cancel').onclick = () => screenDialog.close();
+// Fechar de qualquer jeito (Esc, Cancelar) sem escolher = negar.
+screenDialog.addEventListener('close', () => { if (screenRequestId) answerScreen(null); });
 
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 
@@ -780,13 +1495,20 @@ function runPalette(index: number): void {
   else if (a.action === 'settings') openSettings();
   else if (a.action === 'vault') openVault();
   else if (a.action === 'modules') openModules();
+  else if (a.action === 'bookmark') bookmarkCurrent();
+  else if (a.action === 'bookmarks-manager') openBookmarkManager();
+  else if (a.action === 'history') openHistory();
   else openWorkspaceDialog();
 }
 
 palette.addEventListener('close', () => {
   send({ type: 'palette:toggle', open: false });
 });
-paletteInput.addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+paletteInput.addEventListener('input', () => {
+  paletteSel = 0;
+  send({ type: 'palette:query', text: paletteInput.value.slice(0, 500) }); // histórico vem no próximo estado
+  renderPalette();
+});
 $('#palette-btn').onclick = openPalette;
 paletteInput.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -889,8 +1611,9 @@ $<HTMLInputElement>('#address').addEventListener('blur', () => render());
 // Regressão: cada diálogo avisava sozinho; ao trocar de um diálogo para outro, o aviso
 // "fechou" chegava depois do "abriu" e a página cobria o diálogo novo (tela escura).
 let overlayShown = false;
+// A página de configurações também cobre a área da página do site.
 const syncOverlay = () => {
-  const open = document.querySelector('dialog[open]') !== null;
+  const open = document.querySelector('dialog[open]') !== null || !$('#settings-page').hidden;
   if (open === overlayShown) return;
   overlayShown = open;
   send({ type: 'layout:overlay', open });
@@ -910,6 +1633,16 @@ window.apollo.onEvent((event) => {
     openPalette();
   } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
+  } else if (event.type === 'open-find') {
+    openFind();
+  } else if (event.type === 'edit-bookmark') {
+    openBookmarkDialog(event.bookmarkId);
+  } else if (event.type === 'new-bookmark-folder') {
+    openNewFolderDialog(event.parentId);
+  } else if (event.type === 'manage-bookmarks') {
+    openBookmarkManager();
+  } else if (event.type === 'open-history') {
+    if (!historyDialog.open) openHistory();
   } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);
   } else if (event.type === 'focus-address') {

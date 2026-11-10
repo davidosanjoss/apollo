@@ -19,6 +19,9 @@ const ALWAYS_ALLOW = new Set([
   'keyboardLock',
   'mediaKeySystem', // Widevine/DRM
   'speaker-selection',
+  // Compartilhar tela: o consentimento é o seletor do Apollo (setDisplayMediaRequestHandler),
+  // que sempre pergunta o que compartilhar; aqui só deixa o pedido chegar até ele.
+  'display-capture',
 ]);
 
 /** Permissões que o usuário pode ajustar no painel do site. */
@@ -61,8 +64,24 @@ interface Pending extends PermissionPrompt {
   resolve: (granted: boolean) => void;
 }
 
+export type NotificationState = 'ask' | 'allow' | 'deny';
+
 export class PermissionManager {
   private queue: Pending[] = [];
+  /** "Permitir" sem "Lembrar": vale até fechar o Apollo (workspace|origem|tipo). */
+  private readonly sessionGrants = new Set<string>();
+  private static key = (ws: string, origin: string, kind: PermissionKind) => `${ws}|${origin}|${kind}`;
+
+  private allowed(ws: string, origin: string, kind: PermissionKind): boolean {
+    return this.store.getPermission(ws, origin, kind) === 'allow' || this.sessionGrants.has(PermissionManager.key(ws, origin, kind));
+  }
+
+  /** O que o site deve enxergar em Notification.permission ('ask' = ainda não decidido). */
+  notificationState(workspaceId: string, origin: string): NotificationState {
+    const d = this.store.getPermission(workspaceId, origin, 'notifications');
+    if (d === 'deny') return 'deny';
+    return this.allowed(workspaceId, origin, 'notifications') ? 'allow' : 'ask';
+  }
 
   constructor(
     private readonly store: Store,
@@ -80,7 +99,7 @@ export class PermissionManager {
 
       const decisions = kinds.map((k) => this.store.getPermission(workspaceId, origin, k));
       if (decisions.includes('deny')) return callback(false);
-      if (decisions.every((d) => d === 'allow')) return callback(true);
+      if (kinds.every((k) => this.allowed(workspaceId, origin, k))) return callback(true);
 
       // Sem decisão salva: pergunta. Só dá para perguntar se vier de uma aba (não de popup).
       const tabId = this.resolveTab(wc);
@@ -95,8 +114,8 @@ export class PermissionManager {
       const kinds = kindsFor(permission, mediaType && mediaType !== 'unknown' ? [mediaType] : undefined);
       const origin = originOf(requestingOrigin) ?? originOf(wc?.getURL());
       if (!kinds || !origin) return false;
-      // Consulta síncrona: só "sim" se já foi permitido explicitamente.
-      return kinds.every((k) => this.store.getPermission(workspaceId, origin, k) === 'allow');
+      // Consulta síncrona: só "sim" se já foi permitido (salvo, ou nesta execução).
+      return kinds.every((k) => this.allowed(workspaceId, origin, k));
     });
   }
 
@@ -111,6 +130,9 @@ export class PermissionManager {
     if (!p) return;
     this.queue = this.queue.filter((q) => q !== p);
     if (remember) for (const k of p.kinds) this.store.setPermission(p.workspaceId, p.origin, k, decision);
+    // Regressão: sem "Lembrar", o pedido era liberado mas a checagem seguinte dizia "não"
+    // (ex.: new Notification() falhava logo depois de permitir).
+    else if (decision === 'allow') for (const k of p.kinds) this.sessionGrants.add(PermissionManager.key(p.workspaceId, p.origin, k));
     p.resolve(decision === 'allow');
     this.onChange();
   }
@@ -135,6 +157,7 @@ export class PermissionManager {
 
   set(workspaceId: string, origin: string, kind: PermissionKind, decision: PermissionDecision | null): void {
     this.store.setPermission(workspaceId, origin, kind, decision);
+    this.sessionGrants.delete(PermissionManager.key(workspaceId, origin, kind)); // a escolha explícita vale
     this.onChange();
   }
 }

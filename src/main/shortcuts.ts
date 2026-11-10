@@ -11,7 +11,9 @@ export interface KeyInput {
 
 export type ShortcutAction =
   | 'new-tab' | 'reopen-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
-  | 'next-tab' | 'prev-tab' | 'memory-monitor' | 'autofill' | 'palette' | `workspace-${number}`;
+  | 'next-tab' | 'prev-tab' | 'memory-monitor' | 'autofill' | 'palette' | 'bookmark' | 'find' | 'find-next' | 'find-prev'
+  | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'fullscreen' | 'devtools' | 'bookmark-bar' | 'history'
+  | `workspace-${number}`;
 
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (input.type !== 'keyDown') return null;
@@ -22,6 +24,17 @@ export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (mod && !input.shift && k === 'w') return 'close-tab';
   if (mod && !input.shift && k === 'l') return 'focus-address';
   if (mod && !input.shift && k === 'k') return 'palette';
+  if (mod && !input.shift && k === 'd') return 'bookmark';
+  if (mod && input.shift && k === 'b') return 'bookmark-bar';
+  if (mod && !input.shift && k === 'h') return 'history';
+  if (mod && !input.shift && k === 'f') return 'find';
+  if (mod && !input.shift && k === 'p') return 'print';
+  if (!mod && !input.alt && input.key === 'F11') return 'fullscreen';
+  if ((!mod && !input.alt && input.key === 'F12') || (mod && input.shift && k === 'i')) return 'devtools';
+  if (mod && !input.alt && (input.key === '=' || input.key === '+')) return 'zoom-in';
+  if (mod && !input.alt && (input.key === '-' || input.key === '_')) return 'zoom-out';
+  if (mod && !input.alt && input.key === '0') return 'zoom-reset';
+  if ((mod && k === 'g') || (!mod && !input.alt && input.key === 'F3')) return input.shift ? 'find-prev' : 'find-next';
   if (mod && input.shift && k === 'l') return 'autofill'; // como no Bitwarden
   if ((mod && k === 'r') || input.key === 'F5') return 'reload';
   if (mod && input.key === 'Tab') return input.shift ? 'prev-tab' : 'next-tab';

@@ -41,11 +41,11 @@ O CI roda em todo push na `dev` (só Linux, para poupar a cota de minutos do rep
 
 ## Atualização automática
 
-O app consulta o `apollo-releases` 15 s depois de abrir e a cada 6 h. Se houver versão nova, mostra uma barra com **Baixar e reiniciar** / **Depois**. Nada é baixado nem instalado sem aceitar. O download é conferido pelo hash SHA-512 do manifesto (`latest.yml` / `latest-linux.yml`).
+O app consulta o `apollo-releases` (API pública do GitHub, sem dados do usuário) 15 s depois de abrir e a cada 6 h, em **qualquer** instalação empacotada. Se houver versão nova, mostra uma janela com as notas da versão (a seção do CHANGELOG publicada na release) e **Baixar e instalar** (AppImage/Windows) ou **Abrir a página de download** (zip/tar.gz), **Depois** e **Pular esta versão**. Na primeira abertura depois de atualizar, mostra as novidades uma vez. Configurações → Sobre tem **Verificar atualizações**. Nada é baixado nem instalado sem aceitar. O download é conferido pelo hash SHA-512 do manifesto (`latest.yml` / `latest-linux.yml`).
 
 - Atualiza sozinho: instalador `.exe` (Windows) e **AppImage** (Linux).
 - `zip` e `tar.gz`: atualização manual.
-- Em desenvolvimento (`npm start`) o atualizador fica desligado.
+- Em desenvolvimento (`npm start`) o atualizador e o aviso ficam desligados (os testes usam `APOLLO_UPDATES_API` com uma API falsa).
 
 ## Configuração única: token de publicação
 

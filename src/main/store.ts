@@ -1,3 +1,4 @@
+import { fold } from '../shared/text';
 import type { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -13,6 +14,7 @@ export interface Workspace {
   color: string;
   home: string;
   hibernateAfterMin: number;
+  hiddenHibernateMin: number | null;
   /** Sessão só em memória; o workspace some ao fechar o Apollo. */
   temporary: boolean;
   activeTabId: string | null;
@@ -51,6 +53,7 @@ const toWorkspace = (r: Row): Workspace => ({
   color: r.color as string,
   home: r.home as string,
   hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
+  hiddenHibernateMin: r.hidden_hibernate_min === undefined ? 10 : (r.hidden_hibernate_min as number | null),
   temporary: r.temporary === 1,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
@@ -84,6 +87,7 @@ export interface Panel {
   favicon: string | null;
   width: number;
   mobile: boolean;
+  hibernateMin: number | null;
 }
 
 const toPanel = (r: Row): Panel => ({
@@ -94,7 +98,56 @@ const toPanel = (r: Row): Panel => ({
   favicon: (r.favicon as string | null) ?? null,
   width: r.width as number,
   mobile: r.mobile === 1,
+  hibernateMin: (r.hibernate_min as number | null | undefined) ?? null,
 });
+
+/** Patch sem os campos undefined (senão { ...atual, ...patch } apagaria valores salvos). */
+function defined<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+export interface HistoryEntry {
+  url: string;
+  title: string;
+  visits: number;
+  lastVisit: number;
+}
+
+/** Texto de busca: título e endereço (sem esquema e decodificado) sem acentos. */
+export function historySearchText(url: string, title: string): string {
+  let u = url.replace(/^https?:\/\/(www\.)?/i, '');
+  try { u = decodeURI(u); } catch { /* malformada: como está */ }
+  return fold(`${title} ${u}`);
+}
+
+export interface Bookmark {
+  id: string;
+  workspaceId: string;
+  title: string;
+  /** '' nas pastas. */
+  url: string;
+  favicon: string | null;
+  /** Pasta onde está (null = na barra de favoritos). */
+  parentId: string | null;
+  folder: boolean;
+}
+
+const toBookmark = (r: Row): Bookmark => ({
+  id: r.id as string, workspaceId: r.workspace_id as string, title: r.title as string, url: r.url as string,
+  favicon: (r.favicon as string | null) ?? null, parentId: (r.parent_id as string | null) ?? null, folder: r.is_folder === 1,
+});
+
+/** Mesma página para fins de favorito: sem #fragmento e sem a barra final do caminho. */
+export function normalizeBookmarkUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, '');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
 export class Store {
@@ -135,13 +188,14 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'temporary'> & { hibernateAfterMin?: number; temporary?: boolean }): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'hiddenHibernateMin' | 'temporary'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
     const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
     const temporary = ws.temporary ?? false;
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, temporary ? 1 : 0);
-    return { ...ws, hibernateAfterMin, temporary, activeTabId: null };
+    const hiddenHibernateMin = ws.hiddenHibernateMin === undefined ? 10 : ws.hiddenHibernateMin;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, hidden_hibernate_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, hiddenHibernateMin, temporary ? 1 : 0);
+    return { ...ws, hibernateAfterMin, hiddenHibernateMin, temporary, activeTabId: null };
   }
 
   /** Apaga os workspaces temporários (ao abrir e ao fechar). Devolve os ids apagados. */
@@ -151,9 +205,13 @@ export class Store {
     return ids;
   }
 
-  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {
+  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null }): void {
     this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ?, hibernate_after_min = COALESCE(?, hibernate_after_min) WHERE id = ?')
       .run(patch.name, patch.color, patch.home, patch.hibernateAfterMin ?? null, id);
+    // null é um valor válido ("mesma regra"): só não mexe quando ausente.
+    if (patch.hiddenHibernateMin !== undefined) {
+      this.db.prepare('UPDATE workspaces SET hidden_hibernate_min = ? WHERE id = ?').run(patch.hiddenHibernateMin, id);
+    }
   }
 
   deleteWorkspace(id: string): void {
@@ -253,7 +311,7 @@ export class Store {
   updateGroup(id: string, patch: Partial<Pick<TabGroup, 'name' | 'color' | 'collapsed'>>): void {
     const g = this.getGroup(id);
     if (!g) return;
-    const next = { ...g, ...patch };
+    const next = { ...g, ...defined(patch) };
     this.db.prepare('UPDATE tab_groups SET name = ?, color = ?, collapsed = ? WHERE id = ?')
       .run(next.name, next.color, next.collapsed ? 1 : 0, id);
   }
@@ -329,6 +387,172 @@ export class Store {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
   }
 
+  // ------------------------------------------------------------ histórico de visitas
+
+  recordVisit(workspaceId: string, url: string, title: string, now = Date.now()): void {
+    this.db.prepare(`INSERT INTO history(workspace_id, url, title, search, visits, last_visit) VALUES (?, ?, ?, ?, 1, ?)
+      ON CONFLICT(workspace_id, url) DO UPDATE SET visits = visits + 1, last_visit = excluded.last_visit,
+        title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE title END,
+        search = CASE WHEN excluded.title <> '' THEN excluded.search ELSE search END`)
+      .run(workspaceId, url, title, historySearchText(url, title), now);
+  }
+
+  /** O título chega depois da navegação: atualiza a visita (se existir). */
+  setVisitTitle(workspaceId: string, url: string, title: string): void {
+    this.db.prepare('UPDATE history SET title = ?, search = ? WHERE workspace_id = ? AND url = ?')
+      .run(title, historySearchText(url, title), workspaceId, url);
+  }
+
+  /** Cada palavra tem que aparecer (sem acento/maiúscula) no título ou no endereço. */
+  searchHistory(workspaceId: string, query: string, limit = 8): HistoryEntry[] {
+    const words = fold(query).split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return [];
+    const like = (w: string) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = words.map(() => "search LIKE ? ESCAPE '\\'").join(' AND ');
+    // Mais visitado e mais recente primeiro (frecência simples).
+    return (this.db.prepare(`SELECT url, title, visits, last_visit FROM history WHERE workspace_id = ? AND ${where}
+      ORDER BY (visits * 1.0) / (1 + (? - last_visit) / 86400000.0) DESC LIMIT ?`)
+      .all(workspaceId, ...words.map(like), Date.now(), limit) as Row[])
+      .map((r) => ({ url: r.url as string, title: r.title as string, visits: r.visits as number, lastVisit: r.last_visit as number }));
+  }
+
+  /** Janela de histórico: mais recentes primeiro (filtrado pelas palavras, se houver). */
+  recentHistory(workspaceId: string, query: string, limit = 300): HistoryEntry[] {
+    const words = fold(query).split(/\s+/).filter(Boolean).slice(0, 8);
+    const like = (w: string) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = words.map(() => " AND search LIKE ? ESCAPE '\\'").join('');
+    return (this.db.prepare(`SELECT url, title, visits, last_visit FROM history WHERE workspace_id = ?${where}
+      ORDER BY last_visit DESC LIMIT ?`).all(workspaceId, ...words.map(like), limit) as Row[])
+      .map((r) => ({ url: r.url as string, title: r.title as string, visits: r.visits as number, lastVisit: r.last_visit as number }));
+  }
+
+  deleteVisit(workspaceId: string, url: string): void {
+    this.db.prepare('DELETE FROM history WHERE workspace_id = ? AND url = ?').run(workspaceId, url);
+  }
+
+  clearHistory(): void {
+    this.db.prepare('DELETE FROM history').run();
+  }
+
+  /** Mantém só os últimos `maxAgeDays` e, por workspace, os `maxPerWorkspace` mais recentes. */
+  pruneHistory(maxAgeDays = 90, maxPerWorkspace = 5000, now = Date.now()): void {
+    this.db.prepare('DELETE FROM history WHERE last_visit < ?').run(now - maxAgeDays * 86_400_000);
+    this.db.prepare(`DELETE FROM history WHERE rowid IN (SELECT rowid FROM (SELECT rowid,
+      ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY last_visit DESC) AS n FROM history) WHERE n > ?)`).run(maxPerWorkspace);
+  }
+
+  // ------------------------------------------------------------ zoom por site
+
+  /** Zoom guardado do site (1 = 100%, o padrão: não guardado). */
+  getZoom(workspaceId: string, host: string): number {
+    const row = this.db.prepare('SELECT factor FROM site_zoom WHERE workspace_id = ? AND host = ?').get(workspaceId, host) as { factor: number } | undefined;
+    return row?.factor ?? 1;
+  }
+
+  setZoom(workspaceId: string, host: string, factor: number): void {
+    if (Math.abs(factor - 1) < 0.001) {
+      this.db.prepare('DELETE FROM site_zoom WHERE workspace_id = ? AND host = ?').run(workspaceId, host);
+    } else {
+      this.db.prepare(`INSERT INTO site_zoom(workspace_id, host, factor) VALUES (?, ?, ?)
+        ON CONFLICT(workspace_id, host) DO UPDATE SET factor = excluded.factor`).run(workspaceId, host, factor);
+    }
+  }
+
+  // ------------------------------------------------------------ favoritos (por workspace, com pastas)
+
+  /** Todos os favoritos e pastas do workspace, em ordem (pai, posição). */
+  listBookmarks(workspaceId: string): Bookmark[] {
+    return (this.db.prepare('SELECT * FROM bookmarks WHERE workspace_id = ? ORDER BY position').all(workspaceId) as Row[]).map(toBookmark);
+  }
+
+  /** Filhos diretos de uma pasta (null = raiz / barra de favoritos), em ordem. */
+  childBookmarks(workspaceId: string, parentId: string | null): Bookmark[] {
+    return this.listBookmarks(workspaceId).filter((b) => b.parentId === parentId);
+  }
+
+  getBookmark(id: string): Bookmark | null {
+    const row = this.db.prepare('SELECT * FROM bookmarks WHERE id = ?').get(id) as Row | undefined;
+    return row ? toBookmark(row) : null;
+  }
+
+  /** Favorito (não pasta) da URL neste workspace (ignora só a barra final e o #fragmento). */
+  findBookmark(workspaceId: string, url: string): Bookmark | null {
+    const norm = normalizeBookmarkUrl(url);
+    return this.listBookmarks(workspaceId).find((b) => !b.folder && normalizeBookmarkUrl(b.url) === norm) ?? null;
+  }
+
+  private nextPosition(workspaceId: string, parentId: string | null): number {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM bookmarks WHERE workspace_id = ? AND parent_id IS ?')
+      .get(workspaceId, parentId) as { next: number };
+    return next;
+  }
+
+  addBookmark(b: Pick<Bookmark, 'id' | 'workspaceId' | 'title' | 'url' | 'favicon'> & { parentId?: string | null }): Bookmark {
+    const parentId = this.validParent(b.workspaceId, b.parentId ?? null);
+    this.db.prepare('INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)')
+      .run(b.id, b.workspaceId, b.title, b.url, b.favicon, this.nextPosition(b.workspaceId, parentId), Date.now(), parentId);
+    return this.getBookmark(b.id)!;
+  }
+
+  addFolder(f: { id: string; workspaceId: string; title: string; parentId?: string | null }): Bookmark {
+    const parentId = this.validParent(f.workspaceId, f.parentId ?? null);
+    this.db.prepare("INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, '', NULL, ?, ?, ?, 1)")
+      .run(f.id, f.workspaceId, f.title, this.nextPosition(f.workspaceId, parentId), Date.now(), parentId);
+    return this.getBookmark(f.id)!;
+  }
+
+  /** Pai só se for uma pasta do mesmo workspace; senão, raiz. */
+  private validParent(workspaceId: string, parentId: string | null): string | null {
+    if (!parentId) return null;
+    const p = this.getBookmark(parentId);
+    return p && p.folder && p.workspaceId === workspaceId ? p.id : null;
+  }
+
+  renameBookmark(id: string, title: string): void {
+    this.db.prepare('UPDATE bookmarks SET title = ? WHERE id = ?').run(title, id);
+  }
+
+  updateBookmark(id: string, patch: { title: string; url: string }): void {
+    this.db.prepare('UPDATE bookmarks SET title = ?, url = ? WHERE id = ? AND is_folder = 0').run(patch.title, patch.url, id);
+  }
+
+  /** Remove o favorito; pasta leva junto tudo o que tem dentro (subpastas inclusive). */
+  removeBookmark(id: string): void {
+    const b = this.getBookmark(id);
+    if (!b) return;
+    const all = this.listBookmarks(b.workspaceId);
+    const doomed = new Set([id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const x of all) if (x.parentId && doomed.has(x.parentId) && !doomed.has(x.id)) { doomed.add(x.id); grew = true; }
+    }
+    this.tx(() => { for (const x of doomed) this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(x); });
+  }
+
+  /** Pasta `folderId` é `id` ou está dentro dele? (impede mover uma pasta para dentro dela mesma) */
+  private isInside(folderId: string | null, id: string): boolean {
+    for (let cur = folderId; cur; cur = this.getBookmark(cur)?.parentId ?? null) if (cur === id) return true;
+    return false;
+  }
+
+  /**
+   * Move para a pasta `parentId` (null = barra), na posição final `index` entre os filhos dela.
+   * Mover uma pasta para dentro dela mesma (ou de uma subpasta) é ignorado.
+   */
+  moveBookmark(id: string, parentId: string | null, index: number): void {
+    const b = this.getBookmark(id);
+    if (!b) return;
+    const target = parentId === null ? null : this.validParent(b.workspaceId, parentId);
+    if (parentId !== null && target === null) return;
+    if (this.isInside(target, id)) return;
+    const ids = this.childBookmarks(b.workspaceId, target).map((x) => x.id).filter((x) => x !== id);
+    ids.splice(Math.min(Math.max(0, index), ids.length), 0, id);
+    this.tx(() => {
+      this.db.prepare('UPDATE bookmarks SET parent_id = ? WHERE id = ?').run(target, id);
+      ids.forEach((x, i) => this.db.prepare('UPDATE bookmarks SET position = ? WHERE id = ?').run(i, x));
+    });
+  }
+
   // ------------------------------------------------------------ painéis laterais
 
   listPanels(): Panel[] {
@@ -347,12 +571,12 @@ export class Store {
     return this.getPanel(p.id)!;
   }
 
-  updatePanel(id: string, patch: Partial<Pick<Panel, 'url' | 'title' | 'favicon' | 'width' | 'mobile'>>): void {
+  updatePanel(id: string, patch: Partial<Pick<Panel, 'url' | 'title' | 'favicon' | 'width' | 'mobile' | 'hibernateMin'>>): void {
     const cur = this.getPanel(id);
     if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.db.prepare('UPDATE panels SET url = ?, title = ?, favicon = ?, width = ?, mobile = ? WHERE id = ?')
-      .run(n.url, n.title, n.favicon, n.width, n.mobile ? 1 : 0, id);
+    const n = { ...cur, ...defined(patch) };
+    this.db.prepare('UPDATE panels SET url = ?, title = ?, favicon = ?, width = ?, mobile = ?, hibernate_min = ? WHERE id = ?')
+      .run(n.url, n.title, n.favicon, n.width, n.mobile ? 1 : 0, n.hibernateMin, id);
   }
 
   deletePanel(id: string): void {

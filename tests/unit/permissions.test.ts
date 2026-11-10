@@ -60,8 +60,14 @@ describe('pedidos de permissão', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('nega o que não é conhecido (captura de tela, sistema de arquivos…)', () => {
-    for (const p of ['display-capture', 'fileSystem', 'idle-detection', 'window-management', 'inventada']) {
+  // Compartilhar tela passa para o seletor do Apollo (que é onde o usuário consente).
+  it('compartilhar tela segue para o seletor (não é negado aqui)', () => {
+    expect(request('display-capture').value).toBe(true);
+    expect(h.check!(TAB_WC, 'display-capture', SITE, {})).toBe(true);
+  });
+
+  it('nega o que não é conhecido (sistema de arquivos…)', () => {
+    for (const p of ['fileSystem', 'idle-detection', 'window-management', 'inventada']) {
       expect(request(p).value, p).toBe(false);
     }
   });
@@ -97,6 +103,30 @@ describe('pedidos de permissão', () => {
     expect(r.value).toBe(false);
     expect(store.getPermission('w', SITE, 'geolocation')).toBeNull();
     expect(request('geolocation').value).toBe('pendente');
+  });
+
+  // Regressão: "Permitir" sem "Lembrar" liberava o pedido, mas a checagem logo depois
+  // dizia "não" — new Notification() falhava mesmo depois de o usuário permitir.
+  it('permitir sem "lembrar" vale nesta execução (pedido e checagem), sem salvar', () => {
+    const r = request('notifications');
+    pm.answer(pm.promptFor('tab1')!.id, 'allow', false);
+    expect(r.value).toBe(true);
+    expect(store.getPermission('w', SITE, 'notifications')).toBeNull();
+    expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(true);
+    expect(request('notifications').value).toBe(true); // não pergunta de novo
+    expect(pm.notificationState('w', SITE)).toBe('allow');
+    expect(pm.notificationState('outro', SITE)).toBe('ask');
+    pm.set('w', SITE, 'notifications', 'deny'); // escolha explícita no painel do site vale
+    expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(false);
+    expect(pm.notificationState('w', SITE)).toBe('deny');
+  });
+
+  it('estado das notificações: perguntar / permitir / bloquear', () => {
+    expect(pm.notificationState('w', SITE)).toBe('ask');
+    store.setPermission('w', SITE, 'notifications', 'allow');
+    expect(pm.notificationState('w', SITE)).toBe('allow');
+    store.setPermission('w', SITE, 'notifications', 'deny');
+    expect(pm.notificationState('w', SITE)).toBe('deny');
   });
 
   it('decisão é do workspace: outro workspace não herda', () => {
@@ -136,7 +166,7 @@ describe('verificação síncrona (permission check)', () => {
     store.setPermission('w', SITE, 'notifications', 'allow');
     expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(true);
     expect(h.check!(TAB_WC, 'fullscreen', SITE, {})).toBe(true);
-    expect(h.check!(TAB_WC, 'display-capture', SITE, {})).toBe(false);
+    expect(h.check!(TAB_WC, 'window-management', SITE, {})).toBe(false);
   });
 
   it('mídia: mediaType "unknown" exige câmera e microfone', () => {

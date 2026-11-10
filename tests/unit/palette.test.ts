@@ -45,7 +45,7 @@ describe('rank', () => {
 // ------------------------------------------------------------ itens
 
 const tab = (id: string, title: string, over: object = {}) => ({ id, title, url: `https://${id}.com/`, favicon: null, loading: false,
-  canGoBack: false, canGoForward: false, dormant: false, pinned: false, keepAwake: false, groupId: null, ...over });
+  canGoBack: false, canGoForward: false, dormant: false, live: true, pinned: false, keepAwake: false, groupId: null, ...over });
 const ws = (id: string, name: string) => ({ id, name, color: '#000000', home: '', hibernateAfterMin: 30, privacy: {} as never, temporary: false });
 
 function state(over: Partial<UiState> = {}): UiState {
@@ -91,7 +91,7 @@ describe('buildItems', () => {
   });
 
   it('painéis: abrir/fechar pela paleta', () => {
-    const panels = [{ id: 'p1', workspaceId: 'w2', url: 'https://web.whatsapp.com/', title: 'WhatsApp', favicon: null, width: 420, mobile: false, loaded: false }];
+    const panels = [{ id: 'p1', workspaceId: 'w2', url: 'https://web.whatsapp.com/', title: 'WhatsApp', favicon: null, width: 420, mobile: false, loaded: false, hibernateMin: null }];
     const items = buildItems({ state: state({ panels, activePanelId: null }), query: 'whats', openUrl: null });
     expect(items[0]).toMatchObject({ title: 'Painel: WhatsApp', detail: 'Trabalho', action: { kind: 'command', command: { type: 'panel:toggle', panelId: 'p1' } } });
     expect(buildItems({ state: state({ panels, activePanelId: 'p1' }), query: 'whats', openUrl: null })[0].title).toBe('Fechar o painel: WhatsApp');
@@ -100,5 +100,65 @@ describe('buildItems', () => {
   it('cofre desbloqueado com login no site: preencher e bloquear', () => {
     const items = buildItems({ state: state({ vault: { status: 'unlocked' } as UiState['vault'], vaultSite: { status: 'unlocked', count: 1 } }), query: '', openUrl: null });
     expect(items.map((i) => i.title)).toEqual(expect.arrayContaining(['Bitwarden: preencher login', 'Bitwarden: bloquear o cofre']));
+  });
+});
+
+describe('favoritos na paleta', () => {
+  const bookmarks = [{ id: 'b1', title: 'Moodle UFMG', url: 'https://moodle.ufmg.br/', favicon: null, parentId: null, folder: false }];
+
+  it('favoritos do workspace abrem pelo comando bookmark:open', () => {
+    const items = buildItems({ state: state({ bookmarks, activeBookmarkId: null }), query: 'moodle', openUrl: 'https://www.google.com/search?q=moodle' });
+    expect(items[0]).toMatchObject({ group: 'Favoritos', title: 'Moodle UFMG', detail: 'moodle.ufmg.br/',
+      action: { kind: 'command', command: { type: 'bookmark:open', bookmarkId: 'b1' } } });
+  });
+
+  it('ação de marcar/editar a página atual (não na página inicial)', () => {
+    const add = buildItems({ state: state({ bookmarks: [], activeBookmarkId: null }), query: '', openUrl: null });
+    expect(add.find((i) => i.id === 'act:bookmark')?.title).toBe('Adicionar esta página aos favoritos');
+    const edit = buildItems({ state: state({ bookmarks, activeBookmarkId: 'b1' }), query: '', openUrl: null });
+    expect(edit.find((i) => i.id === 'act:bookmark')?.title).toBe('Editar o favorito desta página');
+    const home = buildItems({ state: state({ tabs: [tab('a', 'Nova aba', { url: 'apollo://home/' })], bookmarks: [], activeBookmarkId: null }), query: '', openUrl: null });
+    expect(home.find((i) => i.id === 'act:bookmark')).toBeUndefined();
+  });
+});
+
+describe('histórico na paleta', () => {
+  const paletteHistory = [
+    { url: 'https://moodle.ufmg.br/course/1', title: 'Cálculo I' },
+    { url: 'https://a.com/', title: 'Já aberta' },
+    { url: 'https://fav.com/', title: 'Já favorito' },
+  ];
+  const bookmarks = [{ id: 'b', title: 'Fav', url: 'https://fav.com/', favicon: null, parentId: null, folder: false }];
+
+  it('sem repetir abas abertas e favoritos; abre em nova aba', () => {
+    const items = buildItems({ state: state({ paletteHistory, bookmarks, activeBookmarkId: null }), query: 'calc', openUrl: null });
+    const hist = items.filter((i) => i.group === 'Histórico');
+    expect(hist.map((h) => h.title)).toEqual(['Cálculo I']);
+    expect(hist[0]).toMatchObject({ detail: 'moodle.ufmg.br/course/1',
+      action: { kind: 'command', command: { type: 'tab:new', url: 'https://moodle.ufmg.br/course/1' } } });
+  });
+
+  // Regressão: "diferencial calculo" não casava "Cálculo Diferencial" (busca aproximada
+  // exige as letras em ordem) e o item do histórico, já filtrado por palavras, sumia.
+  it('palavras fora de ordem: o item do histórico não é descartado', () => {
+    const items = buildItems({ state: state({ paletteHistory, bookmarks: [], activeBookmarkId: null }), query: '1 calculo', openUrl: null });
+    expect(items.filter((i) => i.group === 'Histórico').map((i) => i.title)).toContain('Cálculo I');
+  });
+
+  it('na página inicial (sem página): abre na própria aba', () => {
+    const s = state({ tabs: [tab('a', 'Nova aba', { url: 'apollo://home', live: false })], paletteHistory, bookmarks: [], activeBookmarkId: null });
+    const h = buildItems({ state: s, query: 'calc', openUrl: null }).find((i) => i.group === 'Histórico')!;
+    expect(h.action).toEqual({ kind: 'command', command: { type: 'tab:navigate', url: 'https://moodle.ufmg.br/course/1' } });
+  });
+});
+
+describe('favoritos em pastas na paleta', () => {
+  it('pastas não aparecem; o caminho da pasta vai no detalhe', () => {
+    const bookmarks = [
+      { id: 'f', title: 'Faculdade', url: '', favicon: null, parentId: null, folder: true },
+      { id: 'c', title: 'Cálculo', url: 'https://moodle.ufmg.br/c', favicon: null, parentId: 'f', folder: false },
+    ];
+    const items = buildItems({ state: state({ bookmarks, activeBookmarkId: null }), query: '', openUrl: null }).filter((i) => i.group === 'Favoritos');
+    expect(items.map((i) => [i.title, i.detail])).toEqual([['Cálculo', 'Faculdade › moodle.ufmg.br/c']]);
   });
 });

@@ -108,6 +108,18 @@ describe('painéis laterais', () => {
     await app.until((x) => x.panels.find((p) => p.id === b.id)!.width === 320, 'B salvo com 320');
   });
 
+  // Regressão: ajustar a largura apagava a "versão para celular" (patch com undefined).
+  it('mudar a largura não desliga a versão para celular', async () => {
+    const id = (await app.state()).activePanelId!;
+    await app.send({ type: 'panel:set', panelId: id, mobile: true });
+    await app.until((x) => x.panels.find((p) => p.id === id)!.mobile, 'celular ligado');
+    await app.send({ type: 'panel:set', panelId: id, width: 360 });
+    const s = await app.until((x) => x.panels.find((p) => p.id === id)!.width === 360, 'largura salva');
+    expect(s.panels.find((p) => p.id === id)!.mobile).toBe(true);
+    await app.send({ type: 'panel:set', panelId: id, mobile: false });
+    await app.until((x) => !x.panels.find((p) => p.id === id)!.mobile, 'celular desligado');
+  });
+
   it('não passa dos limites; duplo clique volta à largura padrão', async () => {
     const b = (await app.state()).activePanelId!;
     await app.ui.drag('#panel-resizer', 2000);

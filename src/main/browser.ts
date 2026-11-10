@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
-import type { Store, Tab, Workspace } from './store';
+import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
-import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
+import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
@@ -12,6 +12,7 @@ import type { MenuModelItem } from './menu-model';
 import { vaultMenu } from './vault/menu';
 import { MODULES, parseModules } from './modules';
 import { customizationsFor } from './customizations';
+import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 
 /** Mundo isolado das personalizações do usuário: vê o DOM, não vê a página nem o Apollo. */
 const USER_SCRIPT_WORLD = 1001;
@@ -41,15 +42,24 @@ interface PendingSave {
 const SAVE_PROMPT_TTL_MS = 5 * 60_000;
 
 const CLIPBOARD_CLEAR_MS = 30_000;
+
+/** Promessa com prazo: se o sistema não responder, segue sem ela (null). */
+const within = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+  Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
 import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
+import { normalizeUrl } from '../shared/url';
+import { DownloadManager } from './downloads';
+import type { UpdateCheck } from './update-check';
+import { nextZoom, zoomKey, zoomPercent } from './zoom';
+import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
-import { PermissionManager } from './permissions';
+import { PermissionManager, originOf } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS, PANEL_DEFAULT_WIDTH } from '../shared/types';
+import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -108,7 +118,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -135,6 +145,7 @@ export class Browser {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
     // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
     store.deleteTemporaryWorkspaces();
+    store.pruneHistory();
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -144,6 +155,12 @@ export class Browser {
     this.ensureHasTab(this.activeWorkspaceId);
 
     win.on('resize', () => this.layout());
+    // Saiu da tela cheia pelo sistema (tecla do gerenciador de janelas): a interface volta.
+    win.on('leave-full-screen', () => {
+      if (!this.windowFullscreen) return;
+      this.windowFullscreen = false;
+      this.push();
+    });
   }
 
   // ------------------------------------------------------------ consultas
@@ -177,6 +194,9 @@ export class Browser {
     if (!this.sessionsReady.has(workspaceId)) {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
+      this.applySpellcheck(ses);
+      this.downloads.attach(ses);
+      ses.setDisplayMediaRequestHandler((request, callback) => { void this.handleDisplayMedia(request, callback); });
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
     return ses;
@@ -318,10 +338,40 @@ export class Browser {
       this.push();
     };
 
-    wc.on('page-title-updated', (_e, title) => update({ title }));
+    wc.on('page-title-updated', (_e, title) => {
+      update({ title });
+      if (this.historyOn(workspaceId)) this.store.setVisitTitle(workspaceId, wc.getURL(), title);
+    });
+    // Tela cheia pedida pela página (vídeo): o Electron põe a janela em tela cheia; a view
+    // precisa cobrir a janela inteira (senão o vídeo fica preso no espaço da aba).
+    wc.on('enter-html-full-screen', () => {
+      this.pageFullscreenTabId = tabId;
+      this.layout();
+      this.push();
+    });
+    wc.on('leave-html-full-screen', () => {
+      if (this.pageFullscreenTabId !== tabId) return;
+      this.pageFullscreenTabId = null;
+      if (this.windowFullscreen) this.win.setFullScreen(true); // F11 continua valendo
+      this.layout();
+      this.push();
+    });
+    // Ctrl + roda do mouse.
+    wc.on('zoom-changed', (_e, dir) => this.zoom(wc, workspaceId, dir));
+    wc.on('found-in-page', (_e, r) => {
+      if (this.findState?.tabId !== tabId) return;
+      this.findState = { ...this.findState, active: r.activeMatchOrdinal, matches: r.matches };
+      this.push();
+    });
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
-      if (!url.startsWith('apollo://error')) update({ url });
+      // Código-fonte: o evento traz a URL de dentro; a aba guarda "view-source:…" (senão,
+      // ao restaurar ou acordar da hibernação, abriria a página em vez do código).
+      const shown = wc.getURL();
+      this.applyZoom(wc, workspaceId, url);
+      this.visit(workspaceId, url, '');
+      if (shown.startsWith('view-source:')) update({ url: shown, title: shown });
+      else if (!url.startsWith('apollo://error')) update({ url });
 
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
@@ -332,7 +382,11 @@ export class Browser {
     wc.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) this.blocked.delete(tabId);
     });
-    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) update({ url }); });
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      update({ url });
+      this.visit(workspaceId, url, wc.getTitle());
+    });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
     wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('media-started-playing', () => { this.playing.add(tabId); });
@@ -359,6 +413,7 @@ export class Browser {
       event.preventDefault();
       this.runShortcut(action);
     });
+    wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, workspaceId, tabId));
 
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // "Abrir em nova aba" → aba no mesmo workspace.
@@ -431,6 +486,15 @@ export class Browser {
     if (!manual && (tab.keepAwake || this.playing.has(tabId) || this.unloadBlocked.has(tabId))) return;
     this.permissions.cancelForTab(tabId);
     this.destroyView(tabId, true);
+  }
+
+  private hibernationSoon: NodeJS.Timeout | null = null;
+
+  /** Ao sair de uma aba/workspace: roda a hibernação logo (para "ao sair" valer na hora). */
+  private scheduleHibernation(): void {
+    if (this.hibernationSoon) return;
+    this.hibernationSoon = setTimeout(() => { this.hibernationSoon = null; this.hibernationTick(); }, 1500);
+    this.hibernationSoon.unref();
   }
 
   private memoryInfo(): { usedMb: number; otherMb: number; perTab: Map<string, number> } {
@@ -551,6 +615,354 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ tela cheia, imprimir, devtools
+
+  private windowFullscreen = false;
+  private pageFullscreenTabId: string | null = null;
+
+  /** F11: janela em tela cheia sem a interface (abas, barra, laterais). */
+  toggleFullscreen(): void {
+    this.windowFullscreen = !this.windowFullscreen;
+    this.win.setFullScreen(this.windowFullscreen);
+    this.push();
+  }
+
+  private withActiveWc(fn: (wc: WebContents) => void): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (wc && !wc.isDestroyed()) fn(wc);
+  }
+
+  private print(wc: WebContents): void {
+    wc.print({}, (ok, reason) => { if (!ok && reason !== 'cancelled') console.warn('[apollo] impressão falhou:', reason); });
+  }
+
+  private toggleDevTools(wc: WebContents): void {
+    if (wc.isDevToolsOpened()) wc.closeDevTools();
+    else wc.openDevTools({ mode: 'detach' }); // view não tem onde "acoplar": janela própria
+  }
+
+  // ------------------------------------------------------------ zoom por site
+
+  private zoomActive(dir: 'in' | 'out' | 'reset'): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (tab && wc && !wc.isDestroyed()) this.zoom(wc, tab.workspaceId, dir);
+  }
+
+  /** Muda e guarda o zoom do site (outras abas do mesmo site no workspace acompanham). */
+  private zoom(wc: WebContents, workspaceId: string, dir: 'in' | 'out' | 'reset'): void {
+    const factor = dir === 'reset' ? 1 : nextZoom(wc.getZoomFactor(), dir);
+    wc.setZoomFactor(factor);
+    const key = zoomKey(wc.getURL());
+    if (key) this.store.setZoom(workspaceId, key, factor);
+    this.push();
+  }
+
+  /** Ao abrir uma página: o zoom guardado do site (o Chromium só lembra até fechar o app). */
+  private applyZoom(wc: WebContents, workspaceId: string, url: string): void {
+    const key = zoomKey(url);
+    const factor = key ? this.store.getZoom(workspaceId, key) : 1;
+    if (Math.abs(wc.getZoomFactor() - factor) > 0.001) wc.setZoomFactor(factor);
+  }
+
+  // ------------------------------------------------------------ downloads
+
+  private readonly downloads = new DownloadManager({
+    dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
+    ask: () => this.store.getKv('download-ask') === '1',
+    onChange: () => this.push(),
+  });
+
+  // ------------------------------------------------------------ localizar na página (Ctrl+F)
+
+  private findState: { tabId: string; text: string; active: number; matches: number } | null = null;
+
+  private find(text: string, forward: boolean, findNext: boolean): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (!tab || !wc || wc.isDestroyed()) return;
+    if (!text) { this.stopFind(); this.findState = { tabId: tab.id, text: '', active: 0, matches: 0 }; this.push(); return; }
+    // Outra aba ou texto novo: começa do zero (contagem chega pelo found-in-page).
+    if (this.findState?.tabId !== tab.id || this.findState.text !== text) {
+      this.findState = { tabId: tab.id, text, active: 0, matches: 0 };
+      findNext = false;
+    }
+    wc.findInPage(text, { forward, findNext, matchCase: false });
+  }
+
+  private stopFind(): void {
+    const st = this.findState;
+    this.findState = null;
+    const wc = st ? this.views.get(st.tabId)?.webContents : undefined;
+    if (wc && !wc.isDestroyed()) wc.stopFindInPage('keepSelection');
+    this.push();
+  }
+
+  // ------------------------------------------------------------ favoritos (por workspace)
+
+  /** Marca a página da aba ativa; se já for favorita, devolve a existente (não duplica). */
+  private addBookmark(): Bookmark | null {
+    const tab = this.activeTab();
+    if (!tab || isHomeUrl(tab.url) || !/^(https?|file):/i.test(tab.url)) return null;
+    const existing = this.store.findBookmark(tab.workspaceId, tab.url);
+    if (existing) return existing;
+    const b = this.store.addBookmark({ id: newId(), workspaceId: tab.workspaceId, title: (tab.title || tab.url).slice(0, 300),
+      url: tab.url, favicon: tab.favicon });
+    this.push();
+    return b;
+  }
+
+  private updateBookmark(id: string, title: string, url: string, parentId?: string | null): void {
+    const b = this.store.getBookmark(id);
+    if (!b || b.folder) return;
+    const clean = normalizeUrl(url);
+    if (!clean) return;
+    this.store.updateBookmark(id, { title: title.trim() || clean, url: clean });
+    if (parentId !== undefined && parentId !== b.parentId) this.store.moveBookmark(id, parentId, Number.MAX_SAFE_INTEGER);
+  }
+
+  private addBookmarkFolder(title: string, parentId: string | null): void {
+    this.store.addFolder({ id: newId(), workspaceId: this.activeWorkspaceId, title: title.trim().slice(0, 300), parentId });
+  }
+
+  /** Favorito: abre (na aba atual se estiver na página inicial). Pasta: abre tudo em abas. */
+  private openBookmark(id: string, newTab: boolean): void {
+    const b = this.store.getBookmark(id);
+    if (!b) return;
+    if (b.workspaceId !== this.activeWorkspaceId) this.switchWorkspace(b.workspaceId);
+    if (b.folder) {
+      for (const x of this.store.childBookmarks(b.workspaceId, b.id).filter((x) => !x.folder)) {
+        this.createTab(b.workspaceId, x.url, { activate: false });
+      }
+      return;
+    }
+    const tab = this.activeTab();
+    if (!newTab && tab && isHomeUrl(tab.url)) this.navigate(b.url);
+    else this.createTab(b.workspaceId, b.url, { activate: true });
+  }
+
+  /** Itens de uma pasta como menu nativo (subpastas viram submenus). */
+  private bookmarkMenuItems(folderId: string | null, from = 0): MenuItemConstructorOptions[] {
+    const all = this.store.listBookmarks(this.activeWorkspaceId);
+    const build = (parent: string | null, skip = 0, depth = 0): MenuItemConstructorOptions[] => {
+      const kids = all.filter((b) => b.parentId === parent).slice(skip);
+      const items: MenuItemConstructorOptions[] = kids.map((b) => b.folder
+        ? { label: `📁 ${b.title}`, submenu: depth < 12 ? build(b.id, 0, depth + 1) : [] }
+        : { label: b.title || b.url, click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) });
+      const links = kids.filter((b) => !b.folder).length;
+      if (parent && links > 1) {
+        items.push({ type: 'separator' }, { label: `Abrir todos (${links}) em abas`, click: this.run({ type: 'bookmark:open', bookmarkId: parent }) });
+      }
+      if (!items.length) items.push({ label: '(vazia)', enabled: false });
+      return items;
+    };
+    return build(folderId, from);
+  }
+
+  private showBookmarkMenu(folderId: string | null, x: number, y: number, from?: number): void {
+    if (folderId && this.store.getBookmark(folderId)?.workspaceId !== this.activeWorkspaceId) return;
+    this.popup(this.bookmarkMenuItems(folderId, from ?? 0), x, y);
+  }
+
+  /** Botão direito num favorito/pasta da barra (ou na barra vazia). */
+  private showBookmarkContext(id: string | null, x: number, y: number): void {
+    const b = id ? this.store.getBookmark(id) : null;
+    if (id && (!b || b.workspaceId !== this.activeWorkspaceId)) return;
+    const parentForNew = b ? (b.folder ? b.id : b.parentId) : null;
+    const items: MenuItemConstructorOptions[] = [];
+    if (b && !b.folder) {
+      items.push(
+        { label: 'Abrir', click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) },
+        { label: 'Abrir em nova aba', click: this.run({ type: 'bookmark:open', bookmarkId: b.id, newTab: true }) },
+        { type: 'separator' },
+        { label: 'Editar…', click: () => { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); } },
+      );
+    } else if (b) {
+      const links = this.store.childBookmarks(b.workspaceId, b.id).filter((x) => !x.folder).length;
+      items.push(
+        { label: `Abrir todos (${links}) em abas`, enabled: links > 0, click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) },
+        { type: 'separator' },
+        { label: 'Renomear…', click: () => { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); } },
+      );
+    }
+    const tab = this.activeTab();
+    const canAdd = tab && !isHomeUrl(tab.url) && /^(https?|file):/i.test(tab.url);
+    items.push(
+      ...(b ? [{ type: 'separator' as const }] : []),
+      { label: b?.folder ? 'Adicionar esta página aqui' : 'Adicionar esta página', enabled: Boolean(canAdd), click: () => this.addBookmarkTo(parentForNew) },
+      { label: b?.folder ? 'Nova subpasta…' : 'Nova pasta…', click: () => { this.focusUi(); this.emit({ type: 'new-bookmark-folder', parentId: parentForNew }); } },
+      { type: 'separator' },
+      ...(b ? [{ label: b.folder ? 'Excluir a pasta (e o que tem dentro)' : 'Excluir', click: this.run({ type: 'bookmark:remove', bookmarkId: b.id }) },
+        { type: 'separator' as const }] : []),
+      { label: 'Gerenciar favoritos…', click: () => { this.focusUi(); this.emit({ type: 'manage-bookmarks' }); } },
+      { label: 'Mostrar a barra de favoritos', type: 'checkbox', checked: this.bookmarkBarOn(), accelerator: 'CmdOrCtrl+Shift+B',
+        click: this.run({ type: 'settings:bookmark-bar', show: !this.bookmarkBarOn() }) },
+    );
+    this.popup(items, x, y);
+  }
+
+  /** "Adicionar esta página" numa pasta (ou na barra), sem duplicar. */
+  private addBookmarkTo(parentId: string | null): void {
+    const b = this.addBookmark();
+    if (b && b.parentId !== parentId) this.store.moveBookmark(b.id, parentId, Number.MAX_SAFE_INTEGER);
+    this.push();
+  }
+
+  private bookmarkBarOn(): boolean {
+    return this.store.getKv('bookmark-bar') !== '0';
+  }
+
+  // ------------------------------------------------------------ histórico (janela)
+
+  private historyQuery: string | null = null; // null = janela fechada
+
+  // ------------------------------------------------------------ compartilhar tela (Teams, Meet…)
+
+  private screenRequest: {
+    info: ScreenPickerInfo;
+    callback: (streams: Electron.Streams | null) => void;
+    requesterTabId: string | null;
+    screens: Map<string, Electron.DesktopCapturerSource>;
+    timer: NodeJS.Timeout;
+  } | null = null;
+
+  private static isWayland(): boolean {
+    return process.platform === 'linux' && app.commandLine.getSwitchValue('ozone-platform') !== 'headless'
+      && (process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY));
+  }
+
+  /** getDisplayMedia(): mostra o seletor do Apollo. A escolha do usuário é o consentimento. */
+  private async handleDisplayMedia(request: Electron.DisplayMediaRequestHandlerHandlerRequest,
+    callback: (streams: Electron.Streams | null) => void): Promise<void> {
+    if (this.screenRequest || !request.videoRequested) { callback(null); return; } // um pedido por vez
+    const requesterTabId = request.frame ? this.tabIdOfWebContentsId(this.webContentsIdOfFrame(request.frame)) : null;
+    const sources: ScreenSource[] = [];
+    const screens = new Map<string, Electron.DesktopCapturerSource>();
+    if (Browser.isWayland()) {
+      // No Wayland só o sistema (portal) pode listar telas/janelas: ele mostra o seletor dele.
+      sources.push({ id: 'system', name: 'Tela ou janela (escolher no seletor do sistema)', kind: 'system', thumbnail: null });
+    } else {
+      // Prazo: um sistema que não responde não pode impedir o seletor de abrir.
+      const list = await within(desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } }), 4000);
+      if (!list) console.warn('[apollo] não foi possível listar telas/janelas (sem resposta do sistema)');
+      for (const src of list ?? []) {
+        screens.set(src.id, src);
+        sources.push({ id: src.id, name: src.name, kind: src.id.startsWith('screen:') ? 'screen' : 'window',
+          thumbnail: src.thumbnail.isEmpty() ? null : src.thumbnail.toDataURL() });
+      }
+    }
+    for (const [tabId, view] of this.views) {
+      const wc = view.webContents;
+      if (tabId === requesterTabId || wc.isDestroyed()) continue;
+      const tab = this.store.getTab(tabId);
+      if (!tab) continue;
+      const img = await within(wc.capturePage(), 1500); // aba escondida pode não ter quadro: sem miniatura
+      const thumbnail = img && !img.isEmpty() ? img.resize({ width: 320 }).toDataURL() : null;
+      sources.push({ id: `tab:${tabId}`, name: tab.title || tab.url, kind: 'tab', thumbnail });
+    }
+    const info: ScreenPickerInfo = {
+      id: newId(),
+      origin: originOf(request.securityOrigin) ?? request.securityOrigin,
+      audioRequested: request.audioRequested,
+      systemAudio: process.platform === 'win32',
+      sources,
+    };
+    const timer = setTimeout(() => this.pickScreen(info.id, null, false), 120_000); // sem resposta: nega
+    timer.unref();
+    this.screenRequest = { info, callback, requesterTabId, screens, timer };
+    this.push();
+  }
+
+  private webContentsIdOfFrame(frame: Electron.WebFrameMain): number | undefined {
+    for (const view of this.views.values()) {
+      if (!view.webContents.isDestroyed() && view.webContents.mainFrame === frame.top) return view.webContents.id;
+    }
+    return undefined;
+  }
+
+  /** Abas sendo compartilhadas: precisam continuar desenhando quadros mesmo fora da tela. */
+  private readonly sharedTabs = new Set<string>();
+  private sharedTimer: NodeJS.Timeout | null = null;
+
+  /** Bounds fora da área visível, do tamanho normal: o Chromium desenha, ninguém vê. */
+  private offscreenBounds() {
+    return { x: -(this.bounds.width + 200), y: 0, width: Math.max(this.bounds.width, 640), height: Math.max(this.bounds.height, 360) };
+  }
+
+  /**
+   * Página escondida não desenha quadros, e a captura ficaria esperando para sempre.
+   * Enquanto a aba é compartilhada, ela fica anexada à janela, mas fora da área visível.
+   */
+  private keepRendering(tabId: string): void {
+    const view = this.views.get(tabId);
+    if (!view) return;
+    this.sharedTabs.add(tabId);
+    if (this.attachedTabId !== tabId) {
+      this.win.contentView.addChildView(view, 0);
+      view.setBounds(this.offscreenBounds());
+      view.setVisible(true);
+    }
+    this.sharedTimer ??= setInterval(() => this.checkSharedTabs(), 3000);
+  }
+
+  /** Compartilhamento acabou: a aba volta a ficar só na memória (ou é a da tela). */
+  private checkSharedTabs(): void {
+    for (const tabId of [...this.sharedTabs]) {
+      const view = this.views.get(tabId);
+      if (view && !view.webContents.isDestroyed() && view.webContents.isBeingCaptured()) continue;
+      this.sharedTabs.delete(tabId);
+      if (view && this.attachedTabId !== tabId) this.win.contentView.removeChildView(view);
+    }
+    if (!this.sharedTabs.size && this.sharedTimer) { clearInterval(this.sharedTimer); this.sharedTimer = null; }
+  }
+
+  pickScreen(requestId: string, sourceId: string | null, audio: boolean): void {
+    const req = this.screenRequest;
+    if (!req || req.info.id !== requestId) return;
+    clearTimeout(req.timer);
+    this.screenRequest = null;
+    this.push();
+    const done = (streams: Electron.Streams | null) => { try { req.callback(streams); } catch { /* pedido já encerrado */ } };
+    if (!sourceId) return done(null);
+    if (sourceId === 'system') {
+      // Wayland: o portal do sistema mostra o seletor e devolve só a escolha do usuário.
+      void desktopCapturer.getSources({ types: ['screen', 'window'] })
+        .then((list) => done(list[0] ? { video: list[0] } : null))
+        .catch(() => done(null));
+      return;
+    }
+    if (sourceId.startsWith('tab:')) {
+      const tabId = sourceId.slice(4);
+      const wc = this.views.get(tabId)?.webContents;
+      if (!wc || wc.isDestroyed()) return done(null);
+      this.keepRendering(tabId);
+      return done({ video: wc.mainFrame, ...(audio ? { audio: wc.mainFrame } : {}) });
+    }
+    const src = req.screens.get(sourceId);
+    if (!src) return done(null);
+    done({ video: src, ...(audio && process.platform === 'win32' ? { audio: 'loopback' as const } : {}) });
+  }
+
+  // ------------------------------------------------------------ corretor ortográfico
+
+  /** Público: o index aplica à sessão padrão (a da interface) antes de a janela carregar. */
+  applySpellcheck(ses: Session): void {
+    const langs = spellcheckLanguages(parseSpellcheck(this.store.getKv('spellcheck')));
+    // Lista vazia também no "desligado": o Chromium guarda os idiomas nas preferências da
+    // sessão e baixaria os dicionários deles mesmo com o corretor desligado.
+    ses.setSpellCheckerLanguages(langs);
+    ses.setSpellCheckerEnabled(langs.length > 0);
+  }
+
+  setSpellcheck(mode: SpellcheckMode): void {
+    this.store.setKv('spellcheck', mode);
+    this.applySpellcheck(session.defaultSession); // a interface também tem campos de texto
+    for (const wsId of this.sessionsReady.keys()) {
+      if (this.store.getWorkspace(wsId)) this.applySpellcheck(session.fromPartition(this.partitionOf(wsId)));
+    }
+  }
+
   // ------------------------------------------------------------ módulos e personalizações
 
   isModuleOn(id: ModuleId): boolean {
@@ -618,6 +1030,7 @@ export class Browser {
       event.preventDefault();
       this.runShortcut(action);
     });
+    wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, p.workspaceId, null));
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // Link "nova aba" do painel: abre como aba no workspace do painel.
       if (disposition === 'foreground-tab' || disposition === 'background-tab' || disposition === 'new-window') {
@@ -638,7 +1051,11 @@ export class Browser {
   openPanel(id: string): void {
     const view = this.ensurePanelView(id);
     if (!view) return;
-    if (this.activePanelId && this.activePanelId !== id) this.hidePanelView(this.activePanelId);
+    if (this.activePanelId && this.activePanelId !== id) {
+      this.hidePanelView(this.activePanelId);
+      this.panelClosedAt.set(this.activePanelId, Date.now());
+    }
+    this.panelClosedAt.delete(id);
     if (this.activePanelId !== id) this.win.contentView.addChildView(view);
     this.activePanelId = id;
     this.layoutPanel();
@@ -647,9 +1064,29 @@ export class Browser {
 
   closePanel(): void {
     if (!this.activePanelId) return;
-    this.hidePanelView(this.activePanelId); // continua vivo (mensagens seguem chegando)
+    const id = this.activePanelId;
+    this.hidePanelView(id); // continua vivo (mensagens seguem chegando), salvo regra de hibernar
     this.activePanelId = null;
+    this.panelClosedAt.set(id, Date.now());
+    if (this.store.getPanel(id)?.hibernateMin === 0) this.hibernateClosedPanels(Date.now());
     this.push();
+  }
+
+  /** Hiberna (descarrega) um painel; ele continua no trilho e recarrega ao abrir. */
+  hibernatePanel(id: string): void {
+    if (this.activePanelId === id) this.closePanel();
+    this.destroyPanelView(id);
+  }
+
+  /** Painéis fechados há mais tempo que a regra deles (nunca os que tocam áudio). */
+  private hibernateClosedPanels(now: number): void {
+    for (const p of this.store.listPanels()) {
+      const v = this.panelViews.get(p.id);
+      if (!v || p.id === this.activePanelId || p.hibernateMin === null || v.webContents.isDestroyed()) continue;
+      if (v.webContents.isCurrentlyAudible()) continue;
+      const closedAt = this.panelClosedAt.get(p.id) ?? now;
+      if (now - closedAt >= p.hibernateMin * minuteMs()) this.destroyPanelView(p.id);
+    }
   }
 
   private hidePanelView(id: string): void {
@@ -672,7 +1109,7 @@ export class Browser {
     this.push();
   }
 
-  setPanel(id: string, patch: { width?: number; mobile?: boolean }): void {
+  setPanel(id: string, patch: { width?: number; mobile?: boolean; hibernateMin?: number | null }): void {
     const p = this.store.getPanel(id);
     if (!p) return;
     this.store.updatePanel(id, patch);
@@ -706,6 +1143,28 @@ export class Browser {
       { label: `Voltar à largura padrão (${PANEL_DEFAULT_WIDTH} px)`, enabled: p.width !== PANEL_DEFAULT_WIDTH,
         click: this.run({ type: 'panel:set', panelId: id, width: PANEL_DEFAULT_WIDTH }) },
       { type: 'separator' },
+      { label: 'Hibernar agora (libera a memória)', enabled: this.panelViews.has(id), click: this.run({ type: 'panel:hibernate', panelId: id }) },
+      { label: 'Hibernar quando fechado', submenu: PANEL_HIBERNATE_OPTIONS_MIN.map((m) => ({
+        label: m === null ? 'Nunca (sempre ativo — mensagens chegam)' : m === 0 ? 'Ao fechar' : m < 60 ? `Após ${m} min fechado` : `Após ${m / 60} h fechado`,
+        type: 'radio' as const, checked: p.hibernateMin === m,
+        click: this.run({ type: 'panel:set', panelId: id, hibernateMin: m }),
+      })) },
+      { type: 'separator' },
+      // Painel não tem a barra de permissão das abas: notificações decididas aqui.
+      ...(() => {
+        const origin = originOf(p.url);
+        if (!origin) return [];
+        const cur = this.store.getPermission(p.workspaceId, origin, 'notifications');
+        const set = (decision: PermissionDecision | null) => () => {
+          this.permissions.set(p.workspaceId, origin, 'notifications', decision);
+          this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
+        };
+        return [{ label: 'Notificações', submenu: [
+          { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
+          { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
+          { label: 'Perguntar (o site pede)', type: 'radio' as const, checked: cur === null, click: set(null) },
+        ] }, { type: 'separator' as const }];
+      })(),
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);
   }
@@ -736,6 +1195,7 @@ export class Browser {
       title: t.title || t.url,
       favicon: t.favicon,
       mb: perTab.has(t.id) ? Math.round(perTab.get(t.id)!) : null,
+      home: isHomeUrl(t.url) && !this.views.has(t.id),
       visible: t.id === this.attachedTabId,
       keepAwake: t.keepAwake,
       playing: this.playing.has(t.id) || Boolean(this.views.get(t.id)?.webContents.isCurrentlyAudible()),
@@ -751,6 +1211,32 @@ export class Browser {
   }
 
   /** Mostra a aba, trocando de workspace se preciso. */
+  private panelIdOf(wc: WebContents): string | null {
+    for (const [id, view] of this.panelViews) if (view.webContents === wc) return id;
+    return null;
+  }
+
+  /** Estado das notificações para a página que está carregando (aba ou painel). */
+  notificationState(wc: WebContents, url: string): 'ask' | 'allow' | 'deny' | null {
+    const origin = originOf(url);
+    const tabId = this.tabIdOf(wc);
+    const panelId = tabId ? null : this.panelIdOf(wc);
+    const ws = tabId ? this.store.getTab(tabId)?.workspaceId : panelId ? this.store.getPanel(panelId)?.workspaceId : undefined;
+    return origin && ws ? this.permissions.notificationState(ws, origin) : null;
+  }
+
+  /** Clicou numa notificação: mostra a aba (mesmo em outro workspace) ou abre o painel. */
+  showFromNotification(wc: WebContents): void {
+    const tabId = this.tabIdOf(wc);
+    const panelId = tabId ? null : this.panelIdOf(wc);
+    if (tabId) this.revealTab(tabId);
+    else if (panelId && this.activePanelId !== panelId) this.openPanel(panelId);
+    else if (!panelId) return;
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
+  }
+
   revealTab(tabId: string): void {
     const tab = this.store.getTab(tabId);
     if (!tab) return;
@@ -770,10 +1256,11 @@ export class Browser {
         alive: true,
         visible: tabId === this.attachedTabId,
         keepAwake: tab.keepAwake,
-        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible(),
+        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured(),
         unloadBlocked: this.unloadBlocked.has(tabId),
         lastSeenAt: this.lastSeen.get(tabId) ?? now,
         memoryMb: perTab.get(tabId) ?? null,
+        workspaceVisible: tab.workspaceId === this.activeWorkspaceId,
       });
     }
     return out;
@@ -781,11 +1268,16 @@ export class Browser {
 
   /** Uma rodada: decide e hiberna. Barata quando não há abas em segundo plano. */
   hibernationTick(now = Date.now()): string[] {
-    if (this.views.size <= 1 || !this.isModuleOn('hibernation')) return [];
+    if (!this.isModuleOn('hibernation')) return [];
+    this.hibernateClosedPanels(now);
+    if (this.views.size <= 1) return [];
     const limit = Number(this.store.getKv('memoryLimitMb')) || null;
     const { usedMb, perTab } = limit ? this.memoryInfo() : { usedMb: 0, perTab: new Map<string, number>() };
     const ids = pickTabsToHibernate(this.hibernationCandidates(perTab, now), {
-      timeoutMin: (wsId) => this.store.getWorkspace(wsId)?.hibernateAfterMin ?? 0,
+      timeoutMin: (t) => {
+        const ws = this.store.getWorkspace(t.workspaceId);
+        return ws ? effectiveTimeout(ws.hibernateAfterMin, ws.hiddenHibernateMin, t.workspaceVisible) : null;
+      },
       memoryLimitMb: limit,
       memoryUsedMb: usedMb,
     }, now, minuteMs());
@@ -798,9 +1290,27 @@ export class Browser {
     const tab = this.activeTab();
     if (this.attachedTabId && this.attachedTabId !== tab?.id) {
       const old = this.views.get(this.attachedTabId);
-      if (old) this.win.contentView.removeChildView(old);
+      if (old && this.sharedTabs.has(this.attachedTabId)) {
+        this.win.contentView.addChildView(old, 0); // compartilhada: continua desenhando, fora da tela
+        old.setBounds(this.offscreenBounds());
+      } else if (old) {
+        this.win.contentView.removeChildView(old);
+      }
       this.lastSeen.set(this.attachedTabId, Date.now());
+      if (this.findState?.tabId === this.attachedTabId) this.stopFind();
+      if (this.pageFullscreenTabId === this.attachedTabId) {
+        old?.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
+        this.pageFullscreenTabId = null;
+      }
       this.attachedTabId = null;
+      this.scheduleHibernation();
+    }
+    // Nova aba na página inicial: a interface desenha a página; nenhum processo é criado
+    // até você abrir um endereço (economiza ~40 MB e deixa o Ctrl+T instantâneo).
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) {
+      this.focusAddress();
+      this.push();
+      return;
     }
     if (tab) {
       const view = this.ensureView(tab);
@@ -822,6 +1332,14 @@ export class Browser {
     if (!this.attachedTabId) return;
     const view = this.views.get(this.attachedTabId);
     if (!view) return;
+    // Vídeo (ou outro elemento) em tela cheia: a página cobre a janela inteira, por cima de tudo.
+    if (this.pageFullscreenTabId === this.attachedTabId) {
+      const [width, height] = this.win.getContentSize();
+      this.win.contentView.addChildView(view); // para o topo (acima de painéis)
+      view.setVisible(true);
+      view.setBounds({ x: 0, y: 0, width, height });
+      return;
+    }
     // A view é nativa e fica POR CIMA do HTML da UI: com um diálogo aberto, escondemos a página.
     view.setVisible(!this.overlayOpen && this.bounds.width > 0);
     view.setBounds(this.bounds);
@@ -851,6 +1369,7 @@ export class Browser {
     this.blocked.delete(tabId);
     this.pendingSaves.delete(tabId);
     this.usernameSteps.delete(tabId);
+    if (this.screenRequest?.requesterTabId === tabId) this.pickScreen(this.screenRequest.info.id, null, false);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
       this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
@@ -918,8 +1437,11 @@ export class Browser {
       this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
     } else if (view) view.webContents.loadURL(url).catch(() => {});
     else {
-      // Aba dormindo: a navegação entra no histórico salvo, e a view nasce com ele.
-      this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
+      // Aba sem página (dormindo, ou página inicial desenhada pela interface): a navegação
+      // entra no histórico salvo e a view nasce com ele. Saindo da página inicial, ela fica
+      // antes no histórico (o "voltar" leva de volta a ela, como antes).
+      const base = !tab.history && isHomeUrl(tab.url) ? { index: 0, entries: [{ url: APOLLO_HOME, title: 'Nova aba' }] } : tab.history;
+      this.store.setTabHistory(tab.id, withNavigation(base, url));
       this.showActive();
     }
     this.withActiveView((wc) => wc.focus());
@@ -1036,8 +1558,68 @@ export class Browser {
 
   // ------------------------------------------------------------ menus de contexto (nativos: ficam acima da página)
 
+  /** Último menu nativo montado (os testes acionam os itens por aqui). */
+  lastMenu: MenuItemConstructorOptions[] | null = null;
+
   private popup(items: MenuItemConstructorOptions[], x: number, y: number): void {
+    this.lastMenu = items;
+    if (process.env.APOLLO_TEST_HOOKS) return; // testes: o menu nativo bloquearia a automação
     Menu.buildFromTemplate(items).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
+  }
+
+  // ------------------------------------------------------------ menu de contexto das páginas
+
+  /** Último menu montado (para testes: os itens e quem clicou). */
+  lastPageMenu: { items: ContextItem[]; run: (label: string) => boolean } | null = null;
+
+  private showPageMenu(wc: Electron.WebContents, params: Electron.ContextMenuParams, workspaceId: string, tabId: string | null): void {
+    const items = buildContextMenu(params as unknown as ContextInfo, {
+      canGoBack: wc.navigationHistory.canGoBack(),
+      canGoForward: wc.navigationHistory.canGoForward(),
+      vaultUnlocked: this.vaultInfo.status === 'unlocked' && tabId !== null,
+    });
+    const act = (a: ContextAction) => this.runPageAction(wc, params, workspaceId, tabId, a);
+    this.lastPageMenu = {
+      items,
+      run: (label) => {
+        const it = items.find((x) => x.type === 'item' && x.label === label);
+        if (!it || it.type !== 'item' || it.enabled === false) return false;
+        act(it.action);
+        return true;
+      },
+    };
+    if (process.env.APOLLO_TEST_HOOKS) return; // testes: o menu nativo bloquearia a automação
+    Menu.buildFromTemplate(items.map((it) => it.type === 'separator'
+      ? { type: 'separator' as const }
+      : { label: it.label, enabled: it.enabled !== false, click: () => act(it.action) })).popup({ window: this.win });
+  }
+
+  private runPageAction(wc: Electron.WebContents, params: Electron.ContextMenuParams, workspaceId: string,
+    tabId: string | null, a: ContextAction): void {
+    if (wc.isDestroyed()) return;
+    const newTab = (url: string, activate: boolean) => {
+      if (!this.store.getWorkspace(workspaceId)) return;
+      this.createTab(workspaceId, url, { activate, afterTabId: tabId });
+    };
+    switch (a.kind) {
+      case 'open-link': newTab(a.url, !a.background); break;
+      case 'search': newTab(a.url, true); break;
+      case 'copy-text': clipboard.writeText(a.text); break;
+      case 'copy-image': wc.copyImageAt(params.x, params.y); break;
+      case 'save-url': this.downloads.saveAs(wc, a.url); break;
+      case 'replace-misspelling': wc.replaceMisspelling(a.word); break;
+      case 'add-to-dictionary': wc.session.addWordToSpellCheckerDictionary(a.word); break;
+      case 'edit': wc[a.op](); break;
+      case 'nav':
+        if (a.op === 'reload') wc.reload();
+        else if (a.op === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+        else if (a.op === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+        break;
+      case 'view-source': newTab(`view-source:${wc.getURL()}`, true); break;
+      case 'print': this.print(wc); break;
+      case 'inspect': wc.inspectElement(params.x, params.y); break;
+      case 'vault': if (a.op === 'autofill') this.autofill(); else this.generate(true); break;
+    }
   }
 
   private run(cmd: UiCommand): () => void {
@@ -1096,20 +1678,21 @@ export class Browser {
 
   switchWorkspace(workspaceId: string): void {
     if (!this.store.getWorkspace(workspaceId) || workspaceId === this.activeWorkspaceId) return;
+    this.scheduleHibernation();
     this.activeWorkspaceId = workspaceId;
     this.store.setKv('activeWorkspaceId', workspaceId);
     this.ensureHasTab(workspaceId);
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean): void {
-    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, temporary });
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null): void {
+    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin, temporary });
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
 
-  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number): void {
-    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin });
+  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null): void {
+    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin });
     this.push();
   }
 
@@ -1154,6 +1737,25 @@ export class Browser {
       case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
       case 'autofill': this.autofill(); break;
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
+      case 'find': this.focusUi(); this.emit({ type: 'open-find' }); break;
+      case 'bookmark-bar': this.store.setKv('bookmark-bar', this.bookmarkBarOn() ? '0' : '1'); this.push(); break;
+      case 'history': this.focusUi(); this.emit({ type: 'open-history' }); break;
+      case 'zoom-in': this.zoomActive('in'); break;
+      case 'print': this.withActiveWc((wc) => this.print(wc)); break;
+      case 'fullscreen': this.toggleFullscreen(); break;
+      case 'devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
+      case 'zoom-out': this.zoomActive('out'); break;
+      case 'zoom-reset': this.zoomActive('reset'); break;
+      case 'find-next':
+      case 'find-prev':
+        if (this.findState?.text) this.find(this.findState.text, action === 'find-next', true);
+        else { this.focusUi(); this.emit({ type: 'open-find' }); }
+        break;
+      case 'bookmark': {
+        const b = this.addBookmark();
+        if (b) { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); }
+        break;
+      }
       default: {
         const ws = this.store.listWorkspaces()[Number(action.split('-')[1]) - 1];
         if (ws) this.switchWorkspace(ws.id);
@@ -1189,14 +1791,41 @@ export class Browser {
       case 'vault:copy': this.copyFromVault(cmd.itemId, cmd.what); break;
       case 'vault:open': this.emit({ type: 'open-vault' }); break;
       case 'vault:autofill': this.autofill(); break;
-      case 'palette:toggle': this.paletteOpen = cmd.open; break;
+      case 'palette:toggle': this.paletteOpen = cmd.open; if (!cmd.open) this.paletteQuery = ''; break;
+      case 'palette:query': this.paletteQuery = cmd.text; break;
+      case 'settings:history': this.store.setKv('history-off', cmd.on ? '0' : '1'); break;
+      case 'history:clear': this.store.clearHistory(); break;
       case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
       case 'panel:toggle': this.togglePanel(cmd.panelId); break;
       case 'panel:remove': this.removePanel(cmd.panelId); break;
-      case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile }); break;
+      case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile, hibernateMin: cmd.hibernateMin }); break;
+      case 'panel:hibernate': this.hibernatePanel(cmd.panelId); break;
       case 'panel:bounds': this.panelBounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layoutPanel(); break;
       case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
+      case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
+      case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'zoom:set': this.zoomActive(cmd.dir); break;
+      case 'view:fullscreen': this.toggleFullscreen(); break;
+      case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
+      case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
+      case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
+      case 'download:clear': this.downloads.clear(); break;
+      case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
+      case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
+      case 'find:close': this.stopFind(); break;
+      case 'bookmark:add': this.addBookmark(); break;
+      case 'bookmark:update': this.updateBookmark(cmd.bookmarkId, cmd.title, cmd.url, cmd.parentId); break;
+      case 'bookmark:rename': this.store.renameBookmark(cmd.bookmarkId, cmd.title.trim()); break;
+      case 'bookmark:add-folder': this.addBookmarkFolder(cmd.title, cmd.parentId); break;
+      case 'bookmark:remove': this.store.removeBookmark(cmd.bookmarkId); break;
+      case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.parentId, cmd.index); break;
+      case 'bookmark:menu': this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
+      case 'bookmark:context': this.showBookmarkContext(cmd.bookmarkId, cmd.x, cmd.y); break;
+      case 'settings:bookmark-bar': this.store.setKv('bookmark-bar', cmd.show ? '1' : '0'); break;
+      case 'history:view': this.historyQuery = cmd.open ? cmd.query : null; break;
+      case 'history:delete': this.store.deleteVisit(this.activeWorkspaceId, cmd.url); break;
+      case 'bookmark:open': this.openBookmark(cmd.bookmarkId, cmd.newTab ?? false); break;
       case 'custom:save':
         this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
         break;
@@ -1226,8 +1855,8 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary); break;
-      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin); break;
+      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
       case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
@@ -1247,11 +1876,22 @@ export class Browser {
   };
 
   private paletteOpen = false;
+  private paletteQuery = '';
+
+  private historyOn(workspaceId: string): boolean {
+    return this.store.getKv('history-off') !== '1' && !this.store.getWorkspace(workspaceId)?.temporary;
+  }
+
+  private visit(workspaceId: string, url: string, title: string): void {
+    if (/^https?:/i.test(url) && this.historyOn(workspaceId)) this.store.recordVisit(workspaceId, url, title);
+  }
   private moduleCache: Record<ModuleId, boolean> | null = null;
 
   // Painéis laterais
   private readonly panelViews = new Map<string, WebContentsView>();
   private activePanelId: string | null = null;
+  /** Quando cada painel foi fechado (para hibernar depois de N min fechado). */
+  private readonly panelClosedAt = new Map<string, number>();
   private panelBounds = { x: 0, y: 0, width: 0, height: 0 };
   private vaultProvider: VaultProvider | null = null;
   private clipboardTimer: NodeJS.Timeout | null = null;
@@ -1422,10 +2062,13 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
+
+  /** Verificação de versões (index liga depois de criar o Browser). */
+  updateCheck: UpdateCheck | null = null;
 
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
@@ -1467,7 +2110,8 @@ export class Browser {
         loading: this.loading.has(t.id),
         canGoBack: alive ? wc.navigationHistory.canGoBack() : false,
         canGoForward: alive ? wc.navigationHistory.canGoForward() : false,
-        dormant: !alive,
+        dormant: !alive && !isHomeUrl(t.url),
+        live: Boolean(alive),
         pinned: t.pinned,
         keepAwake: t.keepAwake,
         groupId: t.groupId,
@@ -1477,7 +2121,8 @@ export class Browser {
     return {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
-        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w), temporary: this.store.getWorkspace(id)!.temporary };
+        const full = this.store.getWorkspace(id)!;
+        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary };
       }),
       activeWorkspaceId: ws.id,
       tabs,
@@ -1487,6 +2132,8 @@ export class Browser {
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
+      updateNotice: this.updateCheck?.current() ?? null,
+      updateAbout: this.updateCheck?.about() ?? { version: app.getVersion(), latest: null, checking: false, checked: null, failed: false, enabled: false },
       memory: this.memoryReport,
       vault: this.vaultInfo,
       vaultSite: this.vaultSite(active?.url),
@@ -1495,11 +2142,32 @@ export class Browser {
       paletteTabs: this.paletteOpen
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
-      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
+      paletteHistory: this.paletteOpen && this.paletteQuery.trim()
+        ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
+        : null,
+      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1',
+        historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
+      screenPicker: this.screenRequest?.info ?? null,
+      bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
+      historyView: this.historyQuery === null ? null : {
+        query: this.historyQuery,
+        entries: this.store.recentHistory(ws.id, this.historyQuery).map(({ url, title, lastVisit }) => ({ url, title, lastVisit })),
+      },
+      fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
+        : this.windowFullscreen ? 'window' : null,
+      zoom: (() => {
+        const wc = active ? this.views.get(active.id)?.webContents : undefined;
+        return wc && !wc.isDestroyed() ? zoomPercent(wc.getZoomFactor()) : 100;
+      })(),
+      downloads: this.downloads.list(),
+      find: this.findState && this.findState.tabId === ws.activeTabId
+        ? { text: this.findState.text, active: this.findState.active, matches: this.findState.matches } : null,
+      activeBookmarkId: active && !isHomeUrl(active.url) ? this.store.findBookmark(ws.id, active.url)?.id ?? null : null,
     };
   }
 }

@@ -376,3 +376,174 @@ describe('fase 5c: personalizações', () => {
     expect(store.listCustomizations().map((x) => x.id)).toEqual(['c2']);
   });
 });
+
+describe('v7: hibernação do workspace fora da tela e de painéis', () => {
+  it('padrão 10 min; null = mesma regra; atualizar sem informar mantém', () => {
+    ws('a');
+    expect(store.getWorkspace('a')!.hiddenHibernateMin).toBe(10);
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hiddenHibernateMin: null });
+    expect(store.getWorkspace('a')!.hiddenHibernateMin).toBeNull();
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hiddenHibernateMin: -1 });
+    store.updateWorkspace('a', { name: 'A2', color: '#000000', home: '' });
+    expect(store.getWorkspace('a')).toMatchObject({ name: 'A2', hiddenHibernateMin: -1 });
+  });
+
+  it('painel: sempre ativo por padrão; regra salva', () => {
+    ws('a');
+    store.createPanel({ id: 'p', workspaceId: 'a', url: 'https://x.com', mobile: false });
+    expect(store.getPanel('p')!.hibernateMin).toBeNull();
+    store.updatePanel('p', { hibernateMin: 0 });
+    expect(store.getPanel('p')!.hibernateMin).toBe(0);
+    store.updatePanel('p', { title: 'X' });
+    expect(store.getPanel('p')).toMatchObject({ title: 'X', hibernateMin: 0 });
+  });
+});
+
+describe('atualizações parciais', () => {
+  // Regressão: { ...atual, ...patch } com campos undefined sobrescrevia os salvos —
+  // arrastar a largura do painel desligava a "versão para celular" (e o SQLite
+  // recusava gravar undefined, travando o app).
+  it('updatePanel ignora campos undefined', () => {
+    ws('a');
+    store.createPanel({ id: 'p', workspaceId: 'a', url: 'https://x.com', mobile: true });
+    store.updatePanel('p', { hibernateMin: 30 });
+    store.updatePanel('p', { width: 500, mobile: undefined, hibernateMin: undefined });
+    expect(store.getPanel('p')).toMatchObject({ width: 500, mobile: true, hibernateMin: 30 });
+  });
+
+  it('updateGroup ignora campos undefined', () => {
+    ws('a');
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'Faculdade', color: '#4c8bf5' });
+    store.updateGroup('g', { collapsed: true, name: undefined });
+    expect(store.getGroup('g')).toMatchObject({ name: 'Faculdade', color: '#4c8bf5', collapsed: true });
+  });
+});
+
+describe('v8: favoritos', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('por workspace, em ordem; achar pela URL ignora #fragmento e barra final', () => {
+    store.addBookmark({ id: 'f1', workspaceId: 'a', title: 'Moodle', url: 'https://moodle.ufmg.br/', favicon: null });
+    store.addBookmark({ id: 'f2', workspaceId: 'a', title: 'Outlook', url: 'https://outlook.office.com/mail', favicon: null });
+    store.addBookmark({ id: 'f3', workspaceId: 'b', title: 'Banco', url: 'https://banco.com', favicon: null });
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['f1', 'f2']);
+    expect(store.listBookmarks('b').map((b) => b.id)).toEqual(['f3']);
+    expect(store.findBookmark('a', 'https://moodle.ufmg.br#topo')?.id).toBe('f1');
+    expect(store.findBookmark('a', 'https://outlook.office.com/mail/')?.id).toBe('f2');
+    expect(store.findBookmark('b', 'https://moodle.ufmg.br/')).toBeNull(); // outro workspace
+  });
+
+  it('renomear, reordenar, remover; somem com o workspace', () => {
+    for (const id of ['x', 'y', 'z']) store.addBookmark({ id, workspaceId: 'a', title: id, url: `https://${id}.com`, favicon: null });
+    store.renameBookmark('x', 'Xis');
+    store.moveBookmark('z', null, 0);
+    expect(store.listBookmarks('a').map((b) => b.title)).toEqual(['z', 'Xis', 'y']);
+    store.removeBookmark('x');
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['z', 'y']);
+    store.deleteWorkspace('a');
+    expect(store.listBookmarks('a')).toEqual([]);
+  });
+});
+
+describe('v9: zoom por site', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+  it('por workspace e host; 100% apaga (padrão)', () => {
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'moodle.ufmg.br', 1.25);
+    store.setZoom('a', 'moodle.ufmg.br', 1.5);
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1.5);
+    expect(store.getZoom('b', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'moodle.ufmg.br', 1);
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'x.com', 2);
+    store.deleteWorkspace('a');
+    expect(store.getZoom('a', 'x.com')).toBe(1);
+  });
+});
+
+describe('v10: histórico de visitas', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('conta visitas, mantém o título, busca sem acento com todas as palavras', () => {
+    store.recordVisit('a', 'https://moodle.ufmg.br/course/view.php?id=1', 'Cálculo Diferencial', 1000);
+    store.recordVisit('a', 'https://moodle.ufmg.br/course/view.php?id=1', '', 2000); // título ainda não chegou
+    store.recordVisit('a', 'https://www.ufmg.br/', 'Portal UFMG', 1500);
+    const r = store.searchHistory('a', 'CALCULO moodle');
+    expect(r).toEqual([{ url: 'https://moodle.ufmg.br/course/view.php?id=1', title: 'Cálculo Diferencial', visits: 2, lastVisit: 2000 }]);
+    expect(store.searchHistory('a', 'ufmg').map((x) => x.title)).toEqual(['Cálculo Diferencial', 'Portal UFMG']);
+    expect(store.searchHistory('b', 'ufmg')).toEqual([]); // outro workspace
+    expect(store.searchHistory('a', '   ')).toEqual([]);
+  });
+
+  it('título que chega depois entra na busca; % e _ são literais', () => {
+    store.recordVisit('a', 'https://x.com/a', '', 1);
+    store.setVisitTitle('a', 'https://x.com/a', 'Relatório 100%');
+    expect(store.searchHistory('a', 'relatorio').length).toBe(1);
+    expect(store.searchHistory('a', '100%').length).toBe(1);
+    expect(store.searchHistory('a', '_').length).toBe(0);
+  });
+
+  it('poda por idade e por quantidade; apagar tudo', () => {
+    const day = 86_400_000;
+    const now = 200 * day;
+    store.recordVisit('a', 'https://velho.com', 'Velho', now - 100 * day);
+    for (let i = 0; i < 5; i++) store.recordVisit('a', `https://n${i}.com`, `N${i}`, now - i);
+    store.pruneHistory(90, 3, now);
+    expect(store.searchHistory('a', 'com', 50).map((x) => x.title).sort()).toEqual(['N0', 'N1', 'N2']);
+    store.clearHistory();
+    expect(store.searchHistory('a', 'com')).toEqual([]);
+  });
+});
+
+describe('v11: pastas de favoritos', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+  const add = (id: string, parentId: string | null = null) => store.addBookmark({ id, workspaceId: 'a', title: id, url: `https://${id}.com`, favicon: null, parentId });
+  const kids = (parentId: string | null) => store.childBookmarks('a', parentId).map((b) => b.id);
+
+  it('pastas e subpastas; cada nível com a própria ordem', () => {
+    add('x');
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'Faculdade' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'Cálculo', parentId: 'f' });
+    add('m', 'f');
+    add('n', 'sub');
+    expect(kids(null)).toEqual(['x', 'f']);
+    expect(kids('f')).toEqual(['sub', 'm']);
+    expect(kids('sub')).toEqual(['n']);
+    expect(store.getBookmark('f')).toMatchObject({ folder: true, url: '', parentId: null });
+    expect(store.findBookmark('a', 'https://n.com')?.id).toBe('n');
+  });
+
+  it('pai inválido (outro workspace, não é pasta) vira raiz', () => {
+    store.addFolder({ id: 'fb', workspaceId: 'b', title: 'B' });
+    add('x', 'fb');
+    add('y', 'x');
+    expect(kids(null)).toEqual(['x', 'y']);
+  });
+
+  it('mover entre pastas; pasta nunca entra nela mesma nem numa subpasta dela', () => {
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'F' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'S', parentId: 'f' });
+    add('x');
+    store.moveBookmark('x', 'sub', 0);
+    expect(kids('sub')).toEqual(['x']);
+    store.moveBookmark('x', null, 0);
+    expect(kids(null)).toEqual(['x', 'f']);
+    store.moveBookmark('f', 'sub', 0); // ciclo: ignorado
+    store.moveBookmark('f', 'f', 0);
+    expect(store.getBookmark('f')!.parentId).toBeNull();
+    store.moveBookmark('x', 'x', 0); // não é pasta: ignorado
+    expect(store.getBookmark('x')!.parentId).toBeNull();
+  });
+
+  it('excluir pasta leva tudo dentro (subpastas inclusive); editar URL de pasta é ignorado', () => {
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'F' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'S', parentId: 'f' });
+    add('m', 'f');
+    add('n', 'sub');
+    add('fora');
+    store.updateBookmark('f', { title: 'F2', url: 'https://x.com' });
+    expect(store.getBookmark('f')).toMatchObject({ title: 'F', url: '' });
+    store.removeBookmark('f');
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['fora']);
+  });
+});

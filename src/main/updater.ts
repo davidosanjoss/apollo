@@ -18,6 +18,10 @@ function canAutoUpdate(): boolean {
   return true;
 }
 
+export function canSelfUpdate(): boolean {
+  return canAutoUpdate();
+}
+
 export function setupUpdater(onStatus: (status: UpdateStatus | null) => void, beforeInstall: () => void): Updater {
   if (!canAutoUpdate()) return { download() {}, install() {} };
 
@@ -45,7 +49,12 @@ export function setupUpdater(onStatus: (status: UpdateStatus | null) => void, be
   setInterval(check, CHECK_INTERVAL);
 
   return {
-    download: () => { if (stage === 'available') autoUpdater.downloadUpdate().catch(() => {}); },
+    // "Baixar e instalar" na janela de versão nova pode vir antes de o autoUpdater ter
+    // visto a versão (verificações separadas): verifica e baixa.
+    download: () => {
+      if (stage === 'available') { autoUpdater.downloadUpdate().catch(() => {}); return; }
+      if (stage === null) autoUpdater.checkForUpdates().then((r) => (r?.isUpdateAvailable ? autoUpdater.downloadUpdate() : null)).catch(() => {});
+    },
     install: () => {
       if (stage !== 'downloaded') return;
       beforeInstall();
