@@ -72,6 +72,13 @@
         </label>
         <ul id="memory-tabs"></ul>
       </aside>
+
+      <!-- Painel lateral aberto: o processo principal desenha o site aqui. -->
+      <div id="panel-area" hidden></div>
+      <nav id="panel-rail">
+        <div id="panel-list"></div>
+        <button id="panel-add" class="rail-btn add" title="Adicionar painel lateral">+</button>
+      </nav>
     </div>
   </main>
 
@@ -135,6 +142,21 @@
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="submit">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="panel-dialog">
+    <form method="dialog" id="panel-form">
+      <h2>Novo painel lateral</h2>
+      <div id="panel-suggestions" class="suggestions"></div>
+      <label>Endereço <input id="panel-url" placeholder="https://web.whatsapp.com" spellcheck="false" autocomplete="off"></label>
+      <label>Usar os logins do workspace <select id="panel-ws"></select></label>
+      <label class="remember"><input type="checkbox" id="panel-mobile"> Versão para celular (sites que ficam melhores estreitos)</label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="panel-cancel">Cancelar</button>
+        <button type="submit" class="primary">Adicionar</button>
       </div>
     </form>
   </dialog>

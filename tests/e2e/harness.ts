@@ -68,6 +68,9 @@ export async function startSite(): Promise<TestSite> {
         return html(`<form onsubmit="return false"><input id="email" type="email" name="loginfmt"><button id="avancar">Avançar</button></form>`, 'Etapa 1');
       case '/step2':
         return html(`<form onsubmit="return false"><input id="senha" type="password" name="passwd"><button id="entrar">Entrar</button></form>`, 'Etapa 2');
+      case '/links':
+        return html(`<a id="novo" href="/page?title=Aberto+do+painel" target="_blank">abrir</a>
+          <p id="ua"></p><script>document.getElementById('ua').textContent = navigator.userAgent;</script>`, 'Links');
       case '/login':
         return html(`<form><input id="busca" type="search" name="q">
           <input id="email" type="email" name="email"><input id="senha" type="password" name="senha"></form>`, 'Entrar');

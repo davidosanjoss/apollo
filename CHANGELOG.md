@@ -5,6 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
+- Painéis laterais (como os mensageiros do Opera): sites fixos numa coluna à direita (WhatsApp, Telegram, Teams, agendas, Spotify…), cada um com os logins de um workspace escolhido. Abrem ao lado da página (que encolhe), continuam vivos quando fechados e só carregam quando abertos pela primeira vez. Opções no botão direito: recarregar, versão para celular, largura, remover. Links abertos no painel viram abas do workspace dele.
 - Paleta de comandos (Ctrl+K ou a lupa na barra): busca abas de todos os workspaces, troca de workspace, ações (nova aba, reabrir, fixar, duplicar, agrupar, hibernar, monitor de memória, pausar proteção, Bitwarden, gerar senha, configurações) e abre endereços ou pesquisas. Busca tolerante, sem se importar com acentos.
 
 ## [0.5.0] - 2026-11-10

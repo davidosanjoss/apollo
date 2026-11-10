@@ -43,8 +43,8 @@ import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS } from '../shared/types';
+import type { MemoryReport, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import { GROUP_COLORS, PANEL_WIDTHS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -545,6 +545,142 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ painéis laterais
+
+  private static mobileUA(): string {
+    return `Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Mobile Safari/537.36`;
+  }
+
+  addPanel(url: string, workspaceId: string, mobile: boolean): void {
+    if (!this.store.getWorkspace(workspaceId)) return;
+    const p = this.store.createPanel({ id: newId(), workspaceId, url, mobile });
+    this.openPanel(p.id);
+  }
+
+  togglePanel(id: string): void {
+    if (this.activePanelId === id) this.closePanel();
+    else this.openPanel(id);
+  }
+
+  private ensurePanelView(id: string): WebContentsView | null {
+    const existing = this.panelViews.get(id);
+    if (existing && !existing.webContents.isDestroyed()) return existing;
+    const p = this.store.getPanel(id);
+    if (!p) return null;
+    const view = new WebContentsView({
+      webPreferences: {
+        session: this.sessionFor(p.workspaceId), // logins do workspace escolhido
+        sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, spellcheck: true,
+        preload: path.join(__dirname, 'tab-preload.js'),
+      },
+    });
+    view.setBackgroundColor('#ffffff');
+    const wc = view.webContents;
+    if (p.mobile) wc.setUserAgent(Browser.mobileUA());
+    wc.on('page-title-updated', (_e, title) => { this.store.updatePanel(id, { title }); this.push(); });
+    wc.on('page-favicon-updated', (_e, icons) => { this.store.updatePanel(id, { favicon: icons[0] ?? null }); this.push(); });
+    wc.on('render-process-gone', () => this.destroyPanelView(id));
+    wc.on('before-input-event', (event, input) => {
+      const action = shortcutFor(input);
+      if (!action) return;
+      event.preventDefault();
+      this.runShortcut(action);
+    });
+    wc.setWindowOpenHandler(({ url, disposition }) => {
+      // Link "nova aba" do painel: abre como aba no workspace do painel.
+      if (disposition === 'foreground-tab' || disposition === 'background-tab' || disposition === 'new-window') {
+        if (/^https?:/i.test(url)) {
+          this.switchWorkspace(p.workspaceId);
+          this.createTab(p.workspaceId, url, { activate: true });
+        }
+        return { action: 'deny' };
+      }
+      return { action: 'allow', overrideBrowserWindowOptions: { width: 520, height: 720, autoHideMenuBar: true,
+        webPreferences: { session: this.sessionFor(p.workspaceId), sandbox: true, contextIsolation: true, nodeIntegration: false } } };
+    });
+    this.panelViews.set(id, view);
+    void this.sessionsReady.get(p.workspaceId)?.then(() => { if (!wc.isDestroyed()) wc.loadURL(p.url).catch(() => {}); });
+    return view;
+  }
+
+  openPanel(id: string): void {
+    const view = this.ensurePanelView(id);
+    if (!view) return;
+    if (this.activePanelId && this.activePanelId !== id) this.hidePanelView(this.activePanelId);
+    if (this.activePanelId !== id) this.win.contentView.addChildView(view);
+    this.activePanelId = id;
+    this.layoutPanel();
+    this.push();
+  }
+
+  closePanel(): void {
+    if (!this.activePanelId) return;
+    this.hidePanelView(this.activePanelId); // continua vivo (mensagens seguem chegando)
+    this.activePanelId = null;
+    this.push();
+  }
+
+  private hidePanelView(id: string): void {
+    const v = this.panelViews.get(id);
+    if (v) this.win.contentView.removeChildView(v);
+  }
+
+  private destroyPanelView(id: string): void {
+    const v = this.panelViews.get(id);
+    if (!v) return;
+    if (this.activePanelId === id) { this.win.contentView.removeChildView(v); this.activePanelId = null; }
+    this.panelViews.delete(id);
+    if (!v.webContents.isDestroyed()) v.webContents.close();
+    this.push();
+  }
+
+  removePanel(id: string): void {
+    this.destroyPanelView(id);
+    this.store.deletePanel(id);
+    this.push();
+  }
+
+  setPanel(id: string, patch: { width?: number; mobile?: boolean }): void {
+    const p = this.store.getPanel(id);
+    if (!p) return;
+    this.store.updatePanel(id, patch);
+    if (patch.mobile !== undefined && patch.mobile !== p.mobile) {
+      // Trocar o user agent exige recarregar: recria a view com o novo modo.
+      const wasOpen = this.activePanelId === id;
+      this.destroyPanelView(id);
+      if (wasOpen) this.openPanel(id);
+    }
+    this.push();
+  }
+
+  private layoutPanel(): void {
+    const id = this.activePanelId;
+    const view = id ? this.panelViews.get(id) : null;
+    if (!view) return;
+    view.setVisible(!this.overlayOpen && this.panelBounds.width > 0);
+    view.setBounds(this.panelBounds);
+  }
+
+  showPanelMenu(id: string, x: number, y: number): void {
+    const p = this.store.getPanel(id);
+    if (!p) return;
+    const wsName = this.store.getWorkspace(p.workspaceId)?.name ?? '';
+    this.popup([
+      { label: `${p.title || p.url} — sessão do workspace ${wsName}`, enabled: false },
+      { type: 'separator' },
+      { label: 'Recarregar', enabled: this.panelViews.has(id), click: () => this.panelViews.get(id)?.webContents.reload() },
+      { label: 'Versão para celular', type: 'checkbox', checked: p.mobile, click: this.run({ type: 'panel:set', panelId: id, mobile: !p.mobile }) },
+      { label: 'Largura', submenu: PANEL_WIDTHS.map((w) => ({ label: `${w} px`, type: 'radio' as const, checked: p.width === w,
+        click: this.run({ type: 'panel:set', panelId: id, width: w }) })) },
+      { type: 'separator' },
+      { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
+    ], x, y);
+  }
+
+  private panelsInfo(): PanelInfo[] {
+    return this.store.listPanels().map((p) => ({ ...p, loaded: this.panelViews.has(p.id) }));
+  }
+
   // ------------------------------------------------------------ monitor de memória
 
   toggleMemoryMonitor(open: boolean): void {
@@ -649,6 +785,7 @@ export class Browser {
   }
 
   private layout(): void {
+    this.layoutPanel();
     if (!this.attachedTabId) return;
     const view = this.views.get(this.attachedTabId);
     if (!view) return;
@@ -955,6 +1092,7 @@ export class Browser {
     if (workspaceId === this.activeWorkspaceId) {
       this.switchWorkspace(all.find((w) => w.id !== workspaceId)!.id);
     }
+    for (const p of this.store.listPanels()) if (p.workspaceId === workspaceId) this.destroyPanelView(p.id);
     // A partição depende do workspace (temporário ou não): calcular ANTES de apagá-lo.
     const partition = this.partitionOf(workspaceId);
     this.store.deleteWorkspace(workspaceId); // abas, grupos e permissões vão junto (cascade)
@@ -1019,6 +1157,12 @@ export class Browser {
       case 'vault:open': this.emit({ type: 'open-vault' }); break;
       case 'vault:autofill': this.autofill(); break;
       case 'palette:toggle': this.paletteOpen = cmd.open; break;
+      case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
+      case 'panel:toggle': this.togglePanel(cmd.panelId); break;
+      case 'panel:remove': this.removePanel(cmd.panelId); break;
+      case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile }); break;
+      case 'panel:bounds': this.panelBounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layoutPanel(); break;
+      case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
       case 'vault:save-answer': this.answerSave(cmd.promptId, cmd.action); break;
       case 'vault:generate': this.generate(cmd.fill); break;
       case 'vault:generator': this.store.setKv('vault.generator', JSON.stringify({ length: cmd.length, symbols: cmd.symbols })); break;
@@ -1065,6 +1209,11 @@ export class Browser {
   };
 
   private paletteOpen = false;
+
+  // Painéis laterais
+  private readonly panelViews = new Map<string, WebContentsView>();
+  private activePanelId: string | null = null;
+  private panelBounds = { x: 0, y: 0, width: 0, height: 0 };
   private vaultProvider: VaultProvider | null = null;
   private clipboardTimer: NodeJS.Timeout | null = null;
   /** Logins enviados aguardando "salvar?" (senha só aqui, em memória, por 5 min). */
@@ -1308,6 +1457,8 @@ export class Browser {
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
+      panels: this.panelsInfo(),
+      activePanelId: this.activePanelId,
     };
   }
 }

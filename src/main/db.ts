@@ -79,6 +79,19 @@ const MIGRATIONS: string[] = [
   /* v4: workspace temporário (sessão só em memória; apagado ao fechar) */ `
   ALTER TABLE workspaces ADD COLUMN temporary INTEGER NOT NULL DEFAULT 0;
   `,
+
+  /* v5: painéis laterais (sites fixos à direita, na sessão de um workspace) */ `
+  CREATE TABLE panels (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    url          TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    favicon      TEXT,
+    width        INTEGER NOT NULL DEFAULT 420,
+    mobile       INTEGER NOT NULL DEFAULT 0,
+    position     INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

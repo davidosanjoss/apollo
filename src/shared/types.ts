@@ -169,7 +169,34 @@ export interface UiState {
   generator: { length: number; symbols: boolean };
   /** Abas de todos os workspaces, só enquanto a paleta está aberta (fechada = custo zero). */
   paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
+  panels: PanelInfo[];
+  /** Painel aberto (só um por vez). */
+  activePanelId: string | null;
 }
+
+export interface PanelInfo {
+  id: string;
+  workspaceId: string;
+  url: string;
+  title: string;
+  favicon: string | null;
+  width: number;
+  mobile: boolean;
+  /** Já carregado (continua vivo mesmo fechado, para mensagens chegarem). */
+  loaded: boolean;
+}
+
+export const PANEL_WIDTHS = [320, 420, 520, 640] as const;
+
+/** Sugestões para o diálogo de novo painel. */
+export const PANEL_SUGGESTIONS: { name: string; url: string; mobile?: boolean }[] = [
+  { name: 'WhatsApp', url: 'https://web.whatsapp.com/' },
+  { name: 'Telegram', url: 'https://web.telegram.org/' },
+  { name: 'Teams', url: 'https://teams.microsoft.com/' },
+  { name: 'Outlook Calendário', url: 'https://outlook.office.com/calendar/' },
+  { name: 'Google Agenda', url: 'https://calendar.google.com/' },
+  { name: 'Spotify', url: 'https://open.spotify.com/' },
+];
 
 /** Tamanhos oferecidos pelo gerador de senhas. */
 export const GENERATOR_LENGTHS = [12, 16, 20, 24, 32, 48, 64] as const;
@@ -216,6 +243,12 @@ export type UiCommand =
   | { type: 'vault:open' }
   | { type: 'vault:autofill' }
   | { type: 'palette:toggle'; open: boolean }
+  | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
+  | { type: 'panel:toggle'; panelId: string }
+  | { type: 'panel:remove'; panelId: string }
+  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean }
+  | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
+  | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
   /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
   | { type: 'vault:generate'; fill: boolean }

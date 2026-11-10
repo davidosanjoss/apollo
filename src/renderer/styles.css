@@ -63,6 +63,20 @@ body { display: flex; }
 #global-privacy { display: flex; flex-direction: column; gap: 8px; }
 #vault-dialog { width: 460px; max-width: calc(100vw - 32px); }
 
+/* ---------- painéis laterais ---------- */
+#panel-area { flex-shrink: 0; border-left: 1px solid var(--panel-2); background: #fff; }
+#panel-rail { width: 44px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 8px 0; border-left: 1px solid var(--panel-2); background: var(--bg); }
+#panel-list { display: flex; flex-direction: column; gap: 6px; }
+.rail-btn { width: 32px; height: 32px; border-radius: 8px; border: 2px solid transparent; background: var(--panel-2);
+  color: var(--text); cursor: pointer; display: grid; place-items: center; padding: 0; font-weight: 700; position: relative; }
+.rail-btn img { width: 18px; height: 18px; }
+.rail-btn.active { border-color: var(--accent); }
+.rail-btn.add { background: transparent; color: var(--muted); border: 2px dashed var(--panel-2); }
+.rail-btn .ws-dot { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--bg); }
+.suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.suggestions button { border: 0; border-radius: 14px; padding: 4px 10px; background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+
 /* ---------- paleta de comandos ---------- */
 #palette { width: 620px; max-width: calc(100vw - 32px); margin-top: 12vh; padding: 0; overflow: hidden; }
 #palette-input { width: 100%; border: 0 !important; border-bottom: 1px solid var(--panel-2) !important; border-radius: 0 !important;

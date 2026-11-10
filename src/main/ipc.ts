@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_WIDTHS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
@@ -96,6 +96,15 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:open':
     case 'vault:autofill': return { type: c.type } as UiCommand;
     case 'palette:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
+    case 'panel:add':
+      return str(c.url, 2048) && /^https?:\/\//i.test(c.url as string) && id(c.workspaceId) && typeof c.mobile === 'boolean' ? (c as UiCommand) : null;
+    case 'panel:toggle':
+    case 'panel:remove': return id(c.panelId) ? (c as UiCommand) : null;
+    case 'panel:set':
+      return id(c.panelId) && (c.width === undefined || (PANEL_WIDTHS as readonly unknown[]).includes(c.width))
+        && (c.mobile === undefined || typeof c.mobile === 'boolean') ? (c as UiCommand) : null;
+    case 'panel:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;
+    case 'panel:menu': return id(c.panelId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

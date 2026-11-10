@@ -90,6 +90,13 @@ describe('buildItems', () => {
     expect(items[0]).toMatchObject({ group: 'Abrir', action: { kind: 'command', command: { type: 'tab:new', url: 'https://g1.globo.com' } } });
   });
 
+  it('painéis: abrir/fechar pela paleta', () => {
+    const panels = [{ id: 'p1', workspaceId: 'w2', url: 'https://web.whatsapp.com/', title: 'WhatsApp', favicon: null, width: 420, mobile: false, loaded: false }];
+    const items = buildItems({ state: state({ panels, activePanelId: null }), query: 'whats', openUrl: null });
+    expect(items[0]).toMatchObject({ title: 'Painel: WhatsApp', detail: 'Trabalho', action: { kind: 'command', command: { type: 'panel:toggle', panelId: 'p1' } } });
+    expect(buildItems({ state: state({ panels, activePanelId: 'p1' }), query: 'whats', openUrl: null })[0].title).toBe('Fechar o painel: WhatsApp');
+  });
+
   it('cofre desbloqueado com login no site: preencher e bloquear', () => {
     const items = buildItems({ state: state({ vault: { status: 'unlocked' } as UiState['vault'], vaultSite: { status: 'unlocked', count: 1 } }), query: '', openUrl: null });
     expect(items.map((i) => i.title)).toEqual(expect.arrayContaining(['Bitwarden: preencher login', 'Bitwarden: bloquear o cofre']));

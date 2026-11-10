@@ -2,8 +2,8 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
-import { normalizeUrl } from '../shared/url';
+import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -83,6 +83,7 @@ function render(): void {
   renderMemory(s);
   renderSettings(s);
   renderVault(s);
+  renderPanels(s);
   renderPalette();
 }
 
@@ -559,6 +560,80 @@ $('#vault-form').addEventListener('submit', (e) => {
   } else {
     send({ type: 'vault:lock' });
   }
+});
+
+// ------------------------------------------------------------ painéis laterais
+
+const panelEls = new Map<string, HTMLElement>();
+const panelArea = $('#panel-area');
+
+function renderPanels(s: UiState): void {
+  const wsColor = new Map(s.workspaces.map((w) => [w.id, w.color]));
+  const wsName = new Map(s.workspaces.map((w) => [w.id, w.name]));
+  reconcile($('#panel-list'), panelEls, s.panels, (p) => p.id, (p) => {
+    const b = el('button', { className: 'rail-btn' });
+    b.dataset.panelId = p.id;
+    b.onclick = () => send({ type: 'panel:toggle', panelId: p.id });
+    b.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'panel:menu', panelId: p.id, x: e.clientX, y: e.clientY }); };
+    return b;
+  }, (b, p) => {
+    b.classList.toggle('active', p.id === s.activePanelId);
+    b.title = `${p.title || p.url}\nLogins do workspace ${wsName.get(p.workspaceId) ?? ''}\nBotão direito: opções`;
+    const letter = (p.title || new URL(p.url).hostname.replace(/^www\./, '')).charAt(0).toUpperCase();
+    const img = b.querySelector('img');
+    if (p.favicon) {
+      if (!img || img.getAttribute('src') !== p.favicon) {
+        const i = el('img', { src: p.favicon, alt: '' });
+        i.onerror = () => { i.remove(); b.prepend(letter); };
+        b.replaceChildren(i);
+      }
+    } else if (img || !b.firstChild || b.firstChild.nodeType !== Node.TEXT_NODE) {
+      b.replaceChildren(letter);
+    }
+    let dot = b.querySelector<HTMLElement>('.ws-dot');
+    if (!dot) { dot = el('span', { className: 'ws-dot' }); b.appendChild(dot); }
+    dot.style.background = wsColor.get(p.workspaceId) ?? 'transparent';
+  });
+  const active = s.panels.find((p) => p.id === s.activePanelId);
+  panelArea.hidden = !active;
+  if (active) panelArea.style.width = `${active.width}px`;
+}
+
+const sendPanelBounds = () => {
+  const r = panelArea.getBoundingClientRect();
+  send({ type: 'panel:bounds', x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) });
+};
+new ResizeObserver(sendPanelBounds).observe(panelArea);
+
+const panelDialog = $<HTMLDialogElement>('#panel-dialog');
+$('#panel-suggestions').replaceChildren(...PANEL_SUGGESTIONS.map((sug) => {
+  const b = el('button', { type: 'button', textContent: sug.name });
+  b.onclick = () => {
+    $<HTMLInputElement>('#panel-url').value = sug.url;
+    $<HTMLInputElement>('#panel-mobile').checked = Boolean(sug.mobile);
+  };
+  return b;
+}));
+$('#panel-add').onclick = () => {
+  if (!state) return;
+  $('#panel-ws').replaceChildren(...state.workspaces.map((w) => el('option', { value: w.id, textContent: w.name, selected: w.id === state!.activeWorkspaceId })));
+  $<HTMLInputElement>('#panel-url').value = '';
+  $<HTMLInputElement>('#panel-mobile').checked = false;
+  send({ type: 'layout:overlay', open: true });
+  panelDialog.showModal();
+  $('#panel-url').focus();
+};
+panelDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
+$('#panel-cancel').onclick = () => panelDialog.close();
+$('#panel-form').addEventListener('submit', (e) => {
+  const raw = $<HTMLInputElement>('#panel-url').value.trim();
+  const url = normalizeUrl(raw);
+  if (!url || !/^https?:\/\//.test(url) || url.startsWith(SEARCH_URL)) {
+    e.preventDefault(); // continua aberto: precisa de um endereço
+    $('#panel-url').focus();
+    return;
+  }
+  send({ type: 'panel:add', url, workspaceId: $<HTMLSelectElement>('#panel-ws').value, mobile: $<HTMLInputElement>('#panel-mobile').checked });
 });
 
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)

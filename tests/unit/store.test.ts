@@ -346,3 +346,18 @@ describe('fase 3d: workspace temporário', () => {
     expect(store.deleteTemporaryWorkspaces()).toEqual([]);
   });
 });
+
+describe('fase 5b: painéis laterais', () => {
+  it('criar, listar em ordem, atualizar e apagar; somem com o workspace', () => {
+    ws('a'); ws('b');
+    store.createPanel({ id: 'p1', workspaceId: 'a', url: 'https://web.whatsapp.com', mobile: false });
+    store.createPanel({ id: 'p2', workspaceId: 'b', url: 'https://teams.microsoft.com', mobile: true });
+    expect(store.listPanels().map((p) => [p.id, p.workspaceId, p.width, p.mobile])).toEqual([['p1', 'a', 420, false], ['p2', 'b', 420, true]]);
+    store.updatePanel('p1', { title: 'WhatsApp', width: 500 });
+    expect(store.getPanel('p1')).toMatchObject({ title: 'WhatsApp', width: 500, url: 'https://web.whatsapp.com' });
+    store.deleteWorkspace('b');
+    expect(store.listPanels().map((p) => p.id)).toEqual(['p1']);
+    store.deletePanel('p1');
+    expect(store.listPanels()).toEqual([]);
+  });
+});

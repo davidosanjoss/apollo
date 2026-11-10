@@ -10,7 +10,7 @@ export interface PaletteItem {
   title: string;
   /** Texto menor (URL, workspace…). */
   detail: string;
-  group: 'Abas' | 'Workspaces' | 'Ações' | 'Abrir';
+  group: 'Abas' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
   action: PaletteAction;
 }
 
@@ -86,6 +86,11 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
   items.push(...s.workspaces.filter((w) => w.id !== s.activeWorkspaceId).map((w): PaletteItem => ({
     id: `ws:${w.id}`, title: `Ir para o workspace ${w.name}`, detail: w.temporary ? 'temporário' : '', group: 'Workspaces',
     action: cmd({ type: 'workspace:switch', workspaceId: w.id }),
+  })));
+
+  items.push(...(s.panels ?? []).map((p): PaletteItem => ({
+    id: `panel:${p.id}`, title: `${p.id === s.activePanelId ? 'Fechar o painel' : 'Painel'}: ${p.title || readableUrl(p.url)}`,
+    detail: wsName.get(p.workspaceId) ?? '', group: 'Painéis', action: cmd({ type: 'panel:toggle', panelId: p.id }),
   })));
 
   const a = (id: string, title: string, action: PaletteAction, detail = '') => items.push({ id: `act:${id}`, title, detail, group: 'Ações', action });
