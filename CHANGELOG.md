@@ -14,6 +14,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Compatibilidade testada contra servidor real (Vaultwarden) e o CLI oficial do Bitwarden, inclusive contas Argon2id e itens de organização.
 
 ### Corrigido
+- O contador de bloqueios do escudo podia mostrar menos itens que o real (zerava tarde demais em máquinas lentas).
 - Conectar ao bitwarden.com falhava com "HTTP 400: No client version header found": o servidor oficial exige a versão do cliente em toda requisição (o Vaultwarden não exige).
 - Avisos de API descontinuada do Electron (chaveiro do sistema): cookies de sessão e segredos do Bitwarden passam a usar a API assíncrona; o segredo do Bitwarden é regravado com a chave atual do chaveiro a cada sincronização.
 - Elementos que deveriam estar escondidos em diálogos apareciam (ex.: "Temporário" ao editar um workspace).

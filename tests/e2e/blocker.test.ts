@@ -40,6 +40,8 @@ const reloadAndCheck = async (title: string) => {
 };
 
 describe('bloqueador', () => {
+  // Regressão: o contador zerava no did-navigate, que em máquina lenta (CI) chegava
+  // depois de os bloqueios da página nova já terem sido contados.
   it('padrão: anúncio e rastreador de terceiros não chegam ao servidor', async () => {
     const hit = await loadBlocktest('B1');
     expect(hit).toEqual({ ad: false, tracker: false });

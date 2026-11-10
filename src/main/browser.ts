@@ -317,9 +317,15 @@ export class Browser {
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
       if (!url.startsWith('apollo://error')) update({ url });
-      this.blocked.delete(tabId); // contador é por página
+
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
+    });
+    // Contador de bloqueios é por página. Zera no INÍCIO da navegação: as requisições
+    // da página nova chegam pelo serviço de rede e podem ser contadas antes do evento
+    // did-navigate (commit) — zerar ali apagava bloqueios já contados (visto no CI).
+    wc.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) this.blocked.delete(tabId);
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) update({ url }); });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
