@@ -10,12 +10,14 @@ export interface PaletteItem {
   title: string;
   /** Texto menor (URL, workspace…). */
   detail: string;
-  group: 'Abas' | 'Favoritos' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
+  group: 'Abas' | 'Favoritos' | 'Histórico' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
   action: PaletteAction;
+  /** Já filtrado pela busca em outro lugar (histórico: palavras em qualquer ordem): nunca descartar. */
+  prematched?: boolean;
 }
 
-/** Minúsculas e sem acentos: "Configurações" ≈ "configuracoes". */
-export const fold = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+import { fold } from '../shared/text';
+export { fold };
 
 /**
  * Pontua `text` para a busca `query` (letras em ordem, não precisam ser contíguas).
@@ -45,7 +47,8 @@ export function rank(items: PaletteItem[], query: string): PaletteItem[] {
   if (!query.trim()) return items;
   return items
     .map((item, i) => {
-      const s = Math.max(fuzzyScore(query, item.title) ?? -Infinity, (fuzzyScore(query, item.detail) ?? -Infinity) - 3);
+      let s = Math.max(fuzzyScore(query, item.title) ?? -Infinity, (fuzzyScore(query, item.detail) ?? -Infinity) - 3);
+      if (item.prematched && s === -Infinity) s = 0; // casou por palavras, fora de ordem
       return { item, i, s };
     })
     .filter((x) => x.s > -Infinity)
@@ -86,6 +89,15 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
   items.push(...(s.bookmarks ?? []).map((b): PaletteItem => ({
     id: `bm:${b.id}`, title: b.title, detail: readableUrl(b.url), group: 'Favoritos',
     action: cmd({ type: 'bookmark:open', bookmarkId: b.id }),
+  })));
+
+  // Histórico (já filtrado pelo main com o que foi digitado). Sem repetir abas abertas e favoritos.
+  // Abre na própria aba se ela estiver na página inicial, senão numa nova.
+  const shown = new Set([...(s.paletteTabs ?? []).map((t) => t.url), ...(s.bookmarks ?? []).map((b) => b.url)]);
+  const onHome = Boolean(active && active.url.startsWith('apollo://home') && !active.live);
+  items.push(...(s.paletteHistory ?? []).filter((h) => !shown.has(h.url)).map((h): PaletteItem => ({
+    id: `hist:${h.url}`, title: h.title || readableUrl(h.url), detail: readableUrl(h.url), group: 'Histórico', prematched: true,
+    action: cmd(onHome ? { type: 'tab:navigate', url: h.url } : { type: 'tab:new', url: h.url }),
   })));
 
   items.push(...s.workspaces.filter((w) => w.id !== s.activeWorkspaceId).map((w): PaletteItem => ({

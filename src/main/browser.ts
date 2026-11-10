@@ -117,7 +117,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -144,6 +144,7 @@ export class Browser {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
     // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
     store.deleteTemporaryWorkspaces();
+    store.pruneHistory();
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -330,7 +331,10 @@ export class Browser {
       this.push();
     };
 
-    wc.on('page-title-updated', (_e, title) => update({ title }));
+    wc.on('page-title-updated', (_e, title) => {
+      update({ title });
+      if (this.historyOn(workspaceId)) this.store.setVisitTitle(workspaceId, wc.getURL(), title);
+    });
     // Ctrl + roda do mouse.
     wc.on('zoom-changed', (_e, dir) => this.zoom(wc, workspaceId, dir));
     wc.on('found-in-page', (_e, r) => {
@@ -344,6 +348,7 @@ export class Browser {
       // ao restaurar ou acordar da hibernação, abriria a página em vez do código).
       const shown = wc.getURL();
       this.applyZoom(wc, workspaceId, url);
+      this.visit(workspaceId, url, '');
       if (shown.startsWith('view-source:')) update({ url: shown, title: shown });
       else if (!url.startsWith('apollo://error')) update({ url });
 
@@ -356,7 +361,11 @@ export class Browser {
     wc.on('did-start-navigation', (details) => {
       if (details.isMainFrame && !details.isSameDocument) this.blocked.delete(tabId);
     });
-    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) update({ url }); });
+    wc.on('did-navigate-in-page', (_e, url, isMainFrame) => {
+      if (!isMainFrame) return;
+      update({ url });
+      this.visit(workspaceId, url, wc.getTitle());
+    });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
     wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('media-started-playing', () => { this.playing.add(tabId); });
@@ -1583,7 +1592,10 @@ export class Browser {
       case 'vault:copy': this.copyFromVault(cmd.itemId, cmd.what); break;
       case 'vault:open': this.emit({ type: 'open-vault' }); break;
       case 'vault:autofill': this.autofill(); break;
-      case 'palette:toggle': this.paletteOpen = cmd.open; break;
+      case 'palette:toggle': this.paletteOpen = cmd.open; if (!cmd.open) this.paletteQuery = ''; break;
+      case 'palette:query': this.paletteQuery = cmd.text; break;
+      case 'settings:history': this.store.setKv('history-off', cmd.on ? '0' : '1'); break;
+      case 'history:clear': this.store.clearHistory(); break;
       case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
       case 'panel:toggle': this.togglePanel(cmd.panelId); break;
       case 'panel:remove': this.removePanel(cmd.panelId); break;
@@ -1655,6 +1667,15 @@ export class Browser {
   };
 
   private paletteOpen = false;
+  private paletteQuery = '';
+
+  private historyOn(workspaceId: string): boolean {
+    return this.store.getKv('history-off') !== '1' && !this.store.getWorkspace(workspaceId)?.temporary;
+  }
+
+  private visit(workspaceId: string, url: string, title: string): void {
+    if (/^https?:/i.test(url) && this.historyOn(workspaceId)) this.store.recordVisit(workspaceId, url, title);
+  }
   private moduleCache: Record<ModuleId, boolean> | null = null;
 
   // Painéis laterais
@@ -1832,7 +1853,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -1907,8 +1928,12 @@ export class Browser {
       paletteTabs: this.paletteOpen
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
+      paletteHistory: this.paletteOpen && this.paletteQuery.trim()
+        ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
+        : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1' },
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1',
+        historyOn: this.store.getKv('history-off') !== '1' },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),

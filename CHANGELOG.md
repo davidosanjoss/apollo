@@ -7,6 +7,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
 - Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Histórico pesquisável no Ctrl+K: páginas visitadas do workspace, sem acento e com as palavras em qualquer ordem, mais visitadas e recentes primeiro (sem repetir abas abertas e favoritos). Nunca nos workspaces temporários; últimos 90 dias. Configurações → Histórico: desligar ou apagar tudo.
 - Zoom por site: Ctrl+= / Ctrl+- / Ctrl+0 e Ctrl+roda do mouse, em degraus como no Chrome; guardado por site em cada workspace (vale para todas as abas do site e sobrevive ao reinício). Indicador "125%" na barra (clique volta a 100%) e ações no Ctrl+K.
 - Downloads: vão direto para a pasta Downloads, sem sobrescrever ("nota (1).pdf"); botão ↓ na barra com anel de progresso e lista (pausar, retomar, cancelar, abrir, mostrar na pasta, limpar). Configurações → Downloads: perguntar onde salvar cada arquivo. "Salvar como…" no botão direito sempre pergunta.
 - Localizar na página (Ctrl+F): barra com contagem ("2 de 5"), Enter/F3/Ctrl+G para o próximo e Shift para o anterior, Esc fecha; fecha sozinha ao trocar de aba.

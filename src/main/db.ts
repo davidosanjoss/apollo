@@ -133,6 +133,19 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (workspace_id, host)
   );
   `,
+
+  /* v10: histórico de visitas (por workspace) */ `
+  CREATE TABLE history (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    url          TEXT NOT NULL,
+    title        TEXT NOT NULL DEFAULT '',
+    search       TEXT NOT NULL,
+    visits       INTEGER NOT NULL DEFAULT 1,
+    last_visit   INTEGER NOT NULL,
+    PRIMARY KEY (workspace_id, url)
+  );
+  CREATE INDEX history_recent ON history(workspace_id, last_visit);
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

@@ -101,6 +101,9 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:open':
     case 'vault:autofill': return { type: c.type } as UiCommand;
     case 'palette:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
+    case 'palette:query': return str(c.text, 500) ? (c as UiCommand) : null;
+    case 'settings:history': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
+    case 'history:clear': return { type: c.type } as UiCommand;
     case 'panel:add':
       return str(c.url, 2048) && /^https?:\/\//i.test(c.url as string) && id(c.workspaceId) && typeof c.mobile === 'boolean' ? (c as UiCommand) : null;
     case 'panel:toggle':

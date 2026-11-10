@@ -684,6 +684,7 @@ const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
 function renderSettings(s: UiState): void {
   if (!settingsDialog.open) return;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
+  $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
   const t = s.settings.dnsTest;
@@ -715,6 +716,12 @@ function openSettings(): void {
 }
 
 $('#settings-btn').onclick = openSettings;
+$<HTMLInputElement>('#history-on').onchange = (e) => send({ type: 'settings:history', on: (e.target as HTMLInputElement).checked });
+$('#history-clear').onclick = () => {
+  send({ type: 'history:clear' });
+  $('#history-clear').textContent = 'Histórico apagado';
+  setTimeout(() => { $('#history-clear').textContent = 'Apagar todo o histórico'; }, 2500);
+};
 $<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
 $<HTMLSelectElement>('#spellcheck').onchange = (e) =>
   send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });
@@ -1133,7 +1140,11 @@ function runPalette(index: number): void {
 palette.addEventListener('close', () => {
   send({ type: 'palette:toggle', open: false });
 });
-paletteInput.addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+paletteInput.addEventListener('input', () => {
+  paletteSel = 0;
+  send({ type: 'palette:query', text: paletteInput.value.slice(0, 500) }); // histórico vem no próximo estado
+  renderPalette();
+});
 $('#palette-btn').onclick = openPalette;
 paletteInput.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {

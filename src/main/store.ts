@@ -1,3 +1,4 @@
+import { fold } from '../shared/text';
 import type { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -103,6 +104,20 @@ const toPanel = (r: Row): Panel => ({
 /** Patch sem os campos undefined (senão { ...atual, ...patch } apagaria valores salvos). */
 function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+export interface HistoryEntry {
+  url: string;
+  title: string;
+  visits: number;
+  lastVisit: number;
+}
+
+/** Texto de busca: título e endereço (sem esquema e decodificado) sem acentos. */
+export function historySearchText(url: string, title: string): string {
+  let u = url.replace(/^https?:\/\/(www\.)?/i, '');
+  try { u = decodeURI(u); } catch { /* malformada: como está */ }
+  return fold(`${title} ${u}`);
 }
 
 export interface Bookmark {
@@ -366,6 +381,46 @@ export class Store {
 
   deleteCustomization(id: string): void {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ histórico de visitas
+
+  recordVisit(workspaceId: string, url: string, title: string, now = Date.now()): void {
+    this.db.prepare(`INSERT INTO history(workspace_id, url, title, search, visits, last_visit) VALUES (?, ?, ?, ?, 1, ?)
+      ON CONFLICT(workspace_id, url) DO UPDATE SET visits = visits + 1, last_visit = excluded.last_visit,
+        title = CASE WHEN excluded.title <> '' THEN excluded.title ELSE title END,
+        search = CASE WHEN excluded.title <> '' THEN excluded.search ELSE search END`)
+      .run(workspaceId, url, title, historySearchText(url, title), now);
+  }
+
+  /** O título chega depois da navegação: atualiza a visita (se existir). */
+  setVisitTitle(workspaceId: string, url: string, title: string): void {
+    this.db.prepare('UPDATE history SET title = ?, search = ? WHERE workspace_id = ? AND url = ?')
+      .run(title, historySearchText(url, title), workspaceId, url);
+  }
+
+  /** Cada palavra tem que aparecer (sem acento/maiúscula) no título ou no endereço. */
+  searchHistory(workspaceId: string, query: string, limit = 8): HistoryEntry[] {
+    const words = fold(query).split(/\s+/).filter(Boolean).slice(0, 8);
+    if (!words.length) return [];
+    const like = (w: string) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = words.map(() => "search LIKE ? ESCAPE '\\'").join(' AND ');
+    // Mais visitado e mais recente primeiro (frecência simples).
+    return (this.db.prepare(`SELECT url, title, visits, last_visit FROM history WHERE workspace_id = ? AND ${where}
+      ORDER BY (visits * 1.0) / (1 + (? - last_visit) / 86400000.0) DESC LIMIT ?`)
+      .all(workspaceId, ...words.map(like), Date.now(), limit) as Row[])
+      .map((r) => ({ url: r.url as string, title: r.title as string, visits: r.visits as number, lastVisit: r.last_visit as number }));
+  }
+
+  clearHistory(): void {
+    this.db.prepare('DELETE FROM history').run();
+  }
+
+  /** Mantém só os últimos `maxAgeDays` e, por workspace, os `maxPerWorkspace` mais recentes. */
+  pruneHistory(maxAgeDays = 90, maxPerWorkspace = 5000, now = Date.now()): void {
+    this.db.prepare('DELETE FROM history WHERE last_visit < ?').run(now - maxAgeDays * 86_400_000);
+    this.db.prepare(`DELETE FROM history WHERE rowid IN (SELECT rowid FROM (SELECT rowid,
+      ROW_NUMBER() OVER (PARTITION BY workspace_id ORDER BY last_visit DESC) AS n FROM history) WHERE n > ?)`).run(maxPerWorkspace);
   }
 
   // ------------------------------------------------------------ zoom por site

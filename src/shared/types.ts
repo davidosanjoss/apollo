@@ -161,6 +161,8 @@ export interface SettingsInfo {
   spellcheck: SpellcheckMode;
   /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
   downloadAsk: boolean;
+  /** Guardar histórico de visitas (nunca nos workspaces temporários). */
+  historyOn: boolean;
 }
 
 export interface UiState {
@@ -184,6 +186,8 @@ export interface UiState {
   generator: { length: number; symbols: boolean };
   /** Abas de todos os workspaces, só enquanto a paleta está aberta (fechada = custo zero). */
   paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
+  /** Histórico do workspace que casa com o que foi digitado na paleta (null = paleta fechada ou vazia). */
+  paletteHistory: { url: string; title: string }[] | null;
   panels: PanelInfo[];
   /** Painel aberto (só um por vez). */
   activePanelId: string | null;
@@ -320,6 +324,11 @@ export type UiCommand =
   | { type: 'vault:open' }
   | { type: 'vault:autofill' }
   | { type: 'palette:toggle'; open: boolean }
+  /** Texto digitado na paleta (para buscar no histórico). */
+  | { type: 'palette:query'; text: string }
+  | { type: 'settings:history'; on: boolean }
+  /** Apaga o histórico de visitas de todos os workspaces. */
+  | { type: 'history:clear' }
   | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
   | { type: 'panel:toggle'; panelId: string }
   | { type: 'panel:remove'; panelId: string }

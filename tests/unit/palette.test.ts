@@ -121,3 +121,33 @@ describe('favoritos na paleta', () => {
     expect(home.find((i) => i.id === 'act:bookmark')).toBeUndefined();
   });
 });
+
+describe('histórico na paleta', () => {
+  const paletteHistory = [
+    { url: 'https://moodle.ufmg.br/course/1', title: 'Cálculo I' },
+    { url: 'https://a.com/', title: 'Já aberta' },
+    { url: 'https://fav.com/', title: 'Já favorito' },
+  ];
+  const bookmarks = [{ id: 'b', title: 'Fav', url: 'https://fav.com/', favicon: null }];
+
+  it('sem repetir abas abertas e favoritos; abre em nova aba', () => {
+    const items = buildItems({ state: state({ paletteHistory, bookmarks, activeBookmarkId: null }), query: 'calc', openUrl: null });
+    const hist = items.filter((i) => i.group === 'Histórico');
+    expect(hist.map((h) => h.title)).toEqual(['Cálculo I']);
+    expect(hist[0]).toMatchObject({ detail: 'moodle.ufmg.br/course/1',
+      action: { kind: 'command', command: { type: 'tab:new', url: 'https://moodle.ufmg.br/course/1' } } });
+  });
+
+  // Regressão: "diferencial calculo" não casava "Cálculo Diferencial" (busca aproximada
+  // exige as letras em ordem) e o item do histórico, já filtrado por palavras, sumia.
+  it('palavras fora de ordem: o item do histórico não é descartado', () => {
+    const items = buildItems({ state: state({ paletteHistory, bookmarks: [], activeBookmarkId: null }), query: '1 calculo', openUrl: null });
+    expect(items.filter((i) => i.group === 'Histórico').map((i) => i.title)).toContain('Cálculo I');
+  });
+
+  it('na página inicial (sem página): abre na própria aba', () => {
+    const s = state({ tabs: [tab('a', 'Nova aba', { url: 'apollo://home', live: false })], paletteHistory, bookmarks: [], activeBookmarkId: null });
+    const h = buildItems({ state: s, query: 'calc', openUrl: null }).find((i) => i.group === 'Histórico')!;
+    expect(h.action).toEqual({ kind: 'command', command: { type: 'tab:navigate', url: 'https://moodle.ufmg.br/course/1' } });
+  });
+});

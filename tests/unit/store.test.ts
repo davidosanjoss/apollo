@@ -460,3 +460,37 @@ describe('v9: zoom por site', () => {
     expect(store.getZoom('a', 'x.com')).toBe(1);
   });
 });
+
+describe('v10: histórico de visitas', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('conta visitas, mantém o título, busca sem acento com todas as palavras', () => {
+    store.recordVisit('a', 'https://moodle.ufmg.br/course/view.php?id=1', 'Cálculo Diferencial', 1000);
+    store.recordVisit('a', 'https://moodle.ufmg.br/course/view.php?id=1', '', 2000); // título ainda não chegou
+    store.recordVisit('a', 'https://www.ufmg.br/', 'Portal UFMG', 1500);
+    const r = store.searchHistory('a', 'CALCULO moodle');
+    expect(r).toEqual([{ url: 'https://moodle.ufmg.br/course/view.php?id=1', title: 'Cálculo Diferencial', visits: 2, lastVisit: 2000 }]);
+    expect(store.searchHistory('a', 'ufmg').map((x) => x.title)).toEqual(['Cálculo Diferencial', 'Portal UFMG']);
+    expect(store.searchHistory('b', 'ufmg')).toEqual([]); // outro workspace
+    expect(store.searchHistory('a', '   ')).toEqual([]);
+  });
+
+  it('título que chega depois entra na busca; % e _ são literais', () => {
+    store.recordVisit('a', 'https://x.com/a', '', 1);
+    store.setVisitTitle('a', 'https://x.com/a', 'Relatório 100%');
+    expect(store.searchHistory('a', 'relatorio').length).toBe(1);
+    expect(store.searchHistory('a', '100%').length).toBe(1);
+    expect(store.searchHistory('a', '_').length).toBe(0);
+  });
+
+  it('poda por idade e por quantidade; apagar tudo', () => {
+    const day = 86_400_000;
+    const now = 200 * day;
+    store.recordVisit('a', 'https://velho.com', 'Velho', now - 100 * day);
+    for (let i = 0; i < 5; i++) store.recordVisit('a', `https://n${i}.com`, `N${i}`, now - i);
+    store.pruneHistory(90, 3, now);
+    expect(store.searchHistory('a', 'com', 50).map((x) => x.title).sort()).toEqual(['N0', 'N1', 'N2']);
+    store.clearHistory();
+    expect(store.searchHistory('a', 'com')).toEqual([]);
+  });
+});
