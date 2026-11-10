@@ -53,6 +53,8 @@ describe('parseCommand (validação dos comandos da UI)', () => {
       { type: 'palette:query', text: 'cálculo' },
       { type: 'view:fullscreen' },
       { type: 'update:check' },
+      { type: 'tab:pip' },
+      { type: 'settings:auto-pip', on: true },
       { type: 'settings:download-days', days: 30 },
       { type: 'settings:download-days', days: 0 },
       { type: 'update:dismiss' },

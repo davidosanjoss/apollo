@@ -184,6 +184,8 @@ export interface SettingsInfo {
   downloadAsk: boolean;
   /** Dias que a lista de downloads fica guardada (0 = só nesta sessão). */
   downloadKeepDays: number;
+  /** Vídeo flutuante automático ao trocar de aba com um vídeo tocando. */
+  autoPip: boolean;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
@@ -231,6 +233,8 @@ export interface UiState {
   activeBookmarkId: string | null;
   /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
   fullscreen: 'window' | 'page' | null;
+  /** Vídeo flutuante na aba ativa: available = tem vídeo; active = está flutuando. */
+  pip: { available: boolean; active: boolean };
   /** Zoom da aba ativa, em % (100 = padrão). */
   zoom: number;
   /** Downloads desta sessão do Apollo (mais recente primeiro). */
@@ -385,6 +389,9 @@ export type UiCommand =
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
   /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
   | { type: 'view:fullscreen' }
+  /** Vídeo flutuante (picture-in-picture) da aba ativa: abre/fecha. */
+  | { type: 'tab:pip' }
+  | { type: 'settings:auto-pip'; on: boolean }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }
   /** Zoom da aba ativa (guardado por site, em cada workspace). */

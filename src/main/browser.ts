@@ -52,6 +52,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
 import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
 import { nextZoom, zoomKey, zoomPercent } from './zoom';
@@ -119,7 +120,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -389,6 +390,7 @@ export class Browser {
 
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
+      this.videoTabs.delete(tabId);
     });
     // Contador de bloqueios é por página. Zera no INÍCIO da navegação: as requisições
     // da página nova chegam pelo serviço de rede e podem ser contadas antes do evento
@@ -403,7 +405,7 @@ export class Browser {
     });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
     wc.on('dom-ready', () => this.applyCustomizations(wc));
-    wc.on('media-started-playing', () => { this.playing.add(tabId); });
+    wc.on('media-started-playing', () => { this.playing.add(tabId); this.checkVideo(wc, tabId); });
     wc.on('media-paused', () => { this.playing.delete(tabId); });
     wc.on('did-stop-loading', () => { this.loading.delete(tabId); this.push(); });
 
@@ -627,6 +629,47 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ vídeo flutuante (picture-in-picture)
+
+  /** Abas com vídeo flutuante aberto (não hibernam). */
+  private readonly pipTabs = new Set<string>();
+  /** Abas que têm vídeo (para mostrar o botão). */
+  private readonly videoTabs = new Set<string>();
+
+  /** Abre/fecha o vídeo flutuante da página (gesto do usuário: o clique dele no Apollo). */
+  private async togglePip(wc: WebContents, tabId: string | null): Promise<void> {
+    if (wc.isDestroyed()) return;
+    let r: string;
+    try {
+      r = String(await wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_TOGGLE }], true));
+    } catch {
+      return;
+    }
+    if (!tabId) return;
+    if (r === 'opened') {
+      this.pipTabs.add(tabId);
+      // Quando o vídeo flutuante fechar (pelo ✕ dele também), o botão volta ao normal.
+      void wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_WAIT_CLOSE }], false)
+        .catch(() => {}).finally(() => { this.pipTabs.delete(tabId); this.push(); });
+    } else if (r === 'closed') {
+      this.pipTabs.delete(tabId);
+    }
+    this.push();
+  }
+
+  private checkVideo(wc: WebContents, tabId: string): void {
+    if (wc.isDestroyed()) return;
+    void wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_HAS_VIDEO }], false).then((has) => {
+      const had = this.videoTabs.has(tabId);
+      if (has) this.videoTabs.add(tabId); else this.videoTabs.delete(tabId);
+      if (had !== Boolean(has)) this.push();
+    }).catch(() => {});
+  }
+
+  private autoPipOn(): boolean {
+    return this.store.getKv('auto-pip') === '1';
   }
 
   // ------------------------------------------------------------ tela cheia, imprimir, devtools
@@ -1272,7 +1315,7 @@ export class Browser {
         alive: true,
         visible: tabId === this.attachedTabId,
         keepAwake: tab.keepAwake,
-        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured(),
+        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured() || this.pipTabs.has(tabId),
         unloadBlocked: this.unloadBlocked.has(tabId),
         lastSeenAt: this.lastSeen.get(tabId) ?? now,
         memoryMb: perTab.get(tabId) ?? null,
@@ -1314,6 +1357,9 @@ export class Browser {
       }
       this.lastSeen.set(this.attachedTabId, Date.now());
       if (this.findState?.tabId === this.attachedTabId) this.stopFind();
+      // Vídeo flutuante automático: saiu de uma aba com vídeo tocando.
+      if (old && this.autoPipOn() && this.playing.has(this.attachedTabId) && this.videoTabs.has(this.attachedTabId)
+        && !this.pipTabs.has(this.attachedTabId)) void this.togglePip(old.webContents, this.attachedTabId);
       if (this.pageFullscreenTabId === this.attachedTabId) {
         old?.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
         this.pageFullscreenTabId = null;
@@ -1385,6 +1431,8 @@ export class Browser {
     this.blocked.delete(tabId);
     this.pendingSaves.delete(tabId);
     this.usernameSteps.delete(tabId);
+    this.pipTabs.delete(tabId);
+    this.videoTabs.delete(tabId);
     if (this.screenRequest?.requesterTabId === tabId) this.pickScreen(this.screenRequest.info.id, null, false);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
@@ -1633,6 +1681,7 @@ export class Browser {
         break;
       case 'view-source': newTab(`view-source:${wc.getURL()}`, true); break;
       case 'print': this.print(wc); break;
+      case 'pip': void this.togglePip(wc, tabId); break;
       case 'inspect': wc.inspectElement(params.x, params.y); break;
       case 'vault': if (a.op === 'autofill') this.autofill(); else this.generate(true); break;
     }
@@ -1823,6 +1872,8 @@ export class Browser {
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
       case 'zoom:set': this.zoomActive(cmd.dir); break;
       case 'view:fullscreen': this.toggleFullscreen(); break;
+      case 'tab:pip': { const t = this.activeTab(); this.withActiveWc((wc) => void this.togglePip(wc, t?.id ?? null)); break; }
+      case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
       case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
@@ -2079,7 +2130,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -2163,7 +2214,7 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(),
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(),
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
@@ -2177,6 +2228,7 @@ export class Browser {
       },
       fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
         : this.windowFullscreen ? 'window' : null,
+      pip: { available: Boolean(active && (this.videoTabs.has(active.id) || this.pipTabs.has(active.id))), active: Boolean(active && this.pipTabs.has(active.id)) },
       zoom: (() => {
         const wc = active ? this.views.get(active.id)?.webContents : undefined;
         return wc && !wc.isDestroyed() ? zoomPercent(wc.getZoomFactor()) : 100;

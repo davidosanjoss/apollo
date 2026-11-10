@@ -34,8 +34,10 @@ describe('menu de contexto', () => {
     expect(labels(m).slice(0, 4)).toEqual(['Abrir imagem em nova aba', 'Copiar imagem', 'Copiar endereço da imagem', 'Salvar imagem como…']);
   });
 
-  it('vídeo blob: (streaming) não oferece abrir/salvar', () => {
-    expect(labels(buildContextMenu(info({ mediaType: 'video', srcURL: 'blob:https://a.com/1' }), st))).not.toContain('Abrir vídeo em nova aba');
+  it('vídeo blob: (streaming) não oferece abrir/salvar, mas oferece vídeo flutuante', () => {
+    const m = labels(buildContextMenu(info({ mediaType: 'video', srcURL: 'blob:https://a.com/1' }), st));
+    expect(m).not.toContain('Abrir vídeo em nova aba');
+    expect(m[0]).toBe('Vídeo flutuante (picture-in-picture)');
   });
 
   it('seleção: copiar e pesquisar (rótulo encurtado, URL com o texto inteiro)', () => {

@@ -81,6 +81,10 @@ function render(): void {
 
   renderHome(s);
   renderFullscreen(s);
+  const pipBtn = $('#pip-btn');
+  pipBtn.hidden = !s.pip.available;
+  pipBtn.classList.toggle('on', s.pip.active);
+  pipBtn.title = s.pip.active ? 'Fechar o vídeo flutuante' : 'Vídeo flutuante (picture-in-picture)';
   const zoomBtn = $('#zoom-btn');
   zoomBtn.hidden = s.zoom === 100;
   zoomBtn.textContent = `${s.zoom}%`;
@@ -482,6 +486,7 @@ function bookmarkCurrent(): void {
 
 $('#bookmark-btn').onclick = bookmarkCurrent;
 $('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
+$('#pip-btn').onclick = () => send({ type: 'tab:pip' });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
   if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });
@@ -995,8 +1000,8 @@ $('#ws-delete').onclick = () => {
 // ------------------------------------------------------------ configurações
 
 const settingsPage = $('#settings-page');
-type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'languages' | 'vault' | 'modules' | 'about';
-const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'languages', 'vault', 'modules', 'about'];
+type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'media' | 'languages' | 'vault' | 'modules' | 'about';
+const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'media', 'languages', 'vault', 'modules', 'about'];
 let settingsSection: SettingsSection = 'privacy';
 /** Aba ativa quando a página abriu: trocar de aba fecha as configurações. */
 let settingsTabId: string | null = null;
@@ -1045,11 +1050,13 @@ $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });
+$<HTMLInputElement>('#auto-pip').onchange = (e) => send({ type: 'settings:auto-pip', on: (e.target as HTMLInputElement).checked });
 
 function renderSettings(s: UiState): void {
   if (!settingsOpen()) return;
   if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
   $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
+  $<HTMLInputElement>('#auto-pip').checked = s.settings.autoPip;
   $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
     : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
   const a = s.updateAbout;
