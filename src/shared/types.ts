@@ -195,6 +195,8 @@ export interface UiState {
   bookmarks: BookmarkInfo[];
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
   activeBookmarkId: string | null;
+  /** Zoom da aba ativa, em % (100 = padrão). */
+  zoom: number;
   /** Downloads desta sessão do Apollo (mais recente primeiro). */
   downloads: DownloadInfo[];
   /** Busca na página (Ctrl+F) da aba ativa: resultado atual / total. */
@@ -326,6 +328,8 @@ export type UiCommand =
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Zoom da aba ativa (guardado por site, em cada workspace). */
+  | { type: 'zoom:set'; dir: 'in' | 'out' | 'reset' }
   | { type: 'download:action'; downloadId: string; action: DownloadAction }
   /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
   | { type: 'download:clear' }

@@ -444,3 +444,19 @@ describe('v8: favoritos', () => {
     expect(store.listBookmarks('a')).toEqual([]);
   });
 });
+
+describe('v9: zoom por site', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+  it('por workspace e host; 100% apaga (padrão)', () => {
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'moodle.ufmg.br', 1.25);
+    store.setZoom('a', 'moodle.ufmg.br', 1.5);
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1.5);
+    expect(store.getZoom('b', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'moodle.ufmg.br', 1);
+    expect(store.getZoom('a', 'moodle.ufmg.br')).toBe(1);
+    store.setZoom('a', 'x.com', 2);
+    store.deleteWorkspace('a');
+    expect(store.getZoom('a', 'x.com')).toBe(1);
+  });
+});

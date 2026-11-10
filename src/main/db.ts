@@ -124,6 +124,15 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX bookmarks_by_workspace ON bookmarks(workspace_id, position);
   `,
+
+  /* v9: zoom por site (por workspace) */ `
+  CREATE TABLE site_zoom (
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    host         TEXT NOT NULL,
+    factor       REAL NOT NULL,
+    PRIMARY KEY (workspace_id, host)
+  );
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

@@ -52,6 +52,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
@@ -330,6 +331,8 @@ export class Browser {
     };
 
     wc.on('page-title-updated', (_e, title) => update({ title }));
+    // Ctrl + roda do mouse.
+    wc.on('zoom-changed', (_e, dir) => this.zoom(wc, workspaceId, dir));
     wc.on('found-in-page', (_e, r) => {
       if (this.findState?.tabId !== tabId) return;
       this.findState = { ...this.findState, active: r.activeMatchOrdinal, matches: r.matches };
@@ -340,6 +343,7 @@ export class Browser {
       // Código-fonte: o evento traz a URL de dentro; a aba guarda "view-source:…" (senão,
       // ao restaurar ou acordar da hibernação, abriria a página em vez do código).
       const shown = wc.getURL();
+      this.applyZoom(wc, workspaceId, url);
       if (shown.startsWith('view-source:')) update({ url: shown, title: shown });
       else if (!url.startsWith('apollo://error')) update({ url });
 
@@ -579,6 +583,30 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ zoom por site
+
+  private zoomActive(dir: 'in' | 'out' | 'reset'): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (tab && wc && !wc.isDestroyed()) this.zoom(wc, tab.workspaceId, dir);
+  }
+
+  /** Muda e guarda o zoom do site (outras abas do mesmo site no workspace acompanham). */
+  private zoom(wc: WebContents, workspaceId: string, dir: 'in' | 'out' | 'reset'): void {
+    const factor = dir === 'reset' ? 1 : nextZoom(wc.getZoomFactor(), dir);
+    wc.setZoomFactor(factor);
+    const key = zoomKey(wc.getURL());
+    if (key) this.store.setZoom(workspaceId, key, factor);
+    this.push();
+  }
+
+  /** Ao abrir uma página: o zoom guardado do site (o Chromium só lembra até fechar o app). */
+  private applyZoom(wc: WebContents, workspaceId: string, url: string): void {
+    const key = zoomKey(url);
+    const factor = key ? this.store.getZoom(workspaceId, key) : 1;
+    if (Math.abs(wc.getZoomFactor() - factor) > 0.001) wc.setZoomFactor(factor);
   }
 
   // ------------------------------------------------------------ downloads
@@ -1507,6 +1535,9 @@ export class Browser {
       case 'autofill': this.autofill(); break;
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
       case 'find': this.focusUi(); this.emit({ type: 'open-find' }); break;
+      case 'zoom-in': this.zoomActive('in'); break;
+      case 'zoom-out': this.zoomActive('out'); break;
+      case 'zoom-reset': this.zoomActive('reset'); break;
       case 'find-next':
       case 'find-prev':
         if (this.findState?.text) this.find(this.findState.text, action === 'find-next', true);
@@ -1563,6 +1594,7 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'zoom:set': this.zoomActive(cmd.dir); break;
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
       case 'download:clear': this.downloads.clear(); break;
       case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
@@ -1883,6 +1915,10 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      zoom: (() => {
+        const wc = active ? this.views.get(active.id)?.webContents : undefined;
+        return wc && !wc.isDestroyed() ? zoomPercent(wc.getZoomFactor()) : 100;
+      })(),
       downloads: this.downloads.list(),
       find: this.findState && this.findState.tabId === ws.activeTabId
         ? { text: this.findState.text, active: this.findState.active, matches: this.findState.matches } : null,

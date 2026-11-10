@@ -112,6 +112,11 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
     a('bookmark', s.activeBookmarkId ? 'Editar o favorito desta página' : 'Adicionar esta página aos favoritos',
       { kind: 'ui', action: 'bookmark' }, 'Ctrl+D');
   }
+  if (active?.live) {
+    a('zoom-in', 'Aumentar o zoom', cmd({ type: 'zoom:set', dir: 'in' }), 'Ctrl+=');
+    a('zoom-out', 'Diminuir o zoom', cmd({ type: 'zoom:set', dir: 'out' }), 'Ctrl+-');
+    if (s.zoom !== 100) a('zoom-reset', `Voltar o zoom a 100% (está em ${s.zoom}%)`, cmd({ type: 'zoom:set', dir: 'reset' }), 'Ctrl+0');
+  }
   a('memory', s.memory ? 'Fechar o monitor de memória' : 'Monitor de memória', cmd({ type: 'memory:toggle', open: !s.memory }), 'Shift+Esc');
   if (s.sitePrivacy) {
     a('pause', s.sitePrivacy.tabPaused ? 'Retomar a proteção nesta aba' : 'Pausar a proteção nesta aba',

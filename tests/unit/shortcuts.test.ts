@@ -25,6 +25,10 @@ describe('shortcutFor', () => {
     [key('k', { control: true }), 'palette'],
     [key('d', { control: true }), 'bookmark'],
     [key('f', { control: true }), 'find'],
+    [key('=', { control: true }), 'zoom-in'],
+    [key('+', { control: true, shift: true }), 'zoom-in'],
+    [key('-', { control: true }), 'zoom-out'],
+    [key('0', { control: true }), 'zoom-reset'],
     [key('F3'), 'find-next'],
     [key('F3', { shift: true }), 'find-prev'],
     [key('g', { control: true }), 'find-next'],
@@ -37,7 +41,7 @@ describe('shortcutFor', () => {
     expect(shortcutFor(key('t'))).toBeNull();
     expect(shortcutFor({ ...key('t', { control: true }), type: 'keyUp' })).toBeNull();
     expect(shortcutFor(key('w', { control: true, shift: true }))).toBeNull();
-    expect(shortcutFor(key('0', { control: true }))).toBeNull();
+    expect(shortcutFor(key('0', { control: true, alt: true }))).toBeNull(); // Ctrl+0 sozinho = zoom 100%
     expect(shortcutFor(key('ArrowLeft'))).toBeNull();
     expect(shortcutFor(key('Escape'))).toBeNull(); // Esc sozinho é das páginas
     expect(shortcutFor(key('Escape', { shift: true, control: true }))).toBeNull();

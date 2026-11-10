@@ -368,6 +368,23 @@ export class Store {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
   }
 
+  // ------------------------------------------------------------ zoom por site
+
+  /** Zoom guardado do site (1 = 100%, o padrão: não guardado). */
+  getZoom(workspaceId: string, host: string): number {
+    const row = this.db.prepare('SELECT factor FROM site_zoom WHERE workspace_id = ? AND host = ?').get(workspaceId, host) as { factor: number } | undefined;
+    return row?.factor ?? 1;
+  }
+
+  setZoom(workspaceId: string, host: string, factor: number): void {
+    if (Math.abs(factor - 1) < 0.001) {
+      this.db.prepare('DELETE FROM site_zoom WHERE workspace_id = ? AND host = ?').run(workspaceId, host);
+    } else {
+      this.db.prepare(`INSERT INTO site_zoom(workspace_id, host, factor) VALUES (?, ?, ?)
+        ON CONFLICT(workspace_id, host) DO UPDATE SET factor = excluded.factor`).run(workspaceId, host, factor);
+    }
+  }
+
   // ------------------------------------------------------------ favoritos (por workspace)
 
   listBookmarks(workspaceId: string): Bookmark[] {

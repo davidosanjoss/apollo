@@ -78,6 +78,9 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  const zoomBtn = $('#zoom-btn');
+  zoomBtn.hidden = s.zoom === 100;
+  zoomBtn.textContent = `${s.zoom}%`;
   renderDownloads(s);
   renderFind(s);
   renderBookmarks(s);
@@ -420,6 +423,7 @@ function bookmarkCurrent(): void {
 }
 
 $('#bookmark-btn').onclick = bookmarkCurrent;
+$('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
   if (editingBookmark) send({ type: 'bookmark:remove', bookmarkId: editingBookmark });

@@ -120,6 +120,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'zoom:set': return ['in', 'out', 'reset'].includes(c.dir as string) ? (c as UiCommand) : null;
     case 'download:action':
       return id(c.downloadId) && ['pause', 'resume', 'cancel', 'open', 'show', 'remove'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'settings:download-ask': return typeof c.ask === 'boolean' ? (c as UiCommand) : null;
