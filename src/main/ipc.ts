@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
@@ -26,6 +26,7 @@ const decision = (v: unknown) => v === 'allow' || v === 'deny';
 const id = (v: unknown): v is string => str(v, 64) && (v as string).length > 0;
 const groupColor = (v: unknown) => typeof v === 'string' && (GROUP_COLORS as readonly string[]).includes(v);
 const hibernate = (v: unknown) => v === undefined || (HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
+const hiddenHibernate = (v: unknown) => v === undefined || (HIDDEN_HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
 const password = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 1024;
 const url = (v: unknown): v is string => str(v, 8192) && /^(https?|apollo|file|about|data|view-source):/i.test(v as string);
 
@@ -48,10 +49,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'workspace:delete': return str(c.workspaceId, 64) ? (c as UiCommand) : null;
     case 'workspace:create':
       return str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192) && hibernate(c.hibernateAfterMin)
-        && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
+        && hiddenHibernate(c.hiddenHibernateMin) && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
     case 'workspace:update':
       return str(c.workspaceId, 64) && str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192)
-        && hibernate(c.hibernateAfterMin) ? (c as UiCommand) : null;
+        && hibernate(c.hibernateAfterMin) && hiddenHibernate(c.hiddenHibernateMin) ? (c as UiCommand) : null;
     case 'tab:move':
       return id(c.tabId) && num(c.index) && Number.isInteger(c.index)
         && (c.groupId === undefined || c.groupId === null || id(c.groupId)) ? (c as UiCommand) : null;
@@ -104,7 +105,9 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'panel:remove': return id(c.panelId) ? (c as UiCommand) : null;
     case 'panel:set':
       return id(c.panelId) && (c.width === undefined || (Number.isInteger(c.width) && (c.width as number) >= PANEL_MIN_WIDTH && (c.width as number) <= PANEL_MAX_WIDTH))
-        && (c.mobile === undefined || typeof c.mobile === 'boolean') ? (c as UiCommand) : null;
+        && (c.mobile === undefined || typeof c.mobile === 'boolean')
+        && (c.hibernateMin === undefined || (PANEL_HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(c.hibernateMin)) ? (c as UiCommand) : null;
+    case 'panel:hibernate': return id(c.panelId) ? (c as UiCommand) : null;
     case 'panel:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;
     case 'panel:menu': return id(c.panelId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'module:set': return MODULES.some((m) => m.id === c.moduleId) && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;

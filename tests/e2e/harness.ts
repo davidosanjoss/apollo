@@ -163,6 +163,11 @@ export class Cdp {
       this.pending.get(msg.id)?.(msg);
       this.pending.delete(msg.id);
     };
+    // Conexão caiu (app fechou/travou): falha as chamadas pendentes em vez de esperar para sempre.
+    ws.onclose = () => {
+      for (const resolve of this.pending.values()) resolve({ error: 'conexão de depuração fechada' });
+      this.pending.clear();
+    };
   }
 
   static async connect(url: string): Promise<Cdp> {

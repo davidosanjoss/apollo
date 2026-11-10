@@ -376,3 +376,45 @@ describe('fase 5c: personalizações', () => {
     expect(store.listCustomizations().map((x) => x.id)).toEqual(['c2']);
   });
 });
+
+describe('v7: hibernação do workspace fora da tela e de painéis', () => {
+  it('padrão 10 min; null = mesma regra; atualizar sem informar mantém', () => {
+    ws('a');
+    expect(store.getWorkspace('a')!.hiddenHibernateMin).toBe(10);
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hiddenHibernateMin: null });
+    expect(store.getWorkspace('a')!.hiddenHibernateMin).toBeNull();
+    store.updateWorkspace('a', { name: 'A', color: '#000000', home: '', hiddenHibernateMin: -1 });
+    store.updateWorkspace('a', { name: 'A2', color: '#000000', home: '' });
+    expect(store.getWorkspace('a')).toMatchObject({ name: 'A2', hiddenHibernateMin: -1 });
+  });
+
+  it('painel: sempre ativo por padrão; regra salva', () => {
+    ws('a');
+    store.createPanel({ id: 'p', workspaceId: 'a', url: 'https://x.com', mobile: false });
+    expect(store.getPanel('p')!.hibernateMin).toBeNull();
+    store.updatePanel('p', { hibernateMin: 0 });
+    expect(store.getPanel('p')!.hibernateMin).toBe(0);
+    store.updatePanel('p', { title: 'X' });
+    expect(store.getPanel('p')).toMatchObject({ title: 'X', hibernateMin: 0 });
+  });
+});
+
+describe('atualizações parciais', () => {
+  // Regressão: { ...atual, ...patch } com campos undefined sobrescrevia os salvos —
+  // arrastar a largura do painel desligava a "versão para celular" (e o SQLite
+  // recusava gravar undefined, travando o app).
+  it('updatePanel ignora campos undefined', () => {
+    ws('a');
+    store.createPanel({ id: 'p', workspaceId: 'a', url: 'https://x.com', mobile: true });
+    store.updatePanel('p', { hibernateMin: 30 });
+    store.updatePanel('p', { width: 500, mobile: undefined, hibernateMin: undefined });
+    expect(store.getPanel('p')).toMatchObject({ width: 500, mobile: true, hibernateMin: 30 });
+  });
+
+  it('updateGroup ignora campos undefined', () => {
+    ws('a');
+    store.createGroup({ id: 'g', workspaceId: 'a', name: 'Faculdade', color: '#4c8bf5' });
+    store.updateGroup('g', { collapsed: true, name: undefined });
+    expect(store.getGroup('g')).toMatchObject({ name: 'Faculdade', color: '#4c8bf5', collapsed: true });
+  });
+});

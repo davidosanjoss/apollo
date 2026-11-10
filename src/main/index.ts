@@ -13,6 +13,7 @@ import { DEFAULT_TOGGLES } from './privacy/rules';
 import { loadEngines, scheduleFilterUpdates } from './privacy/filters';
 import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
+import type { UiCommand } from '../shared/types';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { setupUpdater } from './updater';
 import { runDiagnose } from './diagnose';
@@ -57,6 +58,11 @@ if (process.platform === 'linux') {
 // tratam UA de Electron como navegador desconhecido/inseguro.
 const cleanUA = app.userAgentFallback.replace(/\sElectron\/\S+/i, '').replace(/\sapollo\/\S+/i, '');
 app.userAgentFallback = cleanUA;
+
+// Erro não tratado no processo principal: o Electron abriria uma caixa de diálogo que
+// trava o navegador inteiro. Registra e segue (um módulo com bug não derruba tudo).
+process.on('uncaughtException', (err) => console.error('[apollo] erro não tratado:', err));
+process.on('unhandledRejection', (err) => console.error('[apollo] promessa rejeitada sem tratamento:', err));
 
 registerApolloScheme();
 
@@ -269,6 +275,15 @@ app.whenReady().then(async () => {
     if (!isTrustedSender(event, win.webContents)) return;
     const cmd = parseCommand(raw);
     if (!cmd) return console.warn('[apollo] comando inválido da UI ignorado');
+    try {
+      runCommand(cmd);
+    } catch (err) {
+      // Um comando com bug nunca derruba o navegador (nem os dados no log: só o tipo).
+      console.error(`[apollo] comando "${cmd.type}" falhou:`, err);
+    }
+  });
+
+  const runCommand = (cmd: UiCommand): void => {
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
     if (cmd.type === 'settings:dns') {
@@ -287,7 +302,7 @@ app.whenReady().then(async () => {
       case 'vault:lock-after': return vault.setLockAfter(cmd.minutes);
     }
     browser.handleCommand(cmd);
-  });
+  };
 
   app.on('second-instance', () => {
     if (win.isMinimized()) win.restore();

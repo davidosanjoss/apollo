@@ -2,7 +2,7 @@ import path from 'node:path';
 import { app, BrowserWindow, clipboard, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
-import { pickTabsToHibernate, type HibernationCandidate } from './hibernation';
+import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
@@ -49,7 +49,7 @@ import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
 import type { MemoryReport, ModuleId, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS, PANEL_DEFAULT_WIDTH } from '../shared/types';
+import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -433,6 +433,15 @@ export class Browser {
     this.destroyView(tabId, true);
   }
 
+  private hibernationSoon: NodeJS.Timeout | null = null;
+
+  /** Ao sair de uma aba/workspace: roda a hibernação logo (para "ao sair" valer na hora). */
+  private scheduleHibernation(): void {
+    if (this.hibernationSoon) return;
+    this.hibernationSoon = setTimeout(() => { this.hibernationSoon = null; this.hibernationTick(); }, 1500);
+    this.hibernationSoon.unref();
+  }
+
   private memoryInfo(): { usedMb: number; otherMb: number; perTab: Map<string, number> } {
     const metrics = app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, workingSetKb: m.memory.workingSetSize }));
     const tabs = [...this.views].map(([tabId, view]) => ({
@@ -638,7 +647,11 @@ export class Browser {
   openPanel(id: string): void {
     const view = this.ensurePanelView(id);
     if (!view) return;
-    if (this.activePanelId && this.activePanelId !== id) this.hidePanelView(this.activePanelId);
+    if (this.activePanelId && this.activePanelId !== id) {
+      this.hidePanelView(this.activePanelId);
+      this.panelClosedAt.set(this.activePanelId, Date.now());
+    }
+    this.panelClosedAt.delete(id);
     if (this.activePanelId !== id) this.win.contentView.addChildView(view);
     this.activePanelId = id;
     this.layoutPanel();
@@ -647,9 +660,29 @@ export class Browser {
 
   closePanel(): void {
     if (!this.activePanelId) return;
-    this.hidePanelView(this.activePanelId); // continua vivo (mensagens seguem chegando)
+    const id = this.activePanelId;
+    this.hidePanelView(id); // continua vivo (mensagens seguem chegando), salvo regra de hibernar
     this.activePanelId = null;
+    this.panelClosedAt.set(id, Date.now());
+    if (this.store.getPanel(id)?.hibernateMin === 0) this.hibernateClosedPanels(Date.now());
     this.push();
+  }
+
+  /** Hiberna (descarrega) um painel; ele continua no trilho e recarrega ao abrir. */
+  hibernatePanel(id: string): void {
+    if (this.activePanelId === id) this.closePanel();
+    this.destroyPanelView(id);
+  }
+
+  /** Painéis fechados há mais tempo que a regra deles (nunca os que tocam áudio). */
+  private hibernateClosedPanels(now: number): void {
+    for (const p of this.store.listPanels()) {
+      const v = this.panelViews.get(p.id);
+      if (!v || p.id === this.activePanelId || p.hibernateMin === null || v.webContents.isDestroyed()) continue;
+      if (v.webContents.isCurrentlyAudible()) continue;
+      const closedAt = this.panelClosedAt.get(p.id) ?? now;
+      if (now - closedAt >= p.hibernateMin * minuteMs()) this.destroyPanelView(p.id);
+    }
   }
 
   private hidePanelView(id: string): void {
@@ -672,7 +705,7 @@ export class Browser {
     this.push();
   }
 
-  setPanel(id: string, patch: { width?: number; mobile?: boolean }): void {
+  setPanel(id: string, patch: { width?: number; mobile?: boolean; hibernateMin?: number | null }): void {
     const p = this.store.getPanel(id);
     if (!p) return;
     this.store.updatePanel(id, patch);
@@ -705,6 +738,13 @@ export class Browser {
       // Largura: arrastando a borda esquerda do painel (salva por painel).
       { label: `Voltar à largura padrão (${PANEL_DEFAULT_WIDTH} px)`, enabled: p.width !== PANEL_DEFAULT_WIDTH,
         click: this.run({ type: 'panel:set', panelId: id, width: PANEL_DEFAULT_WIDTH }) },
+      { type: 'separator' },
+      { label: 'Hibernar agora (libera a memória)', enabled: this.panelViews.has(id), click: this.run({ type: 'panel:hibernate', panelId: id }) },
+      { label: 'Hibernar quando fechado', submenu: PANEL_HIBERNATE_OPTIONS_MIN.map((m) => ({
+        label: m === null ? 'Nunca (sempre ativo — mensagens chegam)' : m === 0 ? 'Ao fechar' : m < 60 ? `Após ${m} min fechado` : `Após ${m / 60} h fechado`,
+        type: 'radio' as const, checked: p.hibernateMin === m,
+        click: this.run({ type: 'panel:set', panelId: id, hibernateMin: m }),
+      })) },
       { type: 'separator' },
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);
@@ -774,6 +814,7 @@ export class Browser {
         unloadBlocked: this.unloadBlocked.has(tabId),
         lastSeenAt: this.lastSeen.get(tabId) ?? now,
         memoryMb: perTab.get(tabId) ?? null,
+        workspaceVisible: tab.workspaceId === this.activeWorkspaceId,
       });
     }
     return out;
@@ -781,11 +822,16 @@ export class Browser {
 
   /** Uma rodada: decide e hiberna. Barata quando não há abas em segundo plano. */
   hibernationTick(now = Date.now()): string[] {
-    if (this.views.size <= 1 || !this.isModuleOn('hibernation')) return [];
+    if (!this.isModuleOn('hibernation')) return [];
+    this.hibernateClosedPanels(now);
+    if (this.views.size <= 1) return [];
     const limit = Number(this.store.getKv('memoryLimitMb')) || null;
     const { usedMb, perTab } = limit ? this.memoryInfo() : { usedMb: 0, perTab: new Map<string, number>() };
     const ids = pickTabsToHibernate(this.hibernationCandidates(perTab, now), {
-      timeoutMin: (wsId) => this.store.getWorkspace(wsId)?.hibernateAfterMin ?? 0,
+      timeoutMin: (t) => {
+        const ws = this.store.getWorkspace(t.workspaceId);
+        return ws ? effectiveTimeout(ws.hibernateAfterMin, ws.hiddenHibernateMin, t.workspaceVisible) : null;
+      },
       memoryLimitMb: limit,
       memoryUsedMb: usedMb,
     }, now, minuteMs());
@@ -801,6 +847,7 @@ export class Browser {
       if (old) this.win.contentView.removeChildView(old);
       this.lastSeen.set(this.attachedTabId, Date.now());
       this.attachedTabId = null;
+      this.scheduleHibernation();
     }
     if (tab) {
       const view = this.ensureView(tab);
@@ -1096,20 +1143,21 @@ export class Browser {
 
   switchWorkspace(workspaceId: string): void {
     if (!this.store.getWorkspace(workspaceId) || workspaceId === this.activeWorkspaceId) return;
+    this.scheduleHibernation();
     this.activeWorkspaceId = workspaceId;
     this.store.setKv('activeWorkspaceId', workspaceId);
     this.ensureHasTab(workspaceId);
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean): void {
-    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, temporary });
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null): void {
+    const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin, temporary });
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
 
-  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number): void {
-    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin });
+  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null): void {
+    this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin });
     this.push();
   }
 
@@ -1193,7 +1241,8 @@ export class Browser {
       case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
       case 'panel:toggle': this.togglePanel(cmd.panelId); break;
       case 'panel:remove': this.removePanel(cmd.panelId); break;
-      case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile }); break;
+      case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile, hibernateMin: cmd.hibernateMin }); break;
+      case 'panel:hibernate': this.hibernatePanel(cmd.panelId); break;
       case 'panel:bounds': this.panelBounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layoutPanel(); break;
       case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
@@ -1226,8 +1275,8 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary); break;
-      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin); break;
+      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
       case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
@@ -1252,6 +1301,8 @@ export class Browser {
   // Painéis laterais
   private readonly panelViews = new Map<string, WebContentsView>();
   private activePanelId: string | null = null;
+  /** Quando cada painel foi fechado (para hibernar depois de N min fechado). */
+  private readonly panelClosedAt = new Map<string, number>();
   private panelBounds = { x: 0, y: 0, width: 0, height: 0 };
   private vaultProvider: VaultProvider | null = null;
   private clipboardTimer: NodeJS.Timeout | null = null;
@@ -1477,7 +1528,8 @@ export class Browser {
     return {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
-        return { id, name, color, home, hibernateAfterMin, privacy: nullable(w), temporary: this.store.getWorkspace(id)!.temporary };
+        const full = this.store.getWorkspace(id)!;
+        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary };
       }),
       activeWorkspaceId: ws.id,
       tabs,

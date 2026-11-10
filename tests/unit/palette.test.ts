@@ -91,7 +91,7 @@ describe('buildItems', () => {
   });
 
   it('painéis: abrir/fechar pela paleta', () => {
-    const panels = [{ id: 'p1', workspaceId: 'w2', url: 'https://web.whatsapp.com/', title: 'WhatsApp', favicon: null, width: 420, mobile: false, loaded: false }];
+    const panels = [{ id: 'p1', workspaceId: 'w2', url: 'https://web.whatsapp.com/', title: 'WhatsApp', favicon: null, width: 420, mobile: false, loaded: false, hibernateMin: null }];
     const items = buildItems({ state: state({ panels, activePanelId: null }), query: 'whats', openUrl: null });
     expect(items[0]).toMatchObject({ title: 'Painel: WhatsApp', detail: 'Trabalho', action: { kind: 'command', command: { type: 'panel:toggle', panelId: 'p1' } } });
     expect(buildItems({ state: state({ panels, activePanelId: 'p1' }), query: 'whats', openUrl: null })[0].title).toBe('Fechar o painel: WhatsApp');

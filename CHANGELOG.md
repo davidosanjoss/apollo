@@ -4,6 +4,15 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
+- Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Painéis laterais: "Hibernar agora" e "Hibernar quando fechado" (nunca — padrão, para mensageiros —, ao fechar, ou após 30 min/2 h/8 h). Painel tocando áudio nunca hiberna; hibernado aparece esmaecido no trilho.
+
+### Corrigido
+- Mudar a largura de um painel desligava a "versão para celular" dele.
+- Um erro inesperado no processo principal podia travar o navegador inteiro (agora é só registrado no log).
+
 ## [0.6.0] - 2026-11-10
 
 ### Adicionado

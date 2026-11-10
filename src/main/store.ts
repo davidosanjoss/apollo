@@ -13,6 +13,7 @@ export interface Workspace {
   color: string;
   home: string;
   hibernateAfterMin: number;
+  hiddenHibernateMin: number | null;
   /** Sessão só em memória; o workspace some ao fechar o Apollo. */
   temporary: boolean;
   activeTabId: string | null;
@@ -51,6 +52,7 @@ const toWorkspace = (r: Row): Workspace => ({
   color: r.color as string,
   home: r.home as string,
   hibernateAfterMin: (r.hibernate_after_min as number | undefined) ?? 30,
+  hiddenHibernateMin: r.hidden_hibernate_min === undefined ? 10 : (r.hidden_hibernate_min as number | null),
   temporary: r.temporary === 1,
   activeTabId: (r.active_tab_id as string | null) ?? null,
 });
@@ -84,6 +86,7 @@ export interface Panel {
   favicon: string | null;
   width: number;
   mobile: boolean;
+  hibernateMin: number | null;
 }
 
 const toPanel = (r: Row): Panel => ({
@@ -94,7 +97,13 @@ const toPanel = (r: Row): Panel => ({
   favicon: (r.favicon as string | null) ?? null,
   width: r.width as number,
   mobile: r.mobile === 1,
+  hibernateMin: (r.hibernate_min as number | null | undefined) ?? null,
 });
+
+/** Patch sem os campos undefined (senão { ...atual, ...patch } apagaria valores salvos). */
+function defined<T extends object>(patch: T): Partial<T> {
+  return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
 export class Store {
@@ -135,13 +144,14 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'temporary'> & { hibernateAfterMin?: number; temporary?: boolean }): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'hiddenHibernateMin' | 'temporary'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
     const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
     const temporary = ws.temporary ?? false;
-    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, temporary ? 1 : 0);
-    return { ...ws, hibernateAfterMin, temporary, activeTabId: null };
+    const hiddenHibernateMin = ws.hiddenHibernateMin === undefined ? 10 : ws.hiddenHibernateMin;
+    this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, hidden_hibernate_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, hiddenHibernateMin, temporary ? 1 : 0);
+    return { ...ws, hibernateAfterMin, hiddenHibernateMin, temporary, activeTabId: null };
   }
 
   /** Apaga os workspaces temporários (ao abrir e ao fechar). Devolve os ids apagados. */
@@ -151,9 +161,13 @@ export class Store {
     return ids;
   }
 
-  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number }): void {
+  updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null }): void {
     this.db.prepare('UPDATE workspaces SET name = ?, color = ?, home = ?, hibernate_after_min = COALESCE(?, hibernate_after_min) WHERE id = ?')
       .run(patch.name, patch.color, patch.home, patch.hibernateAfterMin ?? null, id);
+    // null é um valor válido ("mesma regra"): só não mexe quando ausente.
+    if (patch.hiddenHibernateMin !== undefined) {
+      this.db.prepare('UPDATE workspaces SET hidden_hibernate_min = ? WHERE id = ?').run(patch.hiddenHibernateMin, id);
+    }
   }
 
   deleteWorkspace(id: string): void {
@@ -253,7 +267,7 @@ export class Store {
   updateGroup(id: string, patch: Partial<Pick<TabGroup, 'name' | 'color' | 'collapsed'>>): void {
     const g = this.getGroup(id);
     if (!g) return;
-    const next = { ...g, ...patch };
+    const next = { ...g, ...defined(patch) };
     this.db.prepare('UPDATE tab_groups SET name = ?, color = ?, collapsed = ? WHERE id = ?')
       .run(next.name, next.color, next.collapsed ? 1 : 0, id);
   }
@@ -347,12 +361,12 @@ export class Store {
     return this.getPanel(p.id)!;
   }
 
-  updatePanel(id: string, patch: Partial<Pick<Panel, 'url' | 'title' | 'favicon' | 'width' | 'mobile'>>): void {
+  updatePanel(id: string, patch: Partial<Pick<Panel, 'url' | 'title' | 'favicon' | 'width' | 'mobile' | 'hibernateMin'>>): void {
     const cur = this.getPanel(id);
     if (!cur) return;
-    const n = { ...cur, ...patch };
-    this.db.prepare('UPDATE panels SET url = ?, title = ?, favicon = ?, width = ?, mobile = ? WHERE id = ?')
-      .run(n.url, n.title, n.favicon, n.width, n.mobile ? 1 : 0, id);
+    const n = { ...cur, ...defined(patch) };
+    this.db.prepare('UPDATE panels SET url = ?, title = ?, favicon = ?, width = ?, mobile = ?, hibernate_min = ? WHERE id = ?')
+      .run(n.url, n.title, n.favicon, n.width, n.mobile ? 1 : 0, n.hibernateMin, id);
   }
 
   deletePanel(id: string): void {

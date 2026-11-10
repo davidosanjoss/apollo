@@ -104,6 +104,13 @@ const MIGRATIONS: string[] = [
     position INTEGER NOT NULL
   );
   `,
+
+  /* v7: hibernação mais agressiva (workspace fora da tela) e hibernação de painéis */ `
+  -- Abas de um workspace que não está na tela: NULL = mesma regra, -1 = ao sair, N min.
+  ALTER TABLE workspaces ADD COLUMN hidden_hibernate_min INTEGER DEFAULT 10;
+  -- Painel fechado: NULL = sempre ativo (mensageiros), 0 = ao fechar, N min fechado.
+  ALTER TABLE panels ADD COLUMN hibernate_min INTEGER;
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

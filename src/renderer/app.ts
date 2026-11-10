@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -354,8 +354,11 @@ window.addEventListener('resize', sendBounds);
 const dialog = $<HTMLDialogElement>('#ws-dialog');
 let editing: WorkspaceInfo | null = null;
 
-const hibernateLabel = (m: number) => (m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
+const hibernateLabel = (m: number) => (m === -1 ? 'Ao sair da aba' : m === 0 ? 'Nunca' : m < 60 ? `${m} minutos` : m === 60 ? '1 hora' : `${m / 60} horas`);
 $('#ws-hibernate').replaceChildren(...HIBERNATE_OPTIONS_MIN.map((m) => el('option', { value: String(m), textContent: hibernateLabel(m) })));
+const hiddenLabel = (m: number | null) => (m === null ? 'Mesma regra de cima' : m === -1 ? 'Ao sair do workspace' : `Após ${hibernateLabel(m)}`);
+$('#ws-hidden-hibernate').replaceChildren(...HIDDEN_HIBERNATE_OPTIONS_MIN.map((m) =>
+  el('option', { value: m === null ? '' : String(m), textContent: hiddenLabel(m) })));
 
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
@@ -364,6 +367,8 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
+  const hidden = ws ? ws.hiddenHibernateMin : 10;
+  $<HTMLSelectElement>('#ws-hidden-hibernate').value = hidden === null ? '' : String(hidden);
   // Temporário só se escolhe ao criar.
   $('#ws-temporary-row').hidden = Boolean(ws);
   $<HTMLInputElement>('#ws-temporary').checked = false;
@@ -385,9 +390,11 @@ $('#ws-form').addEventListener('submit', () => {
   const color = $<HTMLInputElement>('#ws-color').value;
   const home = normalizeUrl($<HTMLInputElement>('#ws-home').value) ?? '';
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
+  const hiddenRaw = $<HTMLSelectElement>('#ws-hidden-hibernate').value;
+  const hiddenHibernateMin = hiddenRaw === '' ? null : Number(hiddenRaw);
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -573,6 +580,7 @@ function renderPanels(s: UiState): void {
     return b;
   }, (b, p) => {
     b.classList.toggle('active', p.id === s.activePanelId);
+    b.classList.toggle('sleeping', !p.loaded);
     b.title = `${p.title || p.url}\nLogins do workspace ${wsName.get(p.workspaceId) ?? ''}\nBotão direito: opções`;
     const letter = (p.title || new URL(p.url).hostname.replace(/^www\./, '')).charAt(0).toUpperCase();
     const img = b.querySelector('img');

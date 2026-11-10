@@ -6,8 +6,10 @@ export interface WorkspaceInfo {
   name: string;
   color: string;
   home: string;
-  /** Minutos sem uso para hibernar abas (0 = nunca). */
+  /** Minutos sem uso para hibernar abas (0 = nunca, -1 = ao sair da aba). */
   hibernateAfterMin: number;
+  /** Quando o workspace não está na tela (null = mesma regra, -1 = ao sair dele). */
+  hiddenHibernateMin: number | null;
   /** Padrões do workspace (null = segue o global). */
   privacy: Record<PrivacyFeature, boolean | null>;
   /** Sessão só em memória; some ao fechar o Apollo. */
@@ -15,7 +17,12 @@ export interface WorkspaceInfo {
 }
 
 /** Opções de "hibernar abas inativas após" (minutos; 0 = nunca). */
-export const HIBERNATE_OPTIONS_MIN = [0, 5, 15, 30, 60, 120, 240] as const;
+/** Hibernar abas paradas após (min): 0 = nunca, -1 = ao sair da aba. */
+export const HIBERNATE_OPTIONS_MIN = [-1, 0, 5, 15, 30, 60, 120, 240] as const;
+/** Workspace fora da tela (min): null = mesma regra, -1 = ao sair do workspace. */
+export const HIDDEN_HIBERNATE_OPTIONS_MIN = [null, -1, 5, 10, 30, 60] as const;
+/** Painel fechado (min): null = sempre ativo, 0 = ao fechar. */
+export const PANEL_HIBERNATE_OPTIONS_MIN = [null, 0, 30, 120, 480] as const;
 
 export interface TabInfo {
   id: string;
@@ -186,6 +193,8 @@ export interface PanelInfo {
   mobile: boolean;
   /** Já carregado (continua vivo mesmo fechado, para mensagens chegarem). */
   loaded: boolean;
+  /** Hibernar quando fechado: null = sempre ativo, 0 = ao fechar, N min. */
+  hibernateMin: number | null;
 }
 
 export type ModuleId = 'gpc' | 'cosmetics' | 'vaultSave' | 'hibernation' | 'customizations';
@@ -257,7 +266,8 @@ export type UiCommand =
   | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
   | { type: 'panel:toggle'; panelId: string }
   | { type: 'panel:remove'; panelId: string }
-  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean }
+  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean; hibernateMin?: number | null }
+  | { type: 'panel:hibernate'; panelId: string }
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
@@ -284,8 +294,8 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; temporary?: boolean }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }

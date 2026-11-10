@@ -147,3 +147,68 @@ describe('hibernação automática', () => {
     await app.until((x) => byTitle(x, 'Velha').dormant, 'Velha hibernou depois do tempo', 5000);
   });
 });
+
+describe('ao sair e workspace fora da tela', () => {
+  let app: Apollo;
+  let profile: ReturnType<typeof tempProfile>;
+  beforeAll(async () => {
+    profile = tempProfile();
+    app = await Apollo.launch(profile.dir, { APOLLO_TEST_MINUTE_MS: '200', APOLLO_TEST_HIBERNATION_TICK_MS: '60000' });
+  });
+  afterAll(async () => { await app?.quit(); profile?.cleanup(); });
+
+  const ws = async () => { const s = await app.state(); return s.workspaces.find((w) => w.id === s.activeWorkspaceId)!; };
+
+  it('"Ao sair da aba": a aba hiberna logo depois de você trocar de aba', async () => {
+    const w = await ws();
+    expect(w.hiddenHibernateMin).toBe(10); // padrão
+    await app.send({ type: 'workspace:update', workspaceId: w.id, name: w.name, color: w.color, home: '', hibernateAfterMin: -1 });
+    await open(app, '/page?title=Primeira', 'Primeira', false);
+    await open(app, '/page?title=Segunda', 'Segunda');
+    // A verificação periódica está desligada (60 s): quem hiberna é a rodada agendada ao sair.
+    await app.until((x) => byTitle(x, 'Primeira').dormant, 'Primeira hibernou ao sair', 5000);
+    expect(byTitle(await app.state(), 'Segunda').dormant).toBe(false);
+  });
+
+  it('workspace fora da tela usa a regra mais curta ("ao sair do workspace")', async () => {
+    const principal = await ws();
+    await app.send({ type: 'workspace:update', workspaceId: principal.id, name: principal.name, color: principal.color, home: '', hibernateAfterMin: 0, hiddenHibernateMin: -1 });
+    await open(app, '/page?title=Fica', 'Fica');
+    await app.send({ type: 'workspace:create', name: 'Outro', color: '#123456', home: '' });
+    await app.until((x) => x.activeWorkspaceId !== principal.id, 'no outro workspace');
+    await app.send({ type: 'workspace:switch', workspaceId: principal.id });
+    const s = await app.until((x) => x.activeWorkspaceId === principal.id, 'de volta');
+    // "Fica" ficou na tela do Principal: ao voltar ela acorda; a regra só vale fora da tela.
+    expect(byTitle(s, 'Fica')).toBeDefined();
+  });
+});
+
+describe('painéis: hibernar', () => {
+  let app: Apollo;
+  let profile: ReturnType<typeof tempProfile>;
+  beforeAll(async () => { profile = tempProfile(); app = await Apollo.launch(profile.dir); });
+  afterAll(async () => { await app?.quit(); profile?.cleanup(); });
+
+  const panelTarget = async (title: string) => (await app.targets()).some((t) => t.type === 'page' && t.url.endsWith(`title=${title}`));
+
+  it('"Hibernar agora" descarrega o painel; abrir recarrega', async () => {
+    const s0 = await app.state();
+    await app.send({ type: 'panel:add', url: `${site.url}/page?title=PainelA`, workspaceId: s0.activeWorkspaceId, mobile: false });
+    const s = await app.until((x) => x.panels.length === 1 && x.panels[0].loaded, 'painel carregado');
+    expect(s.panels[0].hibernateMin).toBeNull(); // padrão: sempre ativo
+    await waitFor(() => panelTarget('PainelA'), 'site do painel');
+    await app.send({ type: 'panel:hibernate', panelId: s.panels[0].id });
+    await app.until((x) => !x.panels[0].loaded && x.activePanelId === null, 'hibernado');
+    await waitFor(async () => !(await panelTarget('PainelA')), 'site descarregado');
+    await app.send({ type: 'panel:toggle', panelId: s.panels[0].id });
+    await app.until((x) => x.panels[0].loaded, 'recarregado');
+    await waitFor(() => panelTarget('PainelA'), 'site de volta');
+  });
+
+  it('"Ao fechar": fechar o painel já libera a memória', async () => {
+    const p = (await app.state()).panels[0];
+    await app.send({ type: 'panel:set', panelId: p.id, hibernateMin: 0 });
+    await app.send({ type: 'panel:toggle', panelId: p.id });
+    await app.until((x) => x.activePanelId === null && !x.panels[0].loaded, 'fechou e hibernou');
+  });
+});
