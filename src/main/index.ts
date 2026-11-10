@@ -1,4 +1,4 @@
-import { app, BrowserWindow, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db';
@@ -219,6 +219,8 @@ app.whenReady().then(async () => {
   }
   const box = await systemSecretBox();
   const { win, browser } = createWindow(store, box);
+  // Só nos testes de integração (com o inspetor do Node ligado pelo harness).
+  if (process.env.APOLLO_TEST_HOOKS) Object.assign(globalThis, { __apolloTest: { browser, clipboard: () => clipboard.readText() } });
 
   // Bitwarden: requisições pela rede do Chromium (respeita o DNS seguro/Zero Trust).
   const vault = new VaultService(

@@ -51,6 +51,7 @@ import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTa
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
+import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
@@ -329,7 +330,11 @@ export class Browser {
     wc.on('page-title-updated', (_e, title) => update({ title }));
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
-      if (!url.startsWith('apollo://error')) update({ url });
+      // Código-fonte: o evento traz a URL de dentro; a aba guarda "view-source:…" (senão,
+      // ao restaurar ou acordar da hibernação, abriria a página em vez do código).
+      const shown = wc.getURL();
+      if (shown.startsWith('view-source:')) update({ url: shown, title: shown });
+      else if (!url.startsWith('apollo://error')) update({ url });
 
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
@@ -367,6 +372,7 @@ export class Browser {
       event.preventDefault();
       this.runShortcut(action);
     });
+    wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, workspaceId, tabId));
 
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // "Abrir em nova aba" → aba no mesmo workspace.
@@ -812,6 +818,7 @@ export class Browser {
       event.preventDefault();
       this.runShortcut(action);
     });
+    wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, p.workspaceId, null));
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // Link "nova aba" do painel: abre como aba no workspace do painel.
       if (disposition === 'foreground-tab' || disposition === 'background-tab' || disposition === 'new-window') {
@@ -1287,6 +1294,60 @@ export class Browser {
 
   private popup(items: MenuItemConstructorOptions[], x: number, y: number): void {
     Menu.buildFromTemplate(items).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
+  }
+
+  // ------------------------------------------------------------ menu de contexto das páginas
+
+  /** Último menu montado (para testes: os itens e quem clicou). */
+  lastPageMenu: { items: ContextItem[]; run: (label: string) => boolean } | null = null;
+
+  private showPageMenu(wc: Electron.WebContents, params: Electron.ContextMenuParams, workspaceId: string, tabId: string | null): void {
+    const items = buildContextMenu(params as unknown as ContextInfo, {
+      canGoBack: wc.navigationHistory.canGoBack(),
+      canGoForward: wc.navigationHistory.canGoForward(),
+      vaultUnlocked: this.vaultInfo.status === 'unlocked' && tabId !== null,
+    });
+    const act = (a: ContextAction) => this.runPageAction(wc, params, workspaceId, tabId, a);
+    this.lastPageMenu = {
+      items,
+      run: (label) => {
+        const it = items.find((x) => x.type === 'item' && x.label === label);
+        if (!it || it.type !== 'item' || it.enabled === false) return false;
+        act(it.action);
+        return true;
+      },
+    };
+    if (process.env.APOLLO_TEST_HOOKS) return; // testes: o menu nativo bloquearia a automação
+    Menu.buildFromTemplate(items.map((it) => it.type === 'separator'
+      ? { type: 'separator' as const }
+      : { label: it.label, enabled: it.enabled !== false, click: () => act(it.action) })).popup({ window: this.win });
+  }
+
+  private runPageAction(wc: Electron.WebContents, params: Electron.ContextMenuParams, workspaceId: string,
+    tabId: string | null, a: ContextAction): void {
+    if (wc.isDestroyed()) return;
+    const newTab = (url: string, activate: boolean) => {
+      if (!this.store.getWorkspace(workspaceId)) return;
+      this.createTab(workspaceId, url, { activate, afterTabId: tabId });
+    };
+    switch (a.kind) {
+      case 'open-link': newTab(a.url, !a.background); break;
+      case 'search': newTab(a.url, true); break;
+      case 'copy-text': clipboard.writeText(a.text); break;
+      case 'copy-image': wc.copyImageAt(params.x, params.y); break;
+      case 'save-url': wc.downloadURL(a.url); break;
+      case 'replace-misspelling': wc.replaceMisspelling(a.word); break;
+      case 'add-to-dictionary': wc.session.addWordToSpellCheckerDictionary(a.word); break;
+      case 'edit': wc[a.op](); break;
+      case 'nav':
+        if (a.op === 'reload') wc.reload();
+        else if (a.op === 'back' && wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
+        else if (a.op === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
+        break;
+      case 'view-source': newTab(`view-source:${wc.getURL()}`, true); break;
+      case 'inspect': wc.inspectElement(params.x, params.y); break;
+      case 'vault': if (a.op === 'autofill') this.autofill(); else this.generate(true); break;
+    }
   }
 
   private run(cmd: UiCommand): () => void {
