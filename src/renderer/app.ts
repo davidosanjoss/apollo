@@ -7,7 +7,7 @@ import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
-import { buildItems, type PaletteItem } from './palette';
+import { buildItems, readableUrl, type PaletteItem } from './palette';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -77,6 +77,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderBookmarks(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
@@ -271,6 +272,107 @@ $('#home-search').addEventListener('submit', (e) => {
   q.value = '';
   send({ type: 'tab:navigate', url });
 });
+
+// ------------------------------------------------------------ favoritos
+
+const bookmarkDialog = $<HTMLDialogElement>('#bookmark-dialog');
+let editingBookmark: string | null = null;
+/** Esperando o favorito recém-criado aparecer no estado para abrir o diálogo. */
+let bookmarkPending = false;
+
+function openBookmarkDialog(id: string): void {
+  const b = state?.bookmarks.find((x) => x.id === id);
+  if (!b) return;
+  editingBookmark = id;
+  $<HTMLInputElement>('#bookmark-title').value = b.title;
+  $<HTMLInputElement>('#bookmark-url').value = b.url;
+  if (!bookmarkDialog.open) bookmarkDialog.showModal();
+  $<HTMLInputElement>('#bookmark-title').select();
+}
+
+/** Estrela / Ctrl+K: marca a página (se ainda não for) e abre o diálogo para editar. */
+function bookmarkCurrent(): void {
+  if (state?.activeBookmarkId) { openBookmarkDialog(state.activeBookmarkId); return; }
+  bookmarkPending = true;
+  send({ type: 'bookmark:add' });
+}
+
+$('#bookmark-btn').onclick = bookmarkCurrent;
+$('#bookmark-cancel').onclick = () => bookmarkDialog.close();
+$('#bookmark-remove').onclick = () => {
+  if (editingBookmark) send({ type: 'bookmark:remove', bookmarkId: editingBookmark });
+  bookmarkDialog.close();
+};
+$('#bookmark-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const url = normalizeUrl($<HTMLInputElement>('#bookmark-url').value);
+  if (!editingBookmark || !url) return;
+  send({ type: 'bookmark:update', bookmarkId: editingBookmark, title: $<HTMLInputElement>('#bookmark-title').value, url });
+  bookmarkDialog.close();
+});
+bookmarkDialog.addEventListener('close', () => { editingBookmark = null; });
+
+let homeBookmarksKey = '';
+let draggingBookmark: string | null = null;
+
+function renderBookmarks(s: UiState): void {
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const btn = $<HTMLButtonElement>('#bookmark-btn');
+  btn.hidden = !tab || isHomeUrl(tab.url) || !/^(https?|file):/i.test(tab.url);
+  btn.textContent = s.activeBookmarkId ? '★' : '☆';
+  btn.classList.toggle('on', Boolean(s.activeBookmarkId));
+  btn.title = s.activeBookmarkId ? 'Editar o favorito (Ctrl+D)' : 'Adicionar aos favoritos (Ctrl+D)';
+  if (bookmarkPending && s.activeBookmarkId) { bookmarkPending = false; openBookmarkDialog(s.activeBookmarkId); }
+
+  // Blocos da página inicial: só redesenha quando os favoritos mudam.
+  const key = JSON.stringify(s.bookmarks);
+  if (key === homeBookmarksKey) return;
+  homeBookmarksKey = key;
+  $('#home-bookmarks').replaceChildren(...s.bookmarks.map((b, i) => {
+    const li = el('li');
+    li.dataset.bookmarkId = b.id;
+    li.draggable = true;
+    const a = el('a', { href: b.url, title: `${b.title}\n${b.url}` });
+    a.draggable = false;
+    const icon = el('span', { className: 'icon' });
+    if (b.favicon) {
+      const img = el('img', { src: b.favicon, alt: '' });
+      img.onerror = () => { img.remove(); icon.textContent = initial(b); };
+      icon.append(img);
+    } else {
+      icon.textContent = initial(b);
+    }
+    a.append(icon, el('span', { className: 'name', textContent: b.title }));
+    a.onclick = (e) => { e.preventDefault(); send({ type: 'bookmark:open', bookmarkId: b.id, newTab: e.ctrlKey || e.metaKey }); };
+    a.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); send({ type: 'bookmark:open', bookmarkId: b.id, newTab: true }); } };
+    a.oncontextmenu = (e) => { e.preventDefault(); openBookmarkDialog(b.id); };
+    // Arrastar para reordenar.
+    li.ondragstart = (e) => { draggingBookmark = b.id; li.classList.add('dragging'); e.dataTransfer?.setData('text/plain', b.id); };
+    li.ondragend = () => { draggingBookmark = null; li.classList.remove('dragging'); clearDrop(); };
+    const after = (e: DragEvent) => { const r = li.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };
+    li.ondragover = (e) => {
+      if (!draggingBookmark) return;
+      e.preventDefault();
+      clearDrop();
+      li.classList.add(after(e) ? 'drop-after' : 'drop-before');
+    };
+    li.ondrop = (e) => {
+      e.preventDefault();
+      const from = s.bookmarks.findIndex((x) => x.id === draggingBookmark);
+      const target = after(e) ? i + 1 : i; // posição na lista atual
+      if (draggingBookmark && from >= 0) {
+        const index = from < target ? target - 1 : target; // posição final, sem o arrastado
+        if (index !== from) send({ type: 'bookmark:move', bookmarkId: draggingBookmark, index });
+      }
+      clearDrop();
+    };
+    li.append(a);
+    return li;
+  }));
+}
+
+const initial = (b: { title: string; url: string }) => (b.title.trim()[0] ?? readableUrl(b.url)[0] ?? '?').toUpperCase();
+const clearDrop = () => { for (const n of document.querySelectorAll('.drop-before, .drop-after')) n.classList.remove('drop-before', 'drop-after'); };
 
 function renderPermissionPrompt(s: UiState): void {
   const bar = $('#permission-bar');
@@ -896,6 +998,7 @@ function runPalette(index: number): void {
   else if (a.action === 'settings') openSettings();
   else if (a.action === 'vault') openVault();
   else if (a.action === 'modules') openModules();
+  else if (a.action === 'bookmark') bookmarkCurrent();
   else openWorkspaceDialog();
 }
 
@@ -1026,6 +1129,8 @@ window.apollo.onEvent((event) => {
     openPalette();
   } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
+  } else if (event.type === 'edit-bookmark') {
+    openBookmarkDialog(event.bookmarkId);
   } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);
   } else if (event.type === 'focus-address') {

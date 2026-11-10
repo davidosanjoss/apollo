@@ -3,14 +3,14 @@ import type { UiCommand, UiState } from '../shared/types';
 
 export type PaletteAction =
   | { kind: 'command'; command: UiCommand }
-  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' };
+  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' | 'bookmark' };
 
 export interface PaletteItem {
   id: string;
   title: string;
   /** Texto menor (URL, workspace…). */
   detail: string;
-  group: 'Abas' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
+  group: 'Abas' | 'Favoritos' | 'Workspaces' | 'Painéis' | 'Ações' | 'Abrir';
   action: PaletteAction;
 }
 
@@ -83,6 +83,11 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
       action: cmd({ type: 'tab:reveal', tabId: t.id }),
     })));
 
+  items.push(...(s.bookmarks ?? []).map((b): PaletteItem => ({
+    id: `bm:${b.id}`, title: b.title, detail: readableUrl(b.url), group: 'Favoritos',
+    action: cmd({ type: 'bookmark:open', bookmarkId: b.id }),
+  })));
+
   items.push(...s.workspaces.filter((w) => w.id !== s.activeWorkspaceId).map((w): PaletteItem => ({
     id: `ws:${w.id}`, title: `Ir para o workspace ${w.name}`, detail: w.temporary ? 'temporário' : '', group: 'Workspaces',
     action: cmd({ type: 'workspace:switch', workspaceId: w.id }),
@@ -102,6 +107,10 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
     a('group', 'Adicionar esta aba a um novo grupo', cmd({ type: 'group:create', tabId: active.id }));
     a('close', 'Fechar esta aba', cmd({ type: 'tab:close', tabId: active.id }), 'Ctrl+W');
     a('hibernate-others', 'Hibernar as outras abas', cmd({ type: 'tab:hibernate-others', tabId: active.id }));
+  }
+  if (active && !active.url.startsWith('apollo:')) {
+    a('bookmark', s.activeBookmarkId ? 'Editar o favorito desta página' : 'Adicionar esta página aos favoritos',
+      { kind: 'ui', action: 'bookmark' }, 'Ctrl+D');
   }
   a('memory', s.memory ? 'Fechar o monitor de memória' : 'Monitor de memória', cmd({ type: 'memory:toggle', open: !s.memory }), 'Shift+Esc');
   if (s.sitePrivacy) {

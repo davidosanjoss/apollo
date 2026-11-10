@@ -105,6 +105,31 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+export interface Bookmark {
+  id: string;
+  workspaceId: string;
+  title: string;
+  url: string;
+  favicon: string | null;
+}
+
+const toBookmark = (r: Row): Bookmark => ({
+  id: r.id as string, workspaceId: r.workspace_id as string, title: r.title as string, url: r.url as string,
+  favicon: (r.favicon as string | null) ?? null,
+});
+
+/** Mesma página para fins de favorito: sem #fragmento e sem a barra final do caminho. */
+export function normalizeBookmarkUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    u.hash = '';
+    if (u.pathname.length > 1) u.pathname = u.pathname.replace(/\/+$/, '');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
 export class Store {
   constructor(private readonly db: DatabaseSync) {}
@@ -341,6 +366,52 @@ export class Store {
 
   deleteCustomization(id: string): void {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ favoritos (por workspace)
+
+  listBookmarks(workspaceId: string): Bookmark[] {
+    return (this.db.prepare('SELECT * FROM bookmarks WHERE workspace_id = ? ORDER BY position').all(workspaceId) as Row[]).map(toBookmark);
+  }
+
+  getBookmark(id: string): Bookmark | null {
+    const row = this.db.prepare('SELECT * FROM bookmarks WHERE id = ?').get(id) as Row | undefined;
+    return row ? toBookmark(row) : null;
+  }
+
+  /** Favorito da URL neste workspace (ignora só a barra final e o #fragmento). */
+  findBookmark(workspaceId: string, url: string): Bookmark | null {
+    const norm = normalizeBookmarkUrl(url);
+    return this.listBookmarks(workspaceId).find((b) => normalizeBookmarkUrl(b.url) === norm) ?? null;
+  }
+
+  addBookmark(b: Pick<Bookmark, 'id' | 'workspaceId' | 'title' | 'url' | 'favicon'>): Bookmark {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM bookmarks WHERE workspace_id = ?')
+      .get(b.workspaceId) as { next: number };
+    this.db.prepare('INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+      .run(b.id, b.workspaceId, b.title, b.url, b.favicon, next, Date.now());
+    return this.getBookmark(b.id)!;
+  }
+
+  renameBookmark(id: string, title: string): void {
+    this.db.prepare('UPDATE bookmarks SET title = ? WHERE id = ?').run(title, id);
+  }
+
+  updateBookmark(id: string, patch: { title: string; url: string }): void {
+    this.db.prepare('UPDATE bookmarks SET title = ?, url = ? WHERE id = ?').run(patch.title, patch.url, id);
+  }
+
+  removeBookmark(id: string): void {
+    this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(id);
+  }
+
+  /** Reordena (arrastar): `index` = posição final entre os favoritos do workspace. */
+  moveBookmark(id: string, index: number): void {
+    const b = this.getBookmark(id);
+    if (!b) return;
+    const ids = this.listBookmarks(b.workspaceId).map((x) => x.id).filter((x) => x !== id);
+    ids.splice(Math.min(Math.max(0, index), ids.length), 0, id);
+    this.tx(() => ids.forEach((x, i) => this.db.prepare('UPDATE bookmarks SET position = ? WHERE id = ?').run(i, x)));
   }
 
   // ------------------------------------------------------------ painéis laterais

@@ -102,3 +102,22 @@ describe('buildItems', () => {
     expect(items.map((i) => i.title)).toEqual(expect.arrayContaining(['Bitwarden: preencher login', 'Bitwarden: bloquear o cofre']));
   });
 });
+
+describe('favoritos na paleta', () => {
+  const bookmarks = [{ id: 'b1', title: 'Moodle UFMG', url: 'https://moodle.ufmg.br/', favicon: null }];
+
+  it('favoritos do workspace abrem pelo comando bookmark:open', () => {
+    const items = buildItems({ state: state({ bookmarks, activeBookmarkId: null }), query: 'moodle', openUrl: 'https://www.google.com/search?q=moodle' });
+    expect(items[0]).toMatchObject({ group: 'Favoritos', title: 'Moodle UFMG', detail: 'moodle.ufmg.br/',
+      action: { kind: 'command', command: { type: 'bookmark:open', bookmarkId: 'b1' } } });
+  });
+
+  it('ação de marcar/editar a página atual (não na página inicial)', () => {
+    const add = buildItems({ state: state({ bookmarks: [], activeBookmarkId: null }), query: '', openUrl: null });
+    expect(add.find((i) => i.id === 'act:bookmark')?.title).toBe('Adicionar esta página aos favoritos');
+    const edit = buildItems({ state: state({ bookmarks, activeBookmarkId: 'b1' }), query: '', openUrl: null });
+    expect(edit.find((i) => i.id === 'act:bookmark')?.title).toBe('Editar o favorito desta página');
+    const home = buildItems({ state: state({ tabs: [tab('a', 'Nova aba', { url: 'apollo://home/' })], bookmarks: [], activeBookmarkId: null }), query: '', openUrl: null });
+    expect(home.find((i) => i.id === 'act:bookmark')).toBeUndefined();
+  });
+});

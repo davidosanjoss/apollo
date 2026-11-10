@@ -189,6 +189,17 @@ export interface UiState {
   customizations: CustomizationInfo[];
   /** Pedido de compartilhar tela aguardando a escolha do usuário. */
   screenPicker: ScreenPickerInfo | null;
+  /** Favoritos do workspace ativo, em ordem. */
+  bookmarks: BookmarkInfo[];
+  /** Favorito da página da aba ativa (estrela acesa), ou null. */
+  activeBookmarkId: string | null;
+}
+
+export interface BookmarkInfo {
+  id: string;
+  title: string;
+  url: string;
+  favicon: string | null;
 }
 
 export interface ScreenSource {
@@ -297,6 +308,13 @@ export type UiCommand =
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Marca a página da aba ativa como favorita (no workspace dela). */
+  | { type: 'bookmark:add' }
+  | { type: 'bookmark:update'; bookmarkId: string; title: string; url: string }
+  | { type: 'bookmark:remove'; bookmarkId: string }
+  | { type: 'bookmark:move'; bookmarkId: string; index: number }
+  /** Abrir o favorito: na aba ativa se ela estiver na página inicial, senão numa nova aba. */
+  | { type: 'bookmark:open'; bookmarkId: string; newTab?: boolean }
   /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
   | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
   /** Cria (sem id) ou edita uma personalização. */
@@ -343,7 +361,9 @@ export type UiEvent =
   /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
   | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
-  | { type: 'edit-group'; groupId: string };
+  | { type: 'edit-group'; groupId: string }
+  /** Abrir o diálogo do favorito (Ctrl+D: acabou de marcar ou já estava marcado). */
+  | { type: 'edit-bookmark'; bookmarkId: string };
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

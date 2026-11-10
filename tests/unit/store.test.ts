@@ -418,3 +418,29 @@ describe('atualizações parciais', () => {
     expect(store.getGroup('g')).toMatchObject({ name: 'Faculdade', color: '#4c8bf5', collapsed: true });
   });
 });
+
+describe('v8: favoritos', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+
+  it('por workspace, em ordem; achar pela URL ignora #fragmento e barra final', () => {
+    store.addBookmark({ id: 'f1', workspaceId: 'a', title: 'Moodle', url: 'https://moodle.ufmg.br/', favicon: null });
+    store.addBookmark({ id: 'f2', workspaceId: 'a', title: 'Outlook', url: 'https://outlook.office.com/mail', favicon: null });
+    store.addBookmark({ id: 'f3', workspaceId: 'b', title: 'Banco', url: 'https://banco.com', favicon: null });
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['f1', 'f2']);
+    expect(store.listBookmarks('b').map((b) => b.id)).toEqual(['f3']);
+    expect(store.findBookmark('a', 'https://moodle.ufmg.br#topo')?.id).toBe('f1');
+    expect(store.findBookmark('a', 'https://outlook.office.com/mail/')?.id).toBe('f2');
+    expect(store.findBookmark('b', 'https://moodle.ufmg.br/')).toBeNull(); // outro workspace
+  });
+
+  it('renomear, reordenar, remover; somem com o workspace', () => {
+    for (const id of ['x', 'y', 'z']) store.addBookmark({ id, workspaceId: 'a', title: id, url: `https://${id}.com`, favicon: null });
+    store.renameBookmark('x', 'Xis');
+    store.moveBookmark('z', 0);
+    expect(store.listBookmarks('a').map((b) => b.title)).toEqual(['z', 'Xis', 'y']);
+    store.removeBookmark('x');
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['z', 'y']);
+    store.deleteWorkspace('a');
+    expect(store.listBookmarks('a')).toEqual([]);
+  });
+});

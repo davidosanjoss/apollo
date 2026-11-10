@@ -118,6 +118,13 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && typeof c.css === 'string' && c.css.length <= MAX_CODE && typeof c.js === 'string' && c.js.length <= MAX_CODE
         && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
+    case 'bookmark:add': return { type: c.type } as UiCommand;
+    case 'bookmark:update':
+      return id(c.bookmarkId) && str(c.title, 300) && url(c.url) ? (c as UiCommand) : null;
+    case 'bookmark:remove': return id(c.bookmarkId) ? (c as UiCommand) : null;
+    case 'bookmark:move': return id(c.bookmarkId) && num(c.index) && Number.isInteger(c.index) ? (c as UiCommand) : null;
+    case 'bookmark:open':
+      return id(c.bookmarkId) && (c.newTab === undefined || typeof c.newTab === 'boolean') ? (c as UiCommand) : null;
     case 'screen:pick':
       return id(c.requestId) && (c.sourceId === null || str(c.sourceId, 256)) && typeof c.audio === 'boolean' ? (c as UiCommand) : null;
     case 'vault:save-answer':

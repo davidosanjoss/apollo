@@ -111,6 +111,19 @@ const MIGRATIONS: string[] = [
   -- Painel fechado: NULL = sempre ativo (mensageiros), 0 = ao fechar, N min fechado.
   ALTER TABLE panels ADD COLUMN hibernate_min INTEGER;
   `,
+
+  /* v8: favoritos (por workspace) */ `
+  CREATE TABLE bookmarks (
+    id           TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    title        TEXT NOT NULL,
+    url          TEXT NOT NULL,
+    favicon      TEXT,
+    position     INTEGER NOT NULL,
+    created_at   INTEGER NOT NULL
+  );
+  CREATE INDEX bookmarks_by_workspace ON bookmarks(workspace_id, position);
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

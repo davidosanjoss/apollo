@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
-import type { Store, Tab, Workspace } from './store';
+import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown } from './memory';
@@ -50,6 +50,7 @@ import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
+import { normalizeUrl } from '../shared/url';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
@@ -565,6 +566,37 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ favoritos (por workspace)
+
+  /** Marca a página da aba ativa; se já for favorita, devolve a existente (não duplica). */
+  private addBookmark(): Bookmark | null {
+    const tab = this.activeTab();
+    if (!tab || isHomeUrl(tab.url) || !/^(https?|file):/i.test(tab.url)) return null;
+    const existing = this.store.findBookmark(tab.workspaceId, tab.url);
+    if (existing) return existing;
+    const b = this.store.addBookmark({ id: newId(), workspaceId: tab.workspaceId, title: (tab.title || tab.url).slice(0, 300),
+      url: tab.url, favicon: tab.favicon });
+    this.push();
+    return b;
+  }
+
+  private updateBookmark(id: string, title: string, url: string): void {
+    const b = this.store.getBookmark(id);
+    if (!b) return;
+    const clean = normalizeUrl(url);
+    if (!clean) return;
+    this.store.updateBookmark(id, { title: title.trim() || clean, url: clean });
+  }
+
+  private openBookmark(id: string, newTab: boolean): void {
+    const b = this.store.getBookmark(id);
+    if (!b) return;
+    if (b.workspaceId !== this.activeWorkspaceId) this.switchWorkspace(b.workspaceId);
+    const tab = this.activeTab();
+    if (!newTab && tab && isHomeUrl(tab.url)) this.navigate(b.url);
+    else this.createTab(b.workspaceId, b.url, { activate: true });
   }
 
   // ------------------------------------------------------------ compartilhar tela (Teams, Meet…)
@@ -1372,6 +1404,11 @@ export class Browser {
       case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
       case 'autofill': this.autofill(); break;
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
+      case 'bookmark': {
+        const b = this.addBookmark();
+        if (b) { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); }
+        break;
+      }
       default: {
         const ws = this.store.listWorkspaces()[Number(action.split('-')[1]) - 1];
         if (ws) this.switchWorkspace(ws.id);
@@ -1418,6 +1455,11 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'bookmark:add': this.addBookmark(); break;
+      case 'bookmark:update': this.updateBookmark(cmd.bookmarkId, cmd.title, cmd.url); break;
+      case 'bookmark:remove': this.store.removeBookmark(cmd.bookmarkId); break;
+      case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.index); break;
+      case 'bookmark:open': this.openBookmark(cmd.bookmarkId, cmd.newTab ?? false); break;
       case 'custom:save':
         this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
         break;
@@ -1727,6 +1769,8 @@ export class Browser {
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
+      bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      activeBookmarkId: active && !isHomeUrl(active.url) ? this.store.findBookmark(ws.id, active.url)?.id ?? null : null,
     };
   }
 }

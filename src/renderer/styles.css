@@ -312,6 +312,20 @@ dialog .error[hidden] { display: none; }
 #home-q { width: 100%; padding: 12px 18px; border-radius: 24px; border: 1px solid var(--panel-2); background: var(--panel);
   color: var(--text); font: inherit; font-size: 15px; outline: none; }
 #home-q:focus { border-color: var(--accent); }
+#bookmark-btn.on { color: #f5b301; }
+#home-bookmarks { list-style: none; margin: 26px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 10px; width: min(720px, 92%); }
+#home-bookmarks li { width: 104px; }
+#home-bookmarks a { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 6px; border-radius: 10px;
+  color: var(--text); text-decoration: none; font-size: 12px; }
+#home-bookmarks a:hover { background: var(--panel); }
+#home-bookmarks .icon { width: 40px; height: 40px; border-radius: 10px; background: var(--panel-2); display: grid; place-items: center;
+  font-size: 18px; font-weight: 600; color: var(--muted); overflow: hidden; }
+#home-bookmarks .icon img { width: 24px; height: 24px; }
+#home-bookmarks .name { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#home-bookmarks li.dragging { opacity: .4; }
+#home-bookmarks li.drop-before a { box-shadow: -3px 0 0 var(--accent); }
+#home-bookmarks li.drop-after a { box-shadow: 3px 0 0 var(--accent); }
 
 /* ---------- monitor de memória ---------- */
 #memory-panel { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;
