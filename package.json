@@ -1,6 +1,6 @@
 {
   "name": "apollo",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Navegador pessoal com workspaces de sessão isolada",
   "main": "build/main.js",
   "private": true,

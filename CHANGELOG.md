@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.5.0] - 2026-11-10
+
 ### Adicionado
 - Bitwarden nativo (sem extensão): conectar com a chave de API pessoal + senha mestra (bitwarden.com, bitwarden.eu ou servidor próprio/Vaultwarden). A senha mestra nunca sai do computador; o cofre fica cifrado na memória e senhas só são decifradas na hora do uso.
 - Chave do Bitwarden na barra de endereço: mostra quantos logins servem para o site (regras de correspondência do Bitwarden) e abre um menu para preencher, copiar usuário/senha ou o código de verificação (TOTP). Ctrl+Shift+L preenche o primeiro login. Senha copiada é apagada da área de transferência em 30 s.
