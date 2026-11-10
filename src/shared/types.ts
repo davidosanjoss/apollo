@@ -83,6 +83,15 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface SyncInfo {
+  status: 'off' | 'connecting' | 'syncing' | 'ok' | 'error';
+  provider: 'google' | 'onedrive' | null;
+  lastSync: number | null;
+  error: string | null;
+  /** Há chaveiro do sistema: a conexão fica lembrada entre reinícios. */
+  remembered: boolean;
+}
+
 export interface UpdateNotice {
   /** available = versão nova; whats-new = acabou de atualizar (mostra uma vez). */
   kind: 'available' | 'whats-new';
@@ -186,6 +195,7 @@ export interface SettingsInfo {
   downloadKeepDays: number;
   /** Vídeo flutuante automático ao trocar de aba com um vídeo tocando. */
   autoPip: boolean;
+  sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
@@ -393,6 +403,11 @@ export type UiCommand =
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
   /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
   | { type: 'view:fullscreen' }
+  /** Sincronização: conectar (login no navegador do sistema), agora, cancelar, desconectar. */
+  | { type: 'sync:connect'; provider: 'google' | 'onedrive'; clientId: string; clientSecret: string | null; passphrase: string }
+  | { type: 'sync:now' }
+  | { type: 'sync:cancel' }
+  | { type: 'sync:disconnect' }
   /** Tela dividida: a aba ativa + `tabId` lado a lado. */
   | { type: 'split:open'; tabId: string }
   | { type: 'split:close' }

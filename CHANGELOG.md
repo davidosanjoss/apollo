@@ -5,6 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
+- Sincronização entre computadores pelo Google Drive ou OneDrive (Configurações → Sincronização): workspaces, favoritos com pastas, painéis, personalizações e preferências. Tudo é cifrado no computador com uma senha de sincronização sua antes de ir para a nuvem, numa pasta do aplicativo (o Apollo não vê seus arquivos). Abas, histórico, cookies, logins e senhas não sincronizam. Precisa de um ID de aplicativo do Google/Microsoft: passo a passo em docs/SYNC.md.
 - Tela dividida: duas abas lado a lado (botão direito na aba → "Dividir a tela com a aba atual", ou Ctrl+K). Clique numa metade para ela virar a ativa (faixa colorida no topo; barra de endereço, Ctrl+F e zoom seguem a ativa); arraste a divisória para ajustar (duplo clique: meio a meio); trocar os lados ou sair pelo mesmo menu. Lembrada por workspace, inclusive depois de reiniciar; fechar uma das abas desfaz.
 - Modo leitura (F9, botão na barra de endereço quando a página parece um artigo, ou Ctrl+K): só o texto e as imagens do artigo, sem menus, anúncios nem scripts da página; tamanho do texto, fonte (com/sem serifa) e tema (claro, sépia, escuro) salvos. Sair recarrega a página original.
 - Vídeo flutuante (picture-in-picture): botão na barra de endereço quando a página tem vídeo, "Vídeo flutuante" no botão direito do vídeo (inclusive YouTube/streaming) e no Ctrl+K. Configurações → Vídeo: flutuar automaticamente ao trocar de aba. A aba com vídeo flutuando não hiberna.

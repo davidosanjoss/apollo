@@ -58,6 +58,8 @@ import { parseReaderStyle, type ReaderStyle } from '../reader/template';
 import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
 import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
+import type { SyncService } from './sync/service';
+import type { ApplyHooks } from './sync/local';
 import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
@@ -123,7 +125,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -2326,13 +2328,32 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'sync'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
 
   /** Verificação de versões (index liga depois de criar o Browser). */
   updateCheck: UpdateCheck | null = null;
+  /** Sincronização entre computadores (index liga depois de criar o Browser). */
+  syncService: SyncService | null = null;
+
+  /** O que a sincronização precisa fazer no navegador (não só no banco). */
+  syncHooks(): ApplyHooks {
+    return {
+      deleteWorkspace: (id) => { void this.deleteWorkspace(id); },
+      removePanel: (id) => this.removePanel(id),
+      reloadPanel: (id) => {
+        const open = this.activePanelId === id;
+        this.destroyPanelView(id);
+        if (open) this.openPanel(id);
+      },
+      done: (prefs) => {
+        if (prefs.includes('spellcheck')) this.setSpellcheck(parseSpellcheck(this.store.getKv('spellcheck')));
+        this.push();
+      },
+    };
+  }
 
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
@@ -2411,6 +2432,7 @@ export class Browser {
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
         spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(),
+        sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,

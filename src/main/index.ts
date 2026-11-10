@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { openDatabase } from './db';
@@ -17,6 +17,7 @@ import type { UiCommand } from '../shared/types';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
+import { SyncService } from './sync/service';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
@@ -304,6 +305,20 @@ app.whenReady().then(async () => {
   });
   browser.updateCheck = updateCheck;
   updateCheck.start();
+  // Sincronização (Google Drive / OneDrive), cifrada com a senha do usuário.
+  const sync = new SyncService({
+    store,
+    box,
+    fetch: (url, init) => net.fetch(url, init),
+    // Testes: o endereço de login fica em sync.lastAuthUrl (o teste "faz o login").
+    openExternal: (url) => { if (!process.env.APOLLO_TEST_HOOKS) void shell.openExternal(url); },
+    hooks: browser.syncHooks(),
+    onChange: () => browser.push(),
+    tickMs: Number(process.env.APOLLO_TEST_SYNC_TICK_MS) || undefined,
+    pullMs: Number(process.env.APOLLO_TEST_SYNC_PULL_MS) || undefined,
+  });
+  browser.syncService = sync;
+  void sync.start();
 
   ipcMain.on('ui:command', (event, raw) => {
     if (!isTrustedSender(event, win.webContents)) return;
@@ -321,6 +336,10 @@ app.whenReady().then(async () => {
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
     if (cmd.type === 'update:check') return void updateCheck.check(true);
+    if (cmd.type === 'sync:connect') return void sync.connect({ provider: cmd.provider, clientId: cmd.clientId.trim(), clientSecret: cmd.clientSecret?.trim() || null, passphrase: cmd.passphrase });
+    if (cmd.type === 'sync:now') return void sync.syncNow();
+    if (cmd.type === 'sync:cancel') return sync.cancelConnect();
+    if (cmd.type === 'sync:disconnect') return sync.disconnect();
     if (cmd.type === 'update:dismiss') return updateCheck.dismiss();
     if (cmd.type === 'update:skip') return updateCheck.skip();
     if (cmd.type === 'update:open-page') { updateCheck.openPage(); return updateCheck.dismiss(); }

@@ -122,6 +122,12 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - Módulos internos com interruptor (`modules.ts`): GPC, cosméticos/scriptlets, oferecer salvar senhas, hibernação automática, personalizações. Privacidade de rede (anúncios, rastreadores, cookies, limpeza de links) fica nas camadas de privacidade (D3).
 - Personalizações do usuário: CSS inserido como estilo de usuário; JS executado num mundo isolado próprio (`executeJavaScriptInIsolatedWorld`, id 1001) no `dom-ready` — acesso ao DOM, sem acesso às variáveis da página, ao preload do Apollo ou ao Node. Não há extensões de terceiros nem código carregado no processo principal.
 
+### D13: Mundos isolados nas páginas
+Código do Apollo que roda nas páginas usa mundos isolados próprios (a página não enxerga nem altera): 1001 personalizações, 1002 vídeo flutuante, 1003 modo leitura (`build/reader.js`, Readability). O modo leitura troca o documento dentro da própria página (com CSP sem scripts) — o conteúdo do site nunca passa pela interface privilegiada.
+
+### D14: Sincronização
+Google Drive (pasta do app) ou OneDrive (pasta do app), com OAuth + PKCE e retorno em 127.0.0.1. Um arquivo só, cifrado com a senha do usuário (scrypt + AES-256-GCM) antes de sair do computador; mesclagem em três vias contra a última versão sincronizada (`src/main/sync/`). Detalhes e como criar o ID do aplicativo: [SYNC.md](SYNC.md).
+
 ## Roadmap
 
 0. ✅ Validação técnica ([phase-0.md](phase-0.md))

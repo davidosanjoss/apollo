@@ -104,6 +104,7 @@
           <button type="button" data-section="bookmarks">Favoritos</button>
           <button type="button" data-section="media">Vídeo</button>
           <button type="button" data-section="languages">Idiomas</button>
+          <button type="button" data-section="sync">Sincronização</button>
           <button type="button" data-section="vault">Bitwarden</button>
           <button type="button" data-section="modules">Módulos e personalizações</button>
           <button type="button" data-section="about">Sobre o Apollo</button>
@@ -181,6 +182,39 @@
         <option value="off">Desligado</option>
       </select></label>
       <p class="hint">O dicionário é baixado uma vez dos servidores do Google, sem nenhum dado seu. "Desligado" evita até isso.</p>
+          </div>
+
+          <div class="settings-section" data-section="sync" hidden>
+            <h2>Sincronização</h2>
+            <p class="hint">Workspaces, favoritos (com pastas), painéis, personalizações e preferências iguais nos seus computadores.
+              Abas, histórico, cookies, logins e senhas <b>não</b> sincronizam. Tudo é cifrado aqui com a sua senha de sincronização
+              antes de ir para a nuvem: o Google e a Microsoft só guardam um arquivo ilegível, numa pasta do aplicativo (o Apollo não vê seus arquivos).</p>
+            <p id="sync-status" class="hint"></p>
+            <div id="sync-connected" hidden>
+              <div class="settings-row">
+                <button type="button" id="sync-now" class="primary">Sincronizar agora</button>
+                <span class="spacer"></span>
+                <button type="button" id="sync-disconnect" class="danger">Desconectar este computador</button>
+              </div>
+            </div>
+            <div id="sync-connecting" hidden>
+              <p>Faça o login na janela do navegador que abriu e autorize o Apollo.</p>
+              <button type="button" id="sync-cancel">Cancelar</button>
+            </div>
+            <form id="sync-form">
+              <label>Nuvem <select id="sync-provider">
+                <option value="google">Google Drive</option>
+                <option value="onedrive">OneDrive</option>
+              </select></label>
+              <label>ID do aplicativo (Client ID) <input id="sync-client-id" autocomplete="off" spellcheck="false" required></label>
+              <label id="sync-secret-row">Chave do aplicativo (Client secret) <input id="sync-client-secret" autocomplete="off" spellcheck="false"></label>
+              <p class="hint" id="sync-app-help"></p>
+              <label>Senha de sincronização (mínimo 8 caracteres) <input id="sync-pass" type="password" autocomplete="new-password" minlength="8" required></label>
+              <label>Repita a senha <input id="sync-pass2" type="password" autocomplete="new-password" minlength="8" required></label>
+              <p class="hint">Use a mesma senha em todos os computadores. Ela não é enviada a ninguém e não dá para recuperá-la: sem ela, os dados na nuvem não abrem.</p>
+              <p class="error" id="sync-form-error" hidden></p>
+              <button type="submit" class="primary">Conectar</button>
+            </form>
           </div>
 
           <div class="settings-section" data-section="vault" hidden>

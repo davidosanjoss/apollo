@@ -126,6 +126,13 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
     case 'settings:auto-pip': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
     case 'reader:toggle': return { type: c.type } as UiCommand;
+    case 'sync:connect':
+      return (c.provider === 'google' || c.provider === 'onedrive') && str(c.clientId, 300) && (c.clientId as string).trim()
+        && (c.clientSecret === null || str(c.clientSecret, 300)) && (c.provider === 'onedrive' || (typeof c.clientSecret === 'string' && c.clientSecret.trim()))
+        && typeof c.passphrase === 'string' && c.passphrase.length >= 8 && c.passphrase.length <= 200 ? (c as UiCommand) : null;
+    case 'sync:now':
+    case 'sync:cancel':
+    case 'sync:disconnect': return { type: c.type } as UiCommand;
     case 'split:open': return id(c.tabId) ? (c as UiCommand) : null;
     case 'split:close':
     case 'split:swap': return { type: c.type } as UiCommand;

@@ -188,6 +188,10 @@ export class Store {
       .run(key, value);
   }
 
+  deleteKv(key: string): void {
+    this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
+  }
+
   // ------------------------------------------------------------ workspaces
 
   listWorkspaces(): Workspace[] {
@@ -396,6 +400,26 @@ export class Store {
 
   deleteCustomization(id: string): void {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ sincronização (gravação direta)
+
+  /** Posição de um workspace/painel (ordem vinda de outro computador). */
+  setRowPosition(table: 'workspaces' | 'panels', id: string, position: number): void {
+    this.db.prepare(`UPDATE ${table === 'workspaces' ? 'workspaces' : 'panels'} SET position = ? WHERE id = ?`).run(position, id);
+  }
+
+  /** Grava o favorito/pasta exatamente como veio (id, pasta, posição). */
+  putBookmark(b: Omit<Bookmark, 'favicon'> & { position: number }): void {
+    this.db.prepare(`INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, title = excluded.title, url = excluded.url,
+        position = excluded.position, parent_id = excluded.parent_id, is_folder = excluded.is_folder`)
+      .run(b.id, b.workspaceId, b.title, b.url, b.position, Date.now(), b.parentId, b.folder ? 1 : 0);
+  }
+
+  /** Apaga só esta linha (sem levar o que está dentro: a sincronização já decidiu). */
+  deleteBookmarkRow(id: string): void {
+    this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(id);
   }
 
   // ------------------------------------------------------------ lista de downloads
