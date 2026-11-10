@@ -106,6 +106,17 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+export interface SavedDownload {
+  id: string;
+  filename: string;
+  url: string;
+  path: string;
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted';
+  received: number;
+  total: number;
+  startedAt: number;
+}
+
 export interface HistoryEntry {
   url: string;
   title: string;
@@ -385,6 +396,33 @@ export class Store {
 
   deleteCustomization(id: string): void {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ lista de downloads
+
+  saveDownload(d: SavedDownload): void {
+    this.db.prepare(`INSERT INTO downloads(id, filename, url, path, state, received, total, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, path = excluded.path, state = excluded.state,
+        received = excluded.received, total = excluded.total`)
+      .run(d.id, d.filename, d.url, d.path, d.state, d.received, d.total, d.startedAt);
+  }
+
+  /** Mais recentes primeiro, desde `since` (ms). */
+  listDownloads(since: number): SavedDownload[] {
+    return (this.db.prepare('SELECT * FROM downloads WHERE started_at >= ? ORDER BY started_at DESC').all(since) as Row[]).map((r) => ({
+      id: r.id as string, filename: r.filename as string, url: r.url as string, path: r.path as string,
+      state: r.state as SavedDownload['state'], received: r.received as number, total: r.total as number, startedAt: r.started_at as number,
+    }));
+  }
+
+  deleteDownload(id: string): void {
+    this.db.prepare('DELETE FROM downloads WHERE id = ?').run(id);
+  }
+
+  /** Apaga os mais antigos que `before` (ms); before = Infinity apaga tudo. */
+  pruneDownloads(before: number): void {
+    if (before === Infinity) this.db.prepare('DELETE FROM downloads').run();
+    else this.db.prepare('DELETE FROM downloads WHERE started_at < ?').run(before);
   }
 
   // ------------------------------------------------------------ histórico de visitas

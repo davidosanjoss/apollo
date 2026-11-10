@@ -52,6 +52,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
 import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
@@ -118,7 +119,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -143,6 +144,19 @@ export class Browser {
     private readonly cipher: Cipher | null = null,
   ) {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    this.downloads = new DownloadManager({
+      dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
+      ask: () => this.store.getKv('download-ask') === '1',
+      onChange: () => this.push(),
+      persist: {
+        load: (since) => this.store.listDownloads(since),
+        save: (d) => this.store.saveDownload(d),
+        remove: (id) => this.store.deleteDownload(id),
+        prune: (before) => this.store.pruneDownloads(before),
+        keepDays: () => this.downloadKeepDays(),
+      },
+    });
+
     // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
     store.deleteTemporaryWorkspaces();
     store.pruneHistory();
@@ -668,11 +682,13 @@ export class Browser {
 
   // ------------------------------------------------------------ downloads
 
-  private readonly downloads = new DownloadManager({
-    dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
-    ask: () => this.store.getKv('download-ask') === '1',
-    onChange: () => this.push(),
-  });
+  /** Criado no construtor: lê a lista guardada (precisa do store). */
+  private readonly downloads: DownloadManager;
+
+  private downloadKeepDays(): number {
+    const v = Number(this.store.getKv('download-days') ?? DEFAULT_DOWNLOAD_KEEP_DAYS);
+    return (DOWNLOAD_KEEP_DAYS as readonly number[]).includes(v) ? v : DEFAULT_DOWNLOAD_KEEP_DAYS;
+  }
 
   // ------------------------------------------------------------ localizar na página (Ctrl+F)
 
@@ -1812,6 +1828,7 @@ export class Browser {
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
       case 'download:clear': this.downloads.clear(); break;
       case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
+      case 'settings:download-days': this.store.setKv('download-days', String(cmd.days)); this.downloads.applyKeepDays(); break;
       case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
       case 'find:close': this.stopFind(); break;
       case 'bookmark:add': this.addBookmark(); break;
@@ -2062,7 +2079,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -2146,7 +2163,7 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1',
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(),
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,

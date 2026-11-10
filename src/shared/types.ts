@@ -182,6 +182,8 @@ export interface SettingsInfo {
   spellcheck: SpellcheckMode;
   /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
   downloadAsk: boolean;
+  /** Dias que a lista de downloads fica guardada (0 = só nesta sessão). */
+  downloadKeepDays: number;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
@@ -245,7 +247,12 @@ export interface DownloadInfo {
   received: number;
   /** 0 = tamanho desconhecido. */
   total: number;
+  startedAt: number;
 }
+
+/** Por quantos dias a lista de downloads fica guardada (0 = só enquanto o Apollo está aberto). */
+export const DOWNLOAD_KEEP_DAYS = [0, 1, 7, 30, 90] as const;
+export const DEFAULT_DOWNLOAD_KEEP_DAYS = 7;
 
 export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove';
 
@@ -386,6 +393,7 @@ export type UiCommand =
   /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
   | { type: 'download:clear' }
   | { type: 'settings:download-ask'; ask: boolean }
+  | { type: 'settings:download-days'; days: number }
   /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
   | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
   | { type: 'find:close' }

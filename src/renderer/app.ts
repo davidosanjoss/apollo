@@ -336,7 +336,7 @@ function renderDownloadList(s: UiState): void {
     return b;
   };
   if (!s.downloads.length) {
-    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download nesta sessão.' }));
+    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download recente.' }));
     return;
   }
   $('#downloads-list').replaceChildren(...s.downloads.map((d) => {
@@ -345,10 +345,12 @@ function renderDownloadList(s: UiState): void {
     const done = d.state === 'completed';
     const name = el('span', { className: `name${done ? ' done' : ''}`, textContent: d.filename, title: d.url });
     if (done) name.onclick = act(d.id, 'open');
-    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`, textContent: downloadStatus(d) });
+    const day = dayLabel(d.startedAt, Date.now());
+    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`,
+      textContent: day === 'Hoje' ? downloadStatus(d) : `${downloadStatus(d)} · ${day}` });
     const actions = el('span', { className: 'actions' });
     if (d.state === 'progressing') actions.append(button('⏸', 'Pausar', act(d.id, 'pause')));
-    if (d.state === 'paused' || d.state === 'interrupted') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
+    if (d.state === 'paused') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
     if (d.state === 'progressing' || d.state === 'paused') actions.append(button('✕', 'Cancelar', act(d.id, 'cancel')));
     if (done) actions.append(button('📂', 'Mostrar na pasta', act(d.id, 'show')));
     if (!(d.state === 'progressing' || d.state === 'paused')) actions.append(button('🗑', 'Tirar da lista', act(d.id, 'remove')));
@@ -1060,6 +1062,8 @@ function renderSettings(s: UiState): void {
     : 'Verificação automática a cada 6 horas.';
   $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
+  const dd = $<HTMLSelectElement>('#download-days');
+  if (document.activeElement !== dd) dd.value = String(s.settings.downloadKeepDays);
   $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
@@ -1090,6 +1094,7 @@ $('#history-clear').onclick = () => {
   $('#history-clear').textContent = 'Histórico apagado';
   setTimeout(() => { $('#history-clear').textContent = 'Apagar todo o histórico'; }, 2500);
 };
+$<HTMLSelectElement>('#download-days').onchange = (e) => send({ type: 'settings:download-days', days: Number((e.target as HTMLSelectElement).value) });
 $<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
 $<HTMLSelectElement>('#spellcheck').onchange = (e) =>
   send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });

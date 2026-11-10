@@ -92,3 +92,37 @@ describe('downloads', () => {
     await app.until((s) => !s.settings.downloadAsk, 'desligada');
   });
 });
+
+describe('lista guardada (padrão: 7 dias)', () => {
+  const restart = async () => {
+    await app.quit();
+    app = await Apollo.launch(profile.dir, { APOLLO_TEST_DOWNLOADS_DIR: dir });
+  };
+
+  it('a lista sobrevive ao reinício', async () => {
+    expect((await app.state()).settings.downloadKeepDays).toBe(7);
+    await download('/file?name=relatorio.pdf');
+    await app.until((x) => x.downloads[0]?.state === 'completed', 'concluído');
+    await restart();
+    const s = await app.state();
+    expect(s.downloads.map((d) => [d.filename, d.state])).toEqual([['relatorio.pdf', 'completed']]);
+  });
+
+  it('download que ficou pela metade ao fechar volta como "falhou"', async () => {
+    await download('/slow-file');
+    await app.until((x) => x.downloads[0]?.filename.startsWith('grande') && x.downloads[0].received > 0, 'baixando');
+    await restart();
+    const s = await app.state();
+    expect(s.downloads[0]).toMatchObject({ state: 'interrupted' });
+    expect(s.downloads).toHaveLength(2);
+  });
+
+  it('"Só enquanto o Apollo está aberto": nada fica guardado', async () => {
+    await app.send({ type: 'settings:download-days', days: 0 });
+    await app.until((s) => s.settings.downloadKeepDays === 0, 'opção');
+    expect((await app.state()).downloads).toHaveLength(2); // a lista desta sessão continua
+    await restart();
+    expect((await app.state()).downloads).toEqual([]);
+    await app.send({ type: 'settings:download-days', days: 7 });
+  });
+});
