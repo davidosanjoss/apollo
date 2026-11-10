@@ -84,6 +84,7 @@ function render(): void {
   renderSettings(s);
   renderVault(s);
   renderPanels(s);
+  renderModules(s);
   renderPalette();
 }
 
@@ -636,6 +637,79 @@ $('#panel-form').addEventListener('submit', (e) => {
   send({ type: 'panel:add', url, workspaceId: $<HTMLSelectElement>('#panel-ws').value, mobile: $<HTMLInputElement>('#panel-mobile').checked });
 });
 
+// ------------------------------------------------------------ módulos e personalizações
+
+const modulesDialog = $<HTMLDialogElement>('#modules-dialog');
+let editingCustom: string | null = null; // id em edição (null = nova)
+
+function renderModules(s: UiState): void {
+  if (!modulesDialog.open) return;
+  $('#modules-list').replaceChildren(...s.modules.map((m) => {
+    const label = el('label', { className: 'module-row' });
+    const cb = el('input', { type: 'checkbox', checked: m.enabled });
+    cb.dataset.moduleId = m.id;
+    cb.onchange = () => send({ type: 'module:set', moduleId: m.id, enabled: cb.checked });
+    const text = el('span');
+    text.append(el('b', { textContent: m.name }), el('small', { textContent: m.description }));
+    label.append(cb, text);
+    return label;
+  }));
+  $('#custom-list').replaceChildren(...(s.customizations.length ? s.customizations.map((c) => {
+    const li = el('li', { className: c.enabled ? '' : 'off' });
+    li.dataset.customId = c.id;
+    li.append(el('b', { textContent: c.name }), el('span', { className: 'sites', textContent: c.sites }),
+      el('small', { textContent: [c.css.trim() && 'CSS', c.js.trim() && 'JS'].filter(Boolean).join(' + ') || 'vazia' }));
+    li.onclick = () => openCustomEditor(c.id);
+    return li;
+  }) : [el('li', { className: 'off', textContent: 'Nenhuma personalização ainda.' })]));
+}
+
+function showModulesView(editor: boolean): void {
+  $('#modules-main').hidden = editor;
+  $('#custom-editor').hidden = !editor;
+}
+
+function openModules(): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== modulesDialog) d.close();
+  showModulesView(false);
+  send({ type: 'layout:overlay', open: true });
+  if (!modulesDialog.open) modulesDialog.showModal();
+  renderModules(state);
+}
+
+function openCustomEditor(id: string | null): void {
+  const c = id ? state?.customizations.find((x) => x.id === id) : null;
+  editingCustom = c?.id ?? null;
+  $('#custom-title').textContent = c ? 'Editar personalização' : 'Nova personalização';
+  $<HTMLInputElement>('#custom-name').value = c?.name ?? '';
+  $<HTMLInputElement>('#custom-sites').value = c?.sites ?? (state?.sitePrivacy?.site ?? '');
+  $<HTMLTextAreaElement>('#custom-css').value = c?.css ?? '';
+  $<HTMLTextAreaElement>('#custom-js').value = c?.js ?? '';
+  $<HTMLInputElement>('#custom-enabled').checked = c?.enabled ?? true;
+  $('#custom-delete').hidden = !c;
+  showModulesView(true);
+  $('#custom-name').focus();
+}
+
+$('#open-modules').onclick = openModules;
+modulesDialog.addEventListener('close', () => { if (!document.querySelector('dialog[open]')) send({ type: 'layout:overlay', open: false }); });
+$('#custom-new').onclick = () => openCustomEditor(null);
+$('#custom-cancel').onclick = () => showModulesView(false);
+$('#custom-save').onclick = () => {
+  const name = $<HTMLInputElement>('#custom-name').value.trim();
+  const sites = $<HTMLInputElement>('#custom-sites').value.trim();
+  if (!name || !sites) { $(name ? '#custom-sites' : '#custom-name').focus(); return; }
+  send({ type: 'custom:save', ...(editingCustom ? { id: editingCustom } : {}), name, sites,
+    css: $<HTMLTextAreaElement>('#custom-css').value, js: $<HTMLTextAreaElement>('#custom-js').value,
+    enabled: $<HTMLInputElement>('#custom-enabled').checked });
+  showModulesView(false);
+};
+$('#custom-delete').onclick = () => {
+  if (editingCustom) send({ type: 'custom:delete', id: editingCustom });
+  showModulesView(false);
+};
+
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 
 const palette = $<HTMLDialogElement>('#palette');
@@ -685,6 +759,7 @@ function runPalette(index: number): void {
   if (a.kind === 'command') send(a.command);
   else if (a.action === 'settings') openSettings();
   else if (a.action === 'vault') openVault();
+  else if (a.action === 'modules') openModules();
   else openWorkspaceDialog();
 }
 

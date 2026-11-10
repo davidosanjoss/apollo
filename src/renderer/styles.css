@@ -53,7 +53,7 @@ body { display: flex; }
 .ws-btn.add { background: transparent; color: var(--muted); border: 2px dashed var(--panel-2); }
 .ws-btn.temporary { border-style: dashed; border-color: #fff8; }
 #sidebar .spacer { flex: 1; }
-#settings-dialog h3 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
+dialog h3 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weight: 600; }
 #settings-dialog input#dns-url { width: 100%; }
 .settings-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .settings-row .spacer { flex: 1; }
@@ -76,6 +76,19 @@ body { display: flex; }
 .rail-btn .ws-dot { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--bg); }
 .suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .suggestions button { border: 0; border-radius: 14px; padding: 4px 10px; background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; font-size: 12px; }
+
+/* ---------- módulos e personalizações ---------- */
+#modules-dialog { width: 560px; max-width: calc(100vw - 32px); }
+#modules-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.module-row { display: flex !important; flex-direction: row !important; align-items: flex-start; gap: 10px; margin: 0 !important; }
+.module-row b { color: var(--text); font-weight: 600; }
+.module-row small { display: block; color: var(--muted); }
+#custom-list { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+#custom-list li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; background: var(--panel-2); cursor: pointer; }
+#custom-list li .sites { color: var(--muted); font-size: 12px; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#custom-list li.off { opacity: .55; }
+dialog textarea { background: var(--bg); border: 1px solid var(--panel-2); color: var(--text); border-radius: 6px; padding: 7px 9px;
+  font: 12px ui-monospace, monospace; resize: vertical; }
 
 /* ---------- paleta de comandos ---------- */
 #palette { width: 620px; max-width: calc(100vw - 32px); margin-top: 12vh; padding: 0; overflow: hidden; }

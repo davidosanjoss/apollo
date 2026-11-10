@@ -5,6 +5,8 @@ import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
 import { validVaultServer } from './vault/api';
+import { MODULES } from './modules';
+import { MAX_CODE } from './customizations';
 
 /**
  * Toda mensagem da UI é validada: tem que vir do frame principal da janela do
@@ -105,6 +107,12 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && (c.mobile === undefined || typeof c.mobile === 'boolean') ? (c as UiCommand) : null;
     case 'panel:bounds': return num(c.x) && num(c.y) && num(c.width) && num(c.height) ? (c as UiCommand) : null;
     case 'panel:menu': return id(c.panelId) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'module:set': return MODULES.some((m) => m.id === c.moduleId) && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
+    case 'custom:save':
+      return (c.id === undefined || id(c.id)) && str(c.name, 80) && (c.name as string).trim() && str(c.sites, 1000) && (c.sites as string).trim()
+        && typeof c.css === 'string' && c.css.length <= MAX_CODE && typeof c.js === 'string' && c.js.length <= MAX_CODE
+        && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
+    case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

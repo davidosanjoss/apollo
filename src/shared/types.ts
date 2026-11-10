@@ -172,6 +172,8 @@ export interface UiState {
   panels: PanelInfo[];
   /** Painel aberto (só um por vez). */
   activePanelId: string | null;
+  modules: ModuleInfo[];
+  customizations: CustomizationInfo[];
 }
 
 export interface PanelInfo {
@@ -185,6 +187,12 @@ export interface PanelInfo {
   /** Já carregado (continua vivo mesmo fechado, para mensagens chegarem). */
   loaded: boolean;
 }
+
+export type ModuleId = 'gpc' | 'cosmetics' | 'vaultSave' | 'hibernation' | 'customizations';
+
+export interface ModuleInfo { id: ModuleId; name: string; description: string; enabled: boolean }
+
+export interface CustomizationInfo { id: string; name: string; sites: string; css: string; js: string; enabled: boolean }
 
 export const PANEL_WIDTHS = [320, 420, 520, 640] as const;
 
@@ -249,6 +257,10 @@ export type UiCommand =
   | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean }
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
+  | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Cria (sem id) ou edita uma personalização. */
+  | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
+  | { type: 'custom:delete'; id: string }
   | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
   /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
   | { type: 'vault:generate'; fill: boolean }

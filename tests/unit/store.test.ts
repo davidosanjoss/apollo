@@ -361,3 +361,18 @@ describe('fase 5b: painéis laterais', () => {
     expect(store.listPanels()).toEqual([]);
   });
 });
+
+describe('fase 5c: personalizações', () => {
+  it('criar, editar (mesmo id), listar em ordem e apagar', () => {
+    const c = { id: 'c1', name: 'YouTube limpo', sites: 'youtube.com', css: '#comments{display:none}', js: '', enabled: true };
+    store.saveCustomization(c);
+    store.saveCustomization({ ...c, id: 'c2', name: 'Moodle', sites: 'moodle.ufmg.br' });
+    store.saveCustomization({ ...c, enabled: false, js: 'document.title = 1' });
+    expect(store.listCustomizations()).toEqual([
+      { ...c, enabled: false, js: 'document.title = 1' },
+      { ...c, id: 'c2', name: 'Moodle', sites: 'moodle.ufmg.br' },
+    ]);
+    store.deleteCustomization('c1');
+    expect(store.listCustomizations().map((x) => x.id)).toEqual(['c2']);
+  });
+});

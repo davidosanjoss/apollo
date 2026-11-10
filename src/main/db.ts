@@ -92,6 +92,18 @@ const MIGRATIONS: string[] = [
     position     INTEGER NOT NULL
   );
   `,
+
+  /* v6: personalizações por site (CSS/JS do usuário) */ `
+  CREATE TABLE customizations (
+    id       TEXT PRIMARY KEY,
+    name     TEXT NOT NULL,
+    sites    TEXT NOT NULL,
+    css      TEXT NOT NULL DEFAULT '',
+    js       TEXT NOT NULL DEFAULT '',
+    enabled  INTEGER NOT NULL DEFAULT 1,
+    position INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

@@ -139,6 +139,10 @@
       <h3>Privacidade (padrão de todos os workspaces)</h3>
       <div id="global-privacy"></div>
 
+      <h3>Módulos</h3>
+      <div class="settings-row"><span class="hint">Ligar/desligar partes do navegador e criar personalizações por site.</span>
+        <span class="spacer"></span><button type="button" id="open-modules">Módulos e personalizações…</button></div>
+
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="submit">Fechar</button>
@@ -157,6 +161,39 @@
         <span class="spacer"></span>
         <button type="button" id="panel-cancel">Cancelar</button>
         <button type="submit" class="primary">Adicionar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="modules-dialog">
+    <form method="dialog" id="modules-form">
+      <!-- Lista -->
+      <div id="modules-main">
+        <h2>Módulos</h2>
+        <div id="modules-list"></div>
+        <h3>Personalizações por site</h3>
+        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
+        <ul id="custom-list"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="custom-new">Nova personalização</button>
+          <span class="spacer"></span>
+          <button type="submit">Fechar</button>
+        </div>
+      </div>
+      <!-- Editor -->
+      <div id="custom-editor" hidden>
+        <h2 id="custom-title">Personalização</h2>
+        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
+        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
+        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
+        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
+        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
+        <div class="dialog-actions">
+          <button type="button" id="custom-delete" class="danger">Apagar</button>
+          <span class="spacer"></span>
+          <button type="button" id="custom-cancel">Voltar</button>
+          <button type="button" id="custom-save" class="primary">Salvar</button>
+        </div>
       </div>
     </form>
   </dialog>

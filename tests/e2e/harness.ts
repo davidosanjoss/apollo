@@ -68,6 +68,9 @@ export async function startSite(): Promise<TestSite> {
         return html(`<form onsubmit="return false"><input id="email" type="email" name="loginfmt"><button id="avancar">Avançar</button></form>`, 'Etapa 1');
       case '/step2':
         return html(`<form onsubmit="return false"><input id="senha" type="password" name="passwd"><button id="entrar">Entrar</button></form>`, 'Etapa 2');
+      case '/custom':
+        // A página tem uma variável própria: a personalização (mundo isolado) não pode vê-la.
+        return html(`<p id="alvo">texto</p><script>window.segredoDaPagina = 'só da página';</script>`, 'Custom');
       case '/links':
         return html(`<a id="novo" href="/page?title=Aberto+do+painel" target="_blank">abrir</a>
           <p id="ua"></p><script>document.getElementById('ua').textContent = navigator.userAgent;</script>`, 'Links');
@@ -188,6 +191,7 @@ export class Cdp {
     const p = await this.eval<{ x: number; y: number } | null>(`(() => {
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return null;
+      el.scrollIntoView({ block: 'center', inline: 'center' }); // como o usuário: rola até ver
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     })()`);

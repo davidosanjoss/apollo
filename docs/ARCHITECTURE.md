@@ -118,6 +118,10 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - Desenvolvimento (`npm start`): `~/.config/apollo-dev`, para nunca mexer nos dados reais.
 - Uma instância por perfil (a segunda só foca a primeira).
 
+### D12: Módulos e personalizações
+- Módulos internos com interruptor (`modules.ts`): GPC, cosméticos/scriptlets, oferecer salvar senhas, hibernação automática, personalizações. Privacidade de rede (anúncios, rastreadores, cookies, limpeza de links) fica nas camadas de privacidade (D3).
+- Personalizações do usuário: CSS inserido como estilo de usuário; JS executado num mundo isolado próprio (`executeJavaScriptInIsolatedWorld`, id 1001) no `dom-ready` — acesso ao DOM, sem acesso às variáveis da página, ao preload do Apollo ou ao Node. Não há extensões de terceiros nem código carregado no processo principal.
+
 ## Roadmap
 
 0. ✅ Validação técnica ([phase-0.md](phase-0.md))
@@ -125,4 +129,4 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 2. ✅ Sessão e abas: restauração, grupos, hibernação, monitor de memória
 3. ✅ Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL, workspace temporário
 4. Bitwarden nativo
-5. Módulos, painéis laterais, paleta de comandos
+5. ✅ Módulos, painéis laterais, paleta de comandos

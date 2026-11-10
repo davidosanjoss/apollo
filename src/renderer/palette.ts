@@ -3,7 +3,7 @@ import type { UiCommand, UiState } from '../shared/types';
 
 export type PaletteAction =
   | { kind: 'command'; command: UiCommand }
-  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' };
+  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' };
 
 export interface PaletteItem {
   id: string;
@@ -117,6 +117,7 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
   a('generate', 'Gerar senha e copiar', cmd({ type: 'vault:generate', fill: false }));
   a('new-ws', 'Novo workspace', { kind: 'ui', action: 'new-workspace' });
   a('settings', 'Configurações', { kind: 'ui', action: 'settings' });
+  a('modules', 'Módulos e personalizações', { kind: 'ui', action: 'modules' });
 
   const ranked = rank(items, query);
   // Endereço/pesquisa digitado: sempre disponível, no topo se nada casar bem.

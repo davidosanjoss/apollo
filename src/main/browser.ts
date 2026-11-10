@@ -10,6 +10,11 @@ import { privacyMenu } from './privacy/menu';
 import { permissionsMenu } from './permissions-menu';
 import type { MenuModelItem } from './menu-model';
 import { vaultMenu } from './vault/menu';
+import { MODULES, parseModules } from './modules';
+import { customizationsFor } from './customizations';
+
+/** Mundo isolado das personalizações do usuário: vê o DOM, não vê a página nem o Apollo. */
+const USER_SCRIPT_WORLD = 1001;
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
 import type { NewLogin, UnlockedVault } from './vault/vault';
@@ -43,7 +48,7 @@ import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import type { MemoryReport, ModuleId, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_WIDTHS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -329,6 +334,7 @@ export class Browser {
     });
     wc.on('did-navigate-in-page', (_e, url, isMainFrame) => { if (isMainFrame) update({ url }); });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
+    wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('media-started-playing', () => { this.playing.add(tabId); });
     wc.on('media-paused', () => { this.playing.delete(tabId); });
     wc.on('did-stop-loading', () => { this.loading.delete(tabId); this.push(); });
@@ -545,6 +551,31 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ módulos e personalizações
+
+  isModuleOn(id: ModuleId): boolean {
+    this.moduleCache ??= parseModules(this.store.getKv('modules'));
+    return this.moduleCache[id];
+  }
+
+  setModule(id: ModuleId, enabled: boolean): void {
+    const m = { ...parseModules(this.store.getKv('modules')), [id]: enabled };
+    this.store.setKv('modules', JSON.stringify(m));
+    this.moduleCache = m;
+  }
+
+  /** CSS como estilo de usuário; JS num mundo isolado próprio (DOM sim; página e Apollo não). */
+  private applyCustomizations(wc: WebContents): void {
+    if (wc.isDestroyed() || !this.isModuleOn('customizations')) return;
+    for (const c of customizationsFor(this.store.listCustomizations(), wc.mainFrame.url)) {
+      if (c.css.trim()) void wc.insertCSS(c.css, { cssOrigin: 'user' }).catch(() => {});
+      if (c.js.trim()) {
+        void wc.executeJavaScriptInIsolatedWorld(USER_SCRIPT_WORLD, [{ code: c.js }])
+          .catch((err: Error) => console.warn(`[apollo] personalização "${c.name}" falhou:`, err.message));
+      }
+    }
+  }
+
   // ------------------------------------------------------------ painéis laterais
 
   private static mobileUA(): string {
@@ -580,6 +611,7 @@ export class Browser {
     wc.on('page-title-updated', (_e, title) => { this.store.updatePanel(id, { title }); this.push(); });
     wc.on('page-favicon-updated', (_e, icons) => { this.store.updatePanel(id, { favicon: icons[0] ?? null }); this.push(); });
     wc.on('render-process-gone', () => this.destroyPanelView(id));
+    wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('before-input-event', (event, input) => {
       const action = shortcutFor(input);
       if (!action) return;
@@ -748,7 +780,7 @@ export class Browser {
 
   /** Uma rodada: decide e hiberna. Barata quando não há abas em segundo plano. */
   hibernationTick(now = Date.now()): string[] {
-    if (this.views.size <= 1) return [];
+    if (this.views.size <= 1 || !this.isModuleOn('hibernation')) return [];
     const limit = Number(this.store.getKv('memoryLimitMb')) || null;
     const { usedMb, perTab } = limit ? this.memoryInfo() : { usedMb: 0, perTab: new Map<string, number>() };
     const ids = pickTabsToHibernate(this.hibernationCandidates(perTab, now), {
@@ -1163,6 +1195,11 @@ export class Browser {
       case 'panel:set': this.setPanel(cmd.panelId, { width: cmd.width, mobile: cmd.mobile }); break;
       case 'panel:bounds': this.panelBounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layoutPanel(); break;
       case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
+      case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
+      case 'custom:save':
+        this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
+        break;
+      case 'custom:delete': this.store.deleteCustomization(cmd.id); break;
       case 'vault:save-answer': this.answerSave(cmd.promptId, cmd.action); break;
       case 'vault:generate': this.generate(cmd.fill); break;
       case 'vault:generator': this.store.setKv('vault.generator', JSON.stringify({ length: cmd.length, symbols: cmd.symbols })); break;
@@ -1209,6 +1246,7 @@ export class Browser {
   };
 
   private paletteOpen = false;
+  private moduleCache: Record<ModuleId, boolean> | null = null;
 
   // Painéis laterais
   private readonly panelViews = new Map<string, WebContentsView>();
@@ -1230,7 +1268,7 @@ export class Browser {
   onLoginSubmitted(tabId: string, frameUrl: string, username: string | null, password: string): void {
     const status = this.vaultProvider?.status() ?? 'disconnected';
     const site = siteOf(frameUrl);
-    if (status === 'disconnected' || !site || !/^https?:/.test(frameUrl) || this.neverSaveSites().has(site)) return;
+    if (!this.isModuleOn('vaultSave') || status === 'disconnected' || !site || !/^https?:/.test(frameUrl) || this.neverSaveSites().has(site)) return;
     let user = username;
     const step = this.usernameSteps.get(tabId);
     if (!user && step && step.site === site && Date.now() - step.at < SAVE_PROMPT_TTL_MS) user = step.username;
@@ -1459,6 +1497,8 @@ export class Browser {
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
+      modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
+      customizations: this.store.listCustomizations(),
     };
   }
 }
