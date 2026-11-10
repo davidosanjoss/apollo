@@ -31,6 +31,7 @@
       <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
       <button id="shield-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg><span id="blocked-count" hidden></span></button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
+      <button id="reader-btn" class="icon-btn" title="Modo leitura (F9)" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 5.5C5.5 4 9 4 12 6c3-2 6.5-2 9-.5V19c-2.5-1.5-6-1.5-9 .5-3-2-6.5-2-9-.5z"/><path d="M12 6v13.5"/></svg></button>
       <button id="pip-btn" class="icon-btn" title="Vídeo flutuante (picture-in-picture)" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><rect x="12" y="11" width="7" height="6" rx="1"/></svg></button>
       <button id="zoom-btn" title="Zoom deste site — clique para voltar a 100% (Ctrl+0)" hidden></button>
       <button id="bookmark-btn" class="icon-btn" title="Adicionar aos favoritos (Ctrl+D)" hidden>☆</button>
@@ -40,6 +41,23 @@
     <div id="bookmark-bar" hidden>
       <div id="bookmark-items"></div>
       <button id="bookmark-more" class="bm" title="Mais favoritos" hidden>»</button>
+    </div>
+
+    <div id="reader-bar" class="bar" hidden>
+      <span>Modo leitura</span>
+      <button id="reader-smaller" class="icon-btn" title="Texto menor">A−</button>
+      <button id="reader-bigger" class="icon-btn" title="Texto maior">A+</button>
+      <select id="reader-font" aria-label="Fonte">
+        <option value="serif">Com serifa</option>
+        <option value="sans">Sem serifa</option>
+      </select>
+      <select id="reader-theme" aria-label="Tema">
+        <option value="light">Claro</option>
+        <option value="sepia">Sépia</option>
+        <option value="dark">Escuro</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="reader-exit">Sair do modo leitura</button>
     </div>
 
     <div id="find-bar" class="bar" hidden>

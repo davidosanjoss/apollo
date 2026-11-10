@@ -128,6 +128,7 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
       { kind: 'ui', action: 'bookmark' }, 'Ctrl+D');
   }
   a('fullscreen', s.fullscreen === 'window' ? 'Sair da tela cheia' : 'Tela cheia', cmd({ type: 'view:fullscreen' }), 'F11');
+  if (s.reader?.available) a('reader', s.reader.active ? 'Sair do modo leitura' : 'Modo leitura', cmd({ type: 'reader:toggle' }), 'F9');
   if (s.pip?.available) a('pip', s.pip.active ? 'Fechar o vídeo flutuante' : 'Vídeo flutuante (picture-in-picture)', cmd({ type: 'tab:pip' }));
   if (active?.live) {
     a('print', 'Imprimir esta página', cmd({ type: 'tab:print' }), 'Ctrl+P');

@@ -233,6 +233,8 @@ export interface UiState {
   activeBookmarkId: string | null;
   /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
   fullscreen: 'window' | 'page' | null;
+  /** Modo leitura da aba ativa: available = parece um artigo; active = em leitura. */
+  reader: { available: boolean; active: boolean; style: import('../reader/template').ReaderStyle };
   /** Vídeo flutuante na aba ativa: available = tem vídeo; active = está flutuando. */
   pip: { available: boolean; active: boolean };
   /** Zoom da aba ativa, em % (100 = padrão). */
@@ -389,6 +391,9 @@ export type UiCommand =
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
   /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
   | { type: 'view:fullscreen' }
+  /** Modo leitura da aba ativa: entra/sai. */
+  | { type: 'reader:toggle' }
+  | { type: 'reader:style'; style: import('../reader/template').ReaderStyle }
   /** Vídeo flutuante (picture-in-picture) da aba ativa: abre/fecha. */
   | { type: 'tab:pip' }
   | { type: 'settings:auto-pip'; on: boolean }

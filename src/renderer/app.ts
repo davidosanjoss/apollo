@@ -6,6 +6,7 @@ import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DE
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
 import { compareVersions } from '../shared/release-notes';
+import { nextReaderSize, type ReaderStyle } from '../reader/template';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -81,6 +82,16 @@ function render(): void {
 
   renderHome(s);
   renderFullscreen(s);
+  const readerBtn = $('#reader-btn');
+  readerBtn.hidden = !s.reader.available;
+  readerBtn.classList.toggle('on', s.reader.active);
+  readerBtn.title = s.reader.active ? 'Sair do modo leitura (F9)' : 'Modo leitura (F9)';
+  $('#reader-bar').hidden = !s.reader.active;
+  if (s.reader.active) {
+    const f = $<HTMLSelectElement>('#reader-font'), t = $<HTMLSelectElement>('#reader-theme');
+    if (document.activeElement !== f) f.value = s.reader.style.font;
+    if (document.activeElement !== t) t.value = s.reader.style.theme;
+  }
   const pipBtn = $('#pip-btn');
   pipBtn.hidden = !s.pip.available;
   pipBtn.classList.toggle('on', s.pip.active);
@@ -487,6 +498,13 @@ function bookmarkCurrent(): void {
 $('#bookmark-btn').onclick = bookmarkCurrent;
 $('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
 $('#pip-btn').onclick = () => send({ type: 'tab:pip' });
+$('#reader-btn').onclick = () => send({ type: 'reader:toggle' });
+$('#reader-exit').onclick = () => send({ type: 'reader:toggle' });
+const readerStyle = (patch: Partial<ReaderStyle>) => { if (state) send({ type: 'reader:style', style: { ...state.reader.style, ...patch } }); };
+$('#reader-smaller').onclick = () => state && readerStyle({ size: nextReaderSize(state.reader.style.size, -1) });
+$('#reader-bigger').onclick = () => state && readerStyle({ size: nextReaderSize(state.reader.style.size, 1) });
+$<HTMLSelectElement>('#reader-font').onchange = (e) => readerStyle({ font: (e.target as HTMLSelectElement).value as ReaderStyle['font'] });
+$<HTMLSelectElement>('#reader-theme').onchange = (e) => readerStyle({ theme: (e.target as HTMLSelectElement).value as ReaderStyle['theme'] });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
   if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Bookmark, Store, Tab, Workspace } from './store';
@@ -52,6 +53,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { parseReaderStyle, type ReaderStyle } from '../reader/template';
 import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
 import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
@@ -391,7 +393,11 @@ export class Browser {
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
       this.videoTabs.delete(tabId);
+      this.readerAvailable.delete(tabId);
+      this.readerActive.delete(tabId);
     });
+    // Parece um artigo? (um pouco depois de carregar, sem atrapalhar a página)
+    wc.on('did-finish-load', () => { setTimeout(() => this.probeReader(wc, tabId), 600); });
     // Contador de bloqueios é por página. Zera no INÍCIO da navegação: as requisições
     // da página nova chegam pelo serviço de rede e podem ser contadas antes do evento
     // did-navigate (commit) — zerar ali apagava bloqueios já contados (visto no CI).
@@ -629,6 +635,70 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ modo leitura
+
+  private static readonly READER_WORLD = 1003;
+  private readerCode: string | null = null;
+  /** Abas cuja página parece um artigo / que estão em leitura. */
+  private readonly readerAvailable = new Set<string>();
+  private readonly readerActive = new Set<string>();
+
+  private readerScript(): string {
+    this.readerCode ??= fs.readFileSync(path.join(__dirname, 'reader.js'), 'utf8');
+    return this.readerCode;
+  }
+
+  /**
+   * Biblioteca + chamada num único script: com vários scripts, o Electron devolve o
+   * resultado do primeiro (a biblioteca), não o da chamada.
+   */
+  private readerCall(expr: string): string {
+    return `${this.readerScript()}\n;${expr}`;
+  }
+
+  private readerStyle(): ReaderStyle {
+    return parseReaderStyle(this.store.getKv('reader-style'));
+  }
+
+  /** Depois de carregar: a página parece um artigo? (para mostrar o botão) */
+  private probeReader(wc: WebContents, tabId: string): void {
+    if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL()) || this.readerActive.has(tabId)) return;
+    void wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD,
+      [{ code: this.readerCall('globalThis.__apolloReader.probe()') }], false)
+      .then((ok) => {
+        const had = this.readerAvailable.has(tabId);
+        if (ok) this.readerAvailable.add(tabId); else this.readerAvailable.delete(tabId);
+        if (had !== Boolean(ok)) this.push();
+      }).catch(() => {});
+  }
+
+  /** Entra (troca a página pela versão de leitura) ou sai (recarrega a original). */
+  private async toggleReader(): Promise<void> {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (!tab || !wc || wc.isDestroyed()) return;
+    if (this.readerActive.has(tab.id)) {
+      this.readerActive.delete(tab.id);
+      wc.reload();
+      this.push();
+      return;
+    }
+    if (!/^https?:/i.test(wc.getURL())) return;
+    const r = await wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD, [{ code: this.readerCall(`globalThis.__apolloReader.enter(${JSON.stringify(this.readerStyle())})`) }], false).catch(() => 'error');
+    if (r === 'ok') this.readerActive.add(tab.id);
+    this.push();
+  }
+
+  private setReaderStyle(style: ReaderStyle): void {
+    this.store.setKv('reader-style', JSON.stringify(style));
+    for (const tabId of this.readerActive) {
+      const wc = this.views.get(tabId)?.webContents;
+      if (wc && !wc.isDestroyed()) {
+        void wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD, [{ code: this.readerCall(`globalThis.__apolloReader.style(${JSON.stringify(style)})`) }], false).catch(() => {});
+      }
+    }
   }
 
   // ------------------------------------------------------------ vídeo flutuante (picture-in-picture)
@@ -1433,6 +1503,8 @@ export class Browser {
     this.usernameSteps.delete(tabId);
     this.pipTabs.delete(tabId);
     this.videoTabs.delete(tabId);
+    this.readerAvailable.delete(tabId);
+    this.readerActive.delete(tabId);
     if (this.screenRequest?.requesterTabId === tabId) this.pickScreen(this.screenRequest.info.id, null, false);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
@@ -1806,6 +1878,7 @@ export class Browser {
       case 'bookmark-bar': this.store.setKv('bookmark-bar', this.bookmarkBarOn() ? '0' : '1'); this.push(); break;
       case 'history': this.focusUi(); this.emit({ type: 'open-history' }); break;
       case 'zoom-in': this.zoomActive('in'); break;
+      case 'reader': void this.toggleReader(); break;
       case 'print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'fullscreen': this.toggleFullscreen(); break;
       case 'devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
@@ -1873,6 +1946,8 @@ export class Browser {
       case 'zoom:set': this.zoomActive(cmd.dir); break;
       case 'view:fullscreen': this.toggleFullscreen(); break;
       case 'tab:pip': { const t = this.activeTab(); this.withActiveWc((wc) => void this.togglePip(wc, t?.id ?? null)); break; }
+      case 'reader:toggle': void this.toggleReader(); break;
+      case 'reader:style': this.setReaderStyle(cmd.style); break;
       case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
       case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
@@ -2228,6 +2303,8 @@ export class Browser {
       },
       fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
         : this.windowFullscreen ? 'window' : null,
+      reader: { available: Boolean(active && (this.readerAvailable.has(active.id) || this.readerActive.has(active.id))),
+        active: Boolean(active && this.readerActive.has(active.id)), style: this.readerStyle() },
       pip: { available: Boolean(active && (this.videoTabs.has(active.id) || this.pipTabs.has(active.id))), active: Boolean(active && this.pipTabs.has(active.id)) },
       zoom: (() => {
         const wc = active ? this.views.get(active.id)?.webContents : undefined;

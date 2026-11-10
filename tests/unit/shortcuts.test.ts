@@ -29,6 +29,7 @@ describe('shortcutFor', () => {
     [key('f', { control: true }), 'find'],
     [key('p', { control: true }), 'print'],
     [key('F11'), 'fullscreen'],
+    [key('F9'), 'reader'],
     [key('F12'), 'devtools'],
     [key('I', { control: true, shift: true }), 'devtools'],
     [key('=', { control: true }), 'zoom-in'],

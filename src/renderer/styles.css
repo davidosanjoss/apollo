@@ -388,7 +388,9 @@ body.fullscreen #bookmark-bar { display: none !important; }
   color: var(--text); font: inherit; font-size: 15px; outline: none; }
 #home-q:focus { border-color: var(--accent); }
 #bookmark-btn.on { color: #f5b301; }
-#pip-btn svg { fill: none; stroke: currentColor; stroke-width: 2; }
+#pip-btn svg, #reader-btn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+#reader-btn.on { color: var(--accent); }
+#reader-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--panel-2); border-radius: 6px; padding: 3px 6px; font: inherit; }
 #pip-btn.on { color: var(--accent); }
 #pip-btn.on svg rect:last-child { fill: currentColor; }
 #zoom-btn { background: var(--panel-2); color: var(--text); border: 0; border-radius: 10px; padding: 2px 8px; font: inherit;

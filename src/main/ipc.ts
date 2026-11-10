@@ -8,6 +8,7 @@ import { validVaultServer } from './vault/api';
 import { MODULES } from './modules';
 import { SPELLCHECK_MODES } from './spellcheck';
 import { MAX_CODE } from './customizations';
+import { READER_SIZES } from '../reader/template';
 
 /**
  * Toda mensagem da UI é validada: tem que vir do frame principal da janela do
@@ -124,6 +125,12 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
     case 'settings:auto-pip': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
+    case 'reader:toggle': return { type: c.type } as UiCommand;
+    case 'reader:style': {
+      const st = c.style as Record<string, unknown> | undefined;
+      return st && READER_SIZES.includes(st.size as number) && (st.font === 'serif' || st.font === 'sans')
+        && ['light', 'sepia', 'dark'].includes(st.theme as string) && Object.keys(st).length === 3 ? (c as UiCommand) : null;
+    }
     case 'update:check':
     case 'update:dismiss':
     case 'update:skip':

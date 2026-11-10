@@ -115,6 +115,17 @@ export async function startSite(): Promise<TestSite> {
         return html(`<div id="player" style="background:#000;color:#fff;height:200px">vídeo</div>
           <button id="cheia" style="width:200px;height:50px">Tela cheia</button><script>
           document.getElementById('cheia').onclick = () => document.getElementById('player').requestFullscreen();</script>`, 'Player');
+      case '/article': {
+        // Página de notícia: menu, anúncio, artigo longo e um script que tenta redesenhar a página.
+        const p = (i: number) => `<p>Parágrafo ${i}. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia.</p>`;
+        return html(`<nav id="menu"><a href="/">Início</a> <a href="/x">Esportes</a></nav>
+          <div class="ad" id="anuncio">COMPRE AGORA</div>
+          <article><h1>Limites e derivadas</h1><p class="byline">Por Ana Souza</p>
+          ${Array.from({ length: 12 }, (_, i) => p(i + 1)).join('')}
+          <p><img src="/nao-existe.png" onerror="document.body.dataset.invadiu='1'" alt="figura"></p></article>
+          <footer>Rodapé do site</footer>
+          <script>setInterval(() => { document.body && document.body.insertAdjacentText('beforeend', 'INVADIU'); }, 300);</script>`, 'Notícia');
+      }
       case '/find':
         return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
       case '/ctx':

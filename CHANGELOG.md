@@ -5,6 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
+- Modo leitura (F9, botão na barra de endereço quando a página parece um artigo, ou Ctrl+K): só o texto e as imagens do artigo, sem menus, anúncios nem scripts da página; tamanho do texto, fonte (com/sem serifa) e tema (claro, sépia, escuro) salvos. Sair recarrega a página original.
 - Vídeo flutuante (picture-in-picture): botão na barra de endereço quando a página tem vídeo, "Vídeo flutuante" no botão direito do vídeo (inclusive YouTube/streaming) e no Ctrl+K. Configurações → Vídeo: flutuar automaticamente ao trocar de aba. A aba com vídeo flutuando não hiberna.
 - Lista de downloads guardada por 7 dias (Configurações → Downloads: só enquanto o Apollo está aberto, 1, 7, 30 ou 90 dias). Downloads interrompidos ao fechar aparecem como "falhou"; os arquivos nunca são apagados.
 
