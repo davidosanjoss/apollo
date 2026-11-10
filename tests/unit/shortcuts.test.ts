@@ -22,6 +22,7 @@ describe('shortcutFor', () => {
     [key('T', { control: true, shift: true }), 'reopen-tab'],
     [key('Escape', { shift: true }), 'memory-monitor'],
     [key('L', { control: true, shift: true }), 'autofill'],
+    [key('k', { control: true }), 'palette'],
   ])('%o → %s', (input, action) => {
     expect(shortcutFor(input)).toBe(action);
   });

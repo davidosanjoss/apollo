@@ -38,7 +38,9 @@ try {
 
   console.log(`\nApollo — diagnóstico (${r.platform}, Electron ${r.electron})\n`);
   console.log(`${ok(r.cookies.persistentCookieSurvivedRestart)} Cookie persistente sobrevive ao reiniciar`);
-  console.log(`${ok(r.cookies.sessionCookieSurvivedRestart)} Cookie de SESSÃO sobrevive ao reiniciar`);
+  // O Electron puro não guarda cookies de sessão; o Apollo os salva e restaura por conta
+  // própria (fase 2, coberto em tests/e2e/session.test.ts). Aqui é só informativo.
+  console.log(`ℹ️  Cookie de SESSÃO no Electron puro: ${r.cookies.sessionCookieSurvivedRestart ? 'sobrevive' : 'não sobrevive'} (o Apollo restaura sozinho)`);
   console.log(`${ok(r.widevine.ok)} Widevine (DRM) ${r.widevine.ok ? '' : `— ${r.widevine.error}`}`);
   console.log(`   componentes: ${JSON.stringify(r.widevineComponent)}`);
   console.log(`${ok(r.gpu.video_decode?.startsWith('enabled'))} Decodificação de vídeo na GPU: ${r.gpu.video_decode}`);

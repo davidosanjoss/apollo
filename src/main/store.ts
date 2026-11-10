@@ -5,6 +5,7 @@ import type { PermissionDecision, PermissionKind, PrivacyFeature } from '../shar
 import type { Overrides } from './privacy/rules';
 import { parseHistory, sanitizeHistory, type TabHistory } from './history';
 import type { OrderTab } from './tab-order';
+import type { Customization } from './customizations';
 
 export interface Workspace {
   id: string;
@@ -73,6 +74,26 @@ const toGroup = (r: Row): TabGroup => ({
   name: r.name as string,
   color: r.color as string,
   collapsed: r.collapsed === 1,
+});
+
+export interface Panel {
+  id: string;
+  workspaceId: string;
+  url: string;
+  title: string;
+  favicon: string | null;
+  width: number;
+  mobile: boolean;
+}
+
+const toPanel = (r: Row): Panel => ({
+  id: r.id as string,
+  workspaceId: r.workspace_id as string,
+  url: r.url as string,
+  title: r.title as string,
+  favicon: (r.favicon as string | null) ?? null,
+  width: r.width as number,
+  mobile: r.mobile === 1,
 });
 
 /** Repositório de workspaces, abas e permissões. Toda escrita é síncrona e imediata. */
@@ -282,6 +303,60 @@ export class Store {
     this.db.prepare(`INSERT INTO site_permissions(workspace_id, origin, kind, decision, updated_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(workspace_id, origin, kind) DO UPDATE SET decision = excluded.decision, updated_at = excluded.updated_at`)
       .run(workspaceId, origin, kind, decision, Date.now());
+  }
+
+  // ------------------------------------------------------------ personalizações (CSS/JS por site)
+
+  listCustomizations(): Customization[] {
+    return (this.db.prepare('SELECT * FROM customizations ORDER BY position').all() as Row[]).map((r) => ({
+      id: r.id as string, name: r.name as string, sites: r.sites as string, css: r.css as string, js: r.js as string, enabled: r.enabled === 1,
+    }));
+  }
+
+  saveCustomization(c: Customization): void {
+    const exists = this.db.prepare('SELECT 1 FROM customizations WHERE id = ?').get(c.id);
+    if (exists) {
+      this.db.prepare('UPDATE customizations SET name = ?, sites = ?, css = ?, js = ?, enabled = ? WHERE id = ?')
+        .run(c.name, c.sites, c.css, c.js, c.enabled ? 1 : 0, c.id);
+    } else {
+      const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM customizations').get() as { next: number };
+      this.db.prepare('INSERT INTO customizations(id, name, sites, css, js, enabled, position) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(c.id, c.name, c.sites, c.css, c.js, c.enabled ? 1 : 0, next);
+    }
+  }
+
+  deleteCustomization(id: string): void {
+    this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ painéis laterais
+
+  listPanels(): Panel[] {
+    return (this.db.prepare('SELECT * FROM panels ORDER BY position').all() as Row[]).map(toPanel);
+  }
+
+  getPanel(id: string): Panel | null {
+    const row = this.db.prepare('SELECT * FROM panels WHERE id = ?').get(id) as Row | undefined;
+    return row ? toPanel(row) : null;
+  }
+
+  createPanel(p: Pick<Panel, 'id' | 'workspaceId' | 'url' | 'mobile'>): Panel {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM panels').get() as { next: number };
+    this.db.prepare('INSERT INTO panels(id, workspace_id, url, mobile, position) VALUES (?, ?, ?, ?, ?)')
+      .run(p.id, p.workspaceId, p.url, p.mobile ? 1 : 0, next);
+    return this.getPanel(p.id)!;
+  }
+
+  updatePanel(id: string, patch: Partial<Pick<Panel, 'url' | 'title' | 'favicon' | 'width' | 'mobile'>>): void {
+    const cur = this.getPanel(id);
+    if (!cur) return;
+    const n = { ...cur, ...patch };
+    this.db.prepare('UPDATE panels SET url = ?, title = ?, favicon = ?, width = ?, mobile = ? WHERE id = ?')
+      .run(n.url, n.title, n.favicon, n.width, n.mobile ? 1 : 0, id);
+  }
+
+  deletePanel(id: string): void {
+    this.db.prepare('DELETE FROM panels WHERE id = ?').run(id);
   }
 
   // ------------------------------------------------------------ cofre (Bitwarden)

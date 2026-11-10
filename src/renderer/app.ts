@@ -2,11 +2,12 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
-import { normalizeUrl } from '../shared/url';
+import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
+import { buildItems, type PaletteItem } from './palette';
 
 declare global {
   interface Window { apollo: ApolloApi }
@@ -82,6 +83,9 @@ function render(): void {
   renderMemory(s);
   renderSettings(s);
   renderVault(s);
+  renderPanels(s);
+  renderModules(s);
+  renderPalette();
 }
 
 // ------------------------------------------------------------ monitor de memória
@@ -371,12 +375,10 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
     return label;
   }) : []));
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
-  send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
   $('#ws-name').focus();
 }
 
-dialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 
 $('#ws-form').addEventListener('submit', () => {
   const name = $<HTMLInputElement>('#ws-name').value.trim();
@@ -436,13 +438,11 @@ function openSettings(): void {
   if (!state) return;
   $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
   $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
-  send({ type: 'layout:overlay', open: true });
   settingsDialog.showModal();
   renderSettings(state);
 }
 
 $('#settings-btn').onclick = openSettings;
-settingsDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 $('#dns-save').onclick = () => {
   const url = $<HTMLInputElement>('#dns-url').value.trim();
   if (url && !/^https:\/\/[^\s]+$/.test(url)) {
@@ -497,7 +497,6 @@ function renderVault(s: UiState): void {
 
 function openVault(): void {
   if (!state) return;
-  send({ type: 'layout:overlay', open: true });
   vaultDialog.showModal();
   renderVault(state);
   const focus = state.vault.status === 'locked' ? '#vault-password' : state.vault.status === 'disconnected' ? '#vault-client-id' : null;
@@ -521,7 +520,6 @@ $('#save-yes').onclick = () => {
 $('#save-no').onclick = () => answerSave('dismiss');
 $('#save-never').onclick = () => answerSave('never');
 vaultDialog.addEventListener('close', () => {
-  send({ type: 'layout:overlay', open: false });
   for (const sel of ['#vault-client-secret', '#vault-connect-password', '#vault-password']) $<HTMLInputElement>(sel).value = '';
 });
 $('#vault-close').onclick = () => vaultDialog.close();
@@ -559,6 +557,249 @@ $('#vault-form').addEventListener('submit', (e) => {
   }
 });
 
+// ------------------------------------------------------------ painéis laterais
+
+const panelEls = new Map<string, HTMLElement>();
+const panelArea = $('#panel-area');
+
+function renderPanels(s: UiState): void {
+  const wsColor = new Map(s.workspaces.map((w) => [w.id, w.color]));
+  const wsName = new Map(s.workspaces.map((w) => [w.id, w.name]));
+  reconcile($('#panel-list'), panelEls, s.panels, (p) => p.id, (p) => {
+    const b = el('button', { className: 'rail-btn' });
+    b.dataset.panelId = p.id;
+    b.onclick = () => send({ type: 'panel:toggle', panelId: p.id });
+    b.oncontextmenu = (e) => { e.preventDefault(); send({ type: 'panel:menu', panelId: p.id, x: e.clientX, y: e.clientY }); };
+    return b;
+  }, (b, p) => {
+    b.classList.toggle('active', p.id === s.activePanelId);
+    b.title = `${p.title || p.url}\nLogins do workspace ${wsName.get(p.workspaceId) ?? ''}\nBotão direito: opções`;
+    const letter = (p.title || new URL(p.url).hostname.replace(/^www\./, '')).charAt(0).toUpperCase();
+    const img = b.querySelector('img');
+    if (p.favicon) {
+      if (!img || img.getAttribute('src') !== p.favicon) {
+        const i = el('img', { src: p.favicon, alt: '' });
+        i.onerror = () => { i.remove(); b.prepend(letter); };
+        b.replaceChildren(i);
+      }
+    } else if (img || !b.firstChild || b.firstChild.nodeType !== Node.TEXT_NODE) {
+      b.replaceChildren(letter);
+    }
+    let dot = b.querySelector<HTMLElement>('.ws-dot');
+    if (!dot) { dot = el('span', { className: 'ws-dot' }); b.appendChild(dot); }
+    dot.style.background = wsColor.get(p.workspaceId) ?? 'transparent';
+  });
+  const active = s.panels.find((p) => p.id === s.activePanelId);
+  panelArea.hidden = !active;
+  $('#panel-resizer').hidden = !active;
+  if (active && !resizing) panelArea.style.width = `${active.width}px`;
+}
+
+// Arrastar a borda: largura ao vivo (o main acompanha pelo ResizeObserver) e salva ao soltar.
+let resizing: { id: string; startX: number; startWidth: number } | null = null;
+const resizer = $('#panel-resizer');
+const clampWidth = (w: number) => Math.round(Math.min(Math.max(w, PANEL_MIN_WIDTH),
+  Math.min(PANEL_MAX_WIDTH, window.innerWidth - 300)));
+resizer.addEventListener('pointerdown', (e) => {
+  if (!state?.activePanelId) return;
+  e.preventDefault();
+  resizer.setPointerCapture(e.pointerId); // continua recebendo o mouse mesmo sobre a página
+  resizer.classList.add('dragging');
+  resizing = { id: state.activePanelId, startX: e.clientX, startWidth: panelArea.getBoundingClientRect().width };
+});
+resizer.addEventListener('pointermove', (e) => {
+  if (!resizing) return;
+  panelArea.style.width = `${clampWidth(resizing.startWidth + (resizing.startX - e.clientX))}px`;
+});
+const endResize = (e: PointerEvent) => {
+  if (!resizing) return;
+  const { id } = resizing;
+  resizing = null;
+  resizer.classList.remove('dragging');
+  if (resizer.hasPointerCapture(e.pointerId)) resizer.releasePointerCapture(e.pointerId);
+  send({ type: 'panel:set', panelId: id, width: clampWidth(panelArea.getBoundingClientRect().width) });
+};
+resizer.addEventListener('pointerup', endResize);
+resizer.addEventListener('pointercancel', endResize);
+resizer.addEventListener('dblclick', () => {
+  if (state?.activePanelId) send({ type: 'panel:set', panelId: state.activePanelId, width: PANEL_DEFAULT_WIDTH });
+});
+
+const sendPanelBounds = () => {
+  const r = panelArea.getBoundingClientRect();
+  send({ type: 'panel:bounds', x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) });
+};
+new ResizeObserver(sendPanelBounds).observe(panelArea);
+
+const panelDialog = $<HTMLDialogElement>('#panel-dialog');
+$('#panel-suggestions').replaceChildren(...PANEL_SUGGESTIONS.map((sug) => {
+  const b = el('button', { type: 'button', textContent: sug.name });
+  b.onclick = () => {
+    $<HTMLInputElement>('#panel-url').value = sug.url;
+    $<HTMLInputElement>('#panel-mobile').checked = Boolean(sug.mobile);
+  };
+  return b;
+}));
+$('#panel-add').onclick = () => {
+  if (!state) return;
+  $('#panel-ws').replaceChildren(...state.workspaces.map((w) => el('option', { value: w.id, textContent: w.name, selected: w.id === state!.activeWorkspaceId })));
+  $<HTMLInputElement>('#panel-url').value = '';
+  $<HTMLInputElement>('#panel-mobile').checked = false;
+  panelDialog.showModal();
+  $('#panel-url').focus();
+};
+$('#panel-cancel').onclick = () => panelDialog.close();
+$('#panel-form').addEventListener('submit', (e) => {
+  const raw = $<HTMLInputElement>('#panel-url').value.trim();
+  const url = normalizeUrl(raw);
+  if (!url || !/^https?:\/\//.test(url) || url.startsWith(SEARCH_URL)) {
+    e.preventDefault(); // continua aberto: precisa de um endereço
+    $('#panel-url').focus();
+    return;
+  }
+  send({ type: 'panel:add', url, workspaceId: $<HTMLSelectElement>('#panel-ws').value, mobile: $<HTMLInputElement>('#panel-mobile').checked });
+});
+
+// ------------------------------------------------------------ módulos e personalizações
+
+const modulesDialog = $<HTMLDialogElement>('#modules-dialog');
+let editingCustom: string | null = null; // id em edição (null = nova)
+
+function renderModules(s: UiState): void {
+  if (!modulesDialog.open) return;
+  $('#modules-list').replaceChildren(...s.modules.map((m) => {
+    const label = el('label', { className: 'module-row' });
+    const cb = el('input', { type: 'checkbox', checked: m.enabled });
+    cb.dataset.moduleId = m.id;
+    cb.onchange = () => send({ type: 'module:set', moduleId: m.id, enabled: cb.checked });
+    const text = el('span');
+    text.append(el('b', { textContent: m.name }), el('small', { textContent: m.description }));
+    label.append(cb, text);
+    return label;
+  }));
+  $('#custom-list').replaceChildren(...(s.customizations.length ? s.customizations.map((c) => {
+    const li = el('li', { className: c.enabled ? '' : 'off' });
+    li.dataset.customId = c.id;
+    li.append(el('b', { textContent: c.name }), el('span', { className: 'sites', textContent: c.sites }),
+      el('small', { textContent: [c.css.trim() && 'CSS', c.js.trim() && 'JS'].filter(Boolean).join(' + ') || 'vazia' }));
+    li.onclick = () => openCustomEditor(c.id);
+    return li;
+  }) : [el('li', { className: 'off', textContent: 'Nenhuma personalização ainda.' })]));
+}
+
+function showModulesView(editor: boolean): void {
+  $('#modules-main').hidden = editor;
+  $('#custom-editor').hidden = !editor;
+}
+
+function openModules(): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== modulesDialog) d.close();
+  showModulesView(false);
+  if (!modulesDialog.open) modulesDialog.showModal();
+  renderModules(state);
+}
+
+function openCustomEditor(id: string | null): void {
+  const c = id ? state?.customizations.find((x) => x.id === id) : null;
+  editingCustom = c?.id ?? null;
+  $('#custom-title').textContent = c ? 'Editar personalização' : 'Nova personalização';
+  $<HTMLInputElement>('#custom-name').value = c?.name ?? '';
+  $<HTMLInputElement>('#custom-sites').value = c?.sites ?? (state?.sitePrivacy?.site ?? '');
+  $<HTMLTextAreaElement>('#custom-css').value = c?.css ?? '';
+  $<HTMLTextAreaElement>('#custom-js').value = c?.js ?? '';
+  $<HTMLInputElement>('#custom-enabled').checked = c?.enabled ?? true;
+  $('#custom-delete').hidden = !c;
+  showModulesView(true);
+  $('#custom-name').focus();
+}
+
+$('#open-modules').onclick = openModules;
+$('#custom-new').onclick = () => openCustomEditor(null);
+$('#custom-cancel').onclick = () => showModulesView(false);
+$('#custom-save').onclick = () => {
+  const name = $<HTMLInputElement>('#custom-name').value.trim();
+  const sites = $<HTMLInputElement>('#custom-sites').value.trim();
+  if (!name || !sites) { $(name ? '#custom-sites' : '#custom-name').focus(); return; }
+  send({ type: 'custom:save', ...(editingCustom ? { id: editingCustom } : {}), name, sites,
+    css: $<HTMLTextAreaElement>('#custom-css').value, js: $<HTMLTextAreaElement>('#custom-js').value,
+    enabled: $<HTMLInputElement>('#custom-enabled').checked });
+  showModulesView(false);
+};
+$('#custom-delete').onclick = () => {
+  if (editingCustom) send({ type: 'custom:delete', id: editingCustom });
+  showModulesView(false);
+};
+
+// ------------------------------------------------------------ paleta de comandos (Ctrl+K)
+
+const palette = $<HTMLDialogElement>('#palette');
+const paletteInput = $<HTMLInputElement>('#palette-input');
+let paletteItems: PaletteItem[] = [];
+let paletteSel = 0;
+
+function renderPalette(): void {
+  if (!palette.open || !state) return;
+  const query = paletteInput.value;
+  paletteItems = buildItems({ state, query, openUrl: query.trim() ? normalizeUrl(query) : null });
+  paletteSel = Math.min(paletteSel, Math.max(0, paletteItems.length - 1));
+  const list = $('#palette-list');
+  const nodes: HTMLElement[] = [];
+  let group = '';
+  paletteItems.forEach((it, i) => {
+    if (it.group !== group) { group = it.group; nodes.push(el('li', { className: 'group', textContent: group })); }
+    const li = el('li', { className: `item${i === paletteSel ? ' selected' : ''}` });
+    li.setAttribute('role', 'option');
+    li.dataset.index = String(i);
+    li.append(el('span', { className: 'title', textContent: it.title }), el('span', { className: 'detail', textContent: it.detail }));
+    li.onmousemove = () => { if (paletteSel !== i) { paletteSel = i; renderPalette(); } };
+    li.onclick = () => runPalette(i);
+    nodes.push(li);
+  });
+  list.replaceChildren(...nodes);
+  list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+}
+
+function openPalette(): void {
+  if (palette.open) { paletteInput.select(); return; }
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  paletteInput.value = '';
+  paletteSel = 0;
+  send({ type: 'palette:toggle', open: true });
+  palette.showModal();
+  paletteInput.focus();
+  renderPalette();
+}
+
+function runPalette(index: number): void {
+  const it = paletteItems[index];
+  if (!it) return;
+  palette.close();
+  const a = it.action;
+  if (a.kind === 'command') send(a.command);
+  else if (a.action === 'settings') openSettings();
+  else if (a.action === 'vault') openVault();
+  else if (a.action === 'modules') openModules();
+  else openWorkspaceDialog();
+}
+
+palette.addEventListener('close', () => {
+  send({ type: 'palette:toggle', open: false });
+});
+paletteInput.addEventListener('input', () => { paletteSel = 0; renderPalette(); });
+$('#palette-btn').onclick = openPalette;
+paletteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = paletteItems.length;
+    if (n) paletteSel = (paletteSel + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderPalette();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    runPalette(paletteSel);
+  }
+});
+
 // ------------------------------------------------------------ diálogo de grupo
 
 const groupDialog = $<HTMLDialogElement>('#group-dialog');
@@ -582,12 +823,10 @@ function openGroupDialog(groupId: string): void {
   editingGroup = g;
   $<HTMLInputElement>('#group-name').value = g.name;
   for (const r of document.querySelectorAll<HTMLInputElement>('input[name="group-color"]')) r.checked = r.value === g.color;
-  send({ type: 'layout:overlay', open: true });
   groupDialog.showModal();
   $('#group-name').focus();
 }
 
-groupDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 $('#group-cancel').onclick = () => groupDialog.close();
 $('#group-form').addEventListener('submit', () => {
   if (!editingGroup) return;
@@ -644,6 +883,21 @@ $<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
 });
 $<HTMLInputElement>('#address').addEventListener('blur', () => render());
 
+// ------------------------------------------------------------ diálogos × página nativa
+// A página é desenhada pelo processo principal POR CIMA desta interface: enquanto houver
+// QUALQUER diálogo aberto, ela fica escondida. Regra única (observa o atributo "open").
+// Regressão: cada diálogo avisava sozinho; ao trocar de um diálogo para outro, o aviso
+// "fechou" chegava depois do "abriu" e a página cobria o diálogo novo (tela escura).
+let overlayShown = false;
+const syncOverlay = () => {
+  const open = document.querySelector('dialog[open]') !== null;
+  if (open === overlayShown) return;
+  overlayShown = open;
+  send({ type: 'layout:overlay', open });
+};
+const dialogObserver = new MutationObserver(syncOverlay);
+for (const d of document.querySelectorAll('dialog')) dialogObserver.observe(d, { attributes: true, attributeFilter: ['open'] });
+
 window.apollo.onState((next) => {
   // Trocou de site: fecha o painel de permissões.
   state = next;
@@ -652,7 +906,9 @@ window.apollo.onState((next) => {
 });
 
 window.apollo.onEvent((event) => {
-  if (event.type === 'open-vault') {
+  if (event.type === 'open-palette') {
+    openPalette();
+  } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
   } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);

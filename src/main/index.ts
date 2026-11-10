@@ -46,6 +46,11 @@ if (process.platform === 'linux') {
     'AcceleratedVideoDecodeLinuxZeroCopyGL',
     'AcceleratedVideoEncoder',
   ].join(','));
+  // Gerenciamento de cor do Wayland (wp_color_manager_v1): compositores como o KWin
+  // recusam a função de transferência que o Chromium pede e o log se enche de
+  // "Unable to set image transfer function". Sem ele, a janela fica em sRGB (como já
+  // estava na prática); só HDR no Wayland deixaria de ser descrito ao compositor.
+  app.commandLine.appendSwitch('disable-features', 'WaylandWpColorManagerV1');
 }
 
 // Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
@@ -122,7 +127,8 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
       urlCleaningModule(togglesFor),
       blockerModule(blocker, { togglesFor, onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind) }),
       thirdPartyCookiesModule(togglesFor),
-      gpcModule,
+      // GPC obedece ao gerenciador de módulos.
+      { ...gpcModule, onBeforeSendHeaders: (d, h, c) => { if (browser?.isModuleOn('gpc') !== false) gpcModule.onBeforeSendHeaders!(d, h, c); } },
     ],
     (id) => browser?.tabIdOfWebContentsId(id) ?? null,
     (tabId) => browser?.tabUrlOf(tabId) ?? null,
@@ -151,7 +157,7 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
     const tabId = b.tabIdOf(event.sender);
     const frame = event.senderFrame;
     if (!tabId || !frame || frame !== event.sender.mainFrame) return null;
-    if (!b.privacyForTab(tabId, frame.url)?.ads) return null;
+    if (!b.isModuleOn('cosmetics') || !b.privacyForTab(tabId, frame.url)?.ads) return null;
     const parsed = features === undefined ? undefined : parseFeatures(features);
     if (parsed === null) return null;
     const result = blocker.cosmetics(frame.url, parsed);

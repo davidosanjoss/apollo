@@ -167,7 +167,47 @@ export interface UiState {
   /** Barra "salvar/atualizar senha" para a aba ativa (a senha nunca vem para a UI). */
   savePrompt: { id: string; site: string; username: string | null; mode: 'save' | 'update' | 'locked' } | null;
   generator: { length: number; symbols: boolean };
+  /** Abas de todos os workspaces, só enquanto a paleta está aberta (fechada = custo zero). */
+  paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
+  panels: PanelInfo[];
+  /** Painel aberto (só um por vez). */
+  activePanelId: string | null;
+  modules: ModuleInfo[];
+  customizations: CustomizationInfo[];
 }
+
+export interface PanelInfo {
+  id: string;
+  workspaceId: string;
+  url: string;
+  title: string;
+  favicon: string | null;
+  width: number;
+  mobile: boolean;
+  /** Já carregado (continua vivo mesmo fechado, para mensagens chegarem). */
+  loaded: boolean;
+}
+
+export type ModuleId = 'gpc' | 'cosmetics' | 'vaultSave' | 'hibernation' | 'customizations';
+
+export interface ModuleInfo { id: ModuleId; name: string; description: string; enabled: boolean }
+
+export interface CustomizationInfo { id: string; name: string; sites: string; css: string; js: string; enabled: boolean }
+
+/** Largura do painel (px): ajustada arrastando a borda; salva por painel. */
+export const PANEL_MIN_WIDTH = 260;
+export const PANEL_MAX_WIDTH = 1600;
+export const PANEL_DEFAULT_WIDTH = 420;
+
+/** Sugestões para o diálogo de novo painel. */
+export const PANEL_SUGGESTIONS: { name: string; url: string; mobile?: boolean }[] = [
+  { name: 'WhatsApp', url: 'https://web.whatsapp.com/' },
+  { name: 'Telegram', url: 'https://web.telegram.org/' },
+  { name: 'Teams', url: 'https://teams.microsoft.com/' },
+  { name: 'Outlook Calendário', url: 'https://outlook.office.com/calendar/' },
+  { name: 'Google Agenda', url: 'https://calendar.google.com/' },
+  { name: 'Spotify', url: 'https://open.spotify.com/' },
+];
 
 /** Tamanhos oferecidos pelo gerador de senhas. */
 export const GENERATOR_LENGTHS = [12, 16, 20, 24, 32, 48, 64] as const;
@@ -212,6 +252,18 @@ export type UiCommand =
   | { type: 'vault:fill'; itemId: string }
   | { type: 'vault:copy'; itemId: string; what: 'username' | 'password' | 'totp' }
   | { type: 'vault:open' }
+  | { type: 'vault:autofill' }
+  | { type: 'palette:toggle'; open: boolean }
+  | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
+  | { type: 'panel:toggle'; panelId: string }
+  | { type: 'panel:remove'; panelId: string }
+  | { type: 'panel:set'; panelId: string; width?: number; mobile?: boolean }
+  | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
+  | { type: 'panel:menu'; panelId: string; x: number; y: number }
+  | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Cria (sem id) ou edita uma personalização. */
+  | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
+  | { type: 'custom:delete'; id: string }
   | { type: 'vault:save-answer'; promptId: string; action: 'save' | 'dismiss' | 'never' }
   /** Gerar senha: preencher os campos de senha novos da página, ou copiar. */
   | { type: 'vault:generate'; fill: boolean }
@@ -247,6 +299,8 @@ export type UiCommand =
 /** Eventos pontuais do main para a UI (além do snapshot de estado). */
 export type UiEvent =
   | { type: 'focus-address' }
+  /** Abrir a paleta de comandos (Ctrl+K com o foco na página). */
+  | { type: 'open-palette' }
   /** Abrir o diálogo do cofre (ex.: "Desbloquear…" no menu da chave). */
   | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */

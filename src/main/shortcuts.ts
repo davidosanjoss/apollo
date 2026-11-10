@@ -11,7 +11,7 @@ export interface KeyInput {
 
 export type ShortcutAction =
   | 'new-tab' | 'reopen-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
-  | 'next-tab' | 'prev-tab' | 'memory-monitor' | 'autofill' | `workspace-${number}`;
+  | 'next-tab' | 'prev-tab' | 'memory-monitor' | 'autofill' | 'palette' | `workspace-${number}`;
 
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (input.type !== 'keyDown') return null;
@@ -21,6 +21,7 @@ export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (mod && input.shift && k === 't') return 'reopen-tab';
   if (mod && !input.shift && k === 'w') return 'close-tab';
   if (mod && !input.shift && k === 'l') return 'focus-address';
+  if (mod && !input.shift && k === 'k') return 'palette';
   if (mod && input.shift && k === 'l') return 'autofill'; // como no Bitwarden
   if ((mod && k === 'r') || input.key === 'F5') return 'reload';
   if (mod && input.key === 'Tab') return input.shift ? 'prev-tab' : 'next-tab';

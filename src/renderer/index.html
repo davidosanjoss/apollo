@@ -25,6 +25,7 @@
       <button id="forward" class="icon-btn" title="Avançar (Alt+→)">→</button>
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
+      <button id="palette-btn" class="icon-btn" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
       <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
       <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
       <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
@@ -71,6 +72,14 @@
         </label>
         <ul id="memory-tabs"></ul>
       </aside>
+
+      <!-- Painel lateral aberto: o processo principal desenha o site aqui. -->
+      <div id="panel-resizer" hidden title="Arraste para mudar a largura · duplo clique: largura padrão"></div>
+      <div id="panel-area" hidden></div>
+      <nav id="panel-rail">
+        <div id="panel-list"></div>
+        <button id="panel-add" class="rail-btn add" title="Adicionar painel lateral">+</button>
+      </nav>
     </div>
   </main>
 
@@ -131,11 +140,68 @@
       <h3>Privacidade (padrão de todos os workspaces)</h3>
       <div id="global-privacy"></div>
 
+      <h3>Módulos</h3>
+      <div class="settings-row"><span class="hint">Ligar/desligar partes do navegador e criar personalizações por site.</span>
+        <span class="spacer"></span><button type="button" id="open-modules">Módulos e personalizações…</button></div>
+
       <div class="dialog-actions">
         <span class="spacer"></span>
         <button type="submit">Fechar</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="panel-dialog">
+    <form method="dialog" id="panel-form">
+      <h2>Novo painel lateral</h2>
+      <div id="panel-suggestions" class="suggestions"></div>
+      <label>Endereço <input id="panel-url" placeholder="https://web.whatsapp.com" spellcheck="false" autocomplete="off"></label>
+      <label>Usar os logins do workspace <select id="panel-ws"></select></label>
+      <label class="remember"><input type="checkbox" id="panel-mobile"> Versão para celular (sites que ficam melhores estreitos)</label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="panel-cancel">Cancelar</button>
+        <button type="submit" class="primary">Adicionar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="modules-dialog">
+    <form method="dialog" id="modules-form">
+      <!-- Lista -->
+      <div id="modules-main">
+        <h2>Módulos</h2>
+        <div id="modules-list"></div>
+        <h3>Personalizações por site</h3>
+        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
+        <ul id="custom-list"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="custom-new">Nova personalização</button>
+          <span class="spacer"></span>
+          <button type="submit">Fechar</button>
+        </div>
+      </div>
+      <!-- Editor -->
+      <div id="custom-editor" hidden>
+        <h2 id="custom-title">Personalização</h2>
+        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
+        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
+        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
+        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
+        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
+        <div class="dialog-actions">
+          <button type="button" id="custom-delete" class="danger">Apagar</button>
+          <span class="spacer"></span>
+          <button type="button" id="custom-cancel">Voltar</button>
+          <button type="button" id="custom-save" class="primary">Salvar</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="palette">
+    <input id="palette-input" autocomplete="off" spellcheck="false" placeholder="Buscar abas, workspaces, ações — ou digitar um endereço">
+    <ul id="palette-list" role="listbox"></ul>
   </dialog>
 
   <dialog id="vault-dialog">
