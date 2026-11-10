@@ -35,6 +35,7 @@ export type ContextAction =
   | { kind: 'edit'; op: 'undo' | 'redo' | 'cut' | 'copy' | 'paste' | 'pasteAndMatchStyle' | 'selectAll' }
   | { kind: 'nav'; op: 'back' | 'forward' | 'reload' }
   | { kind: 'view-source' }
+  | { kind: 'print' }
   | { kind: 'inspect' }
   | { kind: 'vault'; op: 'autofill' | 'generate' };
 
@@ -122,6 +123,7 @@ export function buildContextMenu(p: ContextInfo, s: ContextState): ContextItem[]
       item('Avançar', { kind: 'nav', op: 'forward' }, s.canGoForward),
       item('Recarregar', { kind: 'nav', op: 'reload' }),
     ], [
+      item('Imprimir…', { kind: 'print' }),
       item('Ver código-fonte', { kind: 'view-source' }),
     ]);
   }

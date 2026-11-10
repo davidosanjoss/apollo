@@ -13,7 +13,7 @@ const find = (items: ContextItem[], label: string) => items.find((i) => i.type =
 describe('menu de contexto', () => {
   it('página: navegação (avançar desabilitado quando não dá), código-fonte, inspecionar', () => {
     const m = buildContextMenu(info(), st);
-    expect(labels(m)).toEqual(['Voltar', 'Avançar', 'Recarregar', '—', 'Ver código-fonte', '—', 'Inspecionar']);
+    expect(labels(m)).toEqual(['Voltar', 'Avançar', 'Recarregar', '—', 'Imprimir…', 'Ver código-fonte', '—', 'Inspecionar']);
     expect(find(m, 'Avançar').enabled).toBe(false);
   });
 

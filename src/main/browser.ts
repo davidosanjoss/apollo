@@ -154,6 +154,12 @@ export class Browser {
     this.ensureHasTab(this.activeWorkspaceId);
 
     win.on('resize', () => this.layout());
+    // Saiu da tela cheia pelo sistema (tecla do gerenciador de janelas): a interface volta.
+    win.on('leave-full-screen', () => {
+      if (!this.windowFullscreen) return;
+      this.windowFullscreen = false;
+      this.push();
+    });
   }
 
   // ------------------------------------------------------------ consultas
@@ -334,6 +340,20 @@ export class Browser {
     wc.on('page-title-updated', (_e, title) => {
       update({ title });
       if (this.historyOn(workspaceId)) this.store.setVisitTitle(workspaceId, wc.getURL(), title);
+    });
+    // Tela cheia pedida pela página (vídeo): o Electron põe a janela em tela cheia; a view
+    // precisa cobrir a janela inteira (senão o vídeo fica preso no espaço da aba).
+    wc.on('enter-html-full-screen', () => {
+      this.pageFullscreenTabId = tabId;
+      this.layout();
+      this.push();
+    });
+    wc.on('leave-html-full-screen', () => {
+      if (this.pageFullscreenTabId !== tabId) return;
+      this.pageFullscreenTabId = null;
+      if (this.windowFullscreen) this.win.setFullScreen(true); // F11 continua valendo
+      this.layout();
+      this.push();
     });
     // Ctrl + roda do mouse.
     wc.on('zoom-changed', (_e, dir) => this.zoom(wc, workspaceId, dir));
@@ -592,6 +612,33 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ tela cheia, imprimir, devtools
+
+  private windowFullscreen = false;
+  private pageFullscreenTabId: string | null = null;
+
+  /** F11: janela em tela cheia sem a interface (abas, barra, laterais). */
+  toggleFullscreen(): void {
+    this.windowFullscreen = !this.windowFullscreen;
+    this.win.setFullScreen(this.windowFullscreen);
+    this.push();
+  }
+
+  private withActiveWc(fn: (wc: WebContents) => void): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (wc && !wc.isDestroyed()) fn(wc);
+  }
+
+  private print(wc: WebContents): void {
+    wc.print({}, (ok, reason) => { if (!ok && reason !== 'cancelled') console.warn('[apollo] impressão falhou:', reason); });
+  }
+
+  private toggleDevTools(wc: WebContents): void {
+    if (wc.isDevToolsOpened()) wc.closeDevTools();
+    else wc.openDevTools({ mode: 'detach' }); // view não tem onde "acoplar": janela própria
   }
 
   // ------------------------------------------------------------ zoom por site
@@ -1122,6 +1169,10 @@ export class Browser {
       }
       this.lastSeen.set(this.attachedTabId, Date.now());
       if (this.findState?.tabId === this.attachedTabId) this.stopFind();
+      if (this.pageFullscreenTabId === this.attachedTabId) {
+        old?.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
+        this.pageFullscreenTabId = null;
+      }
       this.attachedTabId = null;
       this.scheduleHibernation();
     }
@@ -1152,6 +1203,14 @@ export class Browser {
     if (!this.attachedTabId) return;
     const view = this.views.get(this.attachedTabId);
     if (!view) return;
+    // Vídeo (ou outro elemento) em tela cheia: a página cobre a janela inteira, por cima de tudo.
+    if (this.pageFullscreenTabId === this.attachedTabId) {
+      const [width, height] = this.win.getContentSize();
+      this.win.contentView.addChildView(view); // para o topo (acima de painéis)
+      view.setVisible(true);
+      view.setBounds({ x: 0, y: 0, width, height });
+      return;
+    }
     // A view é nativa e fica POR CIMA do HTML da UI: com um diálogo aberto, escondemos a página.
     view.setVisible(!this.overlayOpen && this.bounds.width > 0);
     view.setBounds(this.bounds);
@@ -1423,6 +1482,7 @@ export class Browser {
         else if (a.op === 'forward' && wc.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
         break;
       case 'view-source': newTab(`view-source:${wc.getURL()}`, true); break;
+      case 'print': this.print(wc); break;
       case 'inspect': wc.inspectElement(params.x, params.y); break;
       case 'vault': if (a.op === 'autofill') this.autofill(); else this.generate(true); break;
     }
@@ -1545,6 +1605,9 @@ export class Browser {
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
       case 'find': this.focusUi(); this.emit({ type: 'open-find' }); break;
       case 'zoom-in': this.zoomActive('in'); break;
+      case 'print': this.withActiveWc((wc) => this.print(wc)); break;
+      case 'fullscreen': this.toggleFullscreen(); break;
+      case 'devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
       case 'zoom-out': this.zoomActive('out'); break;
       case 'zoom-reset': this.zoomActive('reset'); break;
       case 'find-next':
@@ -1607,6 +1670,9 @@ export class Browser {
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
       case 'zoom:set': this.zoomActive(cmd.dir); break;
+      case 'view:fullscreen': this.toggleFullscreen(); break;
+      case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
+      case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
       case 'download:clear': this.downloads.clear(); break;
       case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
@@ -1940,6 +2006,8 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
+        : this.windowFullscreen ? 'window' : null,
       zoom: (() => {
         const wc = active ? this.views.get(active.id)?.webContents : undefined;
         return wc && !wc.isDestroyed() ? zoomPercent(wc.getZoomFactor()) : 100;

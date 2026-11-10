@@ -78,6 +78,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderFullscreen(s);
   const zoomBtn = $('#zoom-btn');
   zoomBtn.hidden = s.zoom === 100;
   zoomBtn.textContent = `${s.zoom}%`;
@@ -278,6 +279,22 @@ $('#home-search').addEventListener('submit', (e) => {
   q.value = '';
   send({ type: 'tab:navigate', url });
 });
+
+// ------------------------------------------------------------ tela cheia (F11)
+
+let lastFullscreen: UiState['fullscreen'] = null;
+let hintTimer: ReturnType<typeof setTimeout> | null = null;
+function renderFullscreen(s: UiState): void {
+  document.body.classList.toggle('fullscreen', s.fullscreen !== null);
+  if (s.fullscreen === lastFullscreen) return;
+  lastFullscreen = s.fullscreen;
+  // Aviso de como sair (só no F11; vídeo tem o próprio Esc). A página fica por cima do HTML,
+  // então o aviso aparece na faixa da interface por 2,5 s.
+  const hint = $('#fullscreen-hint');
+  hint.hidden = s.fullscreen !== 'window';
+  if (hintTimer) clearTimeout(hintTimer);
+  if (!hint.hidden) hintTimer = setTimeout(() => { hint.hidden = true; }, 2500);
+}
 
 // ------------------------------------------------------------ downloads
 

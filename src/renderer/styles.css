@@ -325,6 +325,12 @@ dialog .error[hidden] { display: none; }
 #downloads-list progress { grid-column: 1; width: 100%; height: 4px; }
 #downloads-list .empty { color: var(--muted); border: 0; }
 
+/* F11: só a página. */
+body.fullscreen #sidebar, body.fullscreen #toolbar, body.fullscreen #navbar, body.fullscreen #panel-rail { display: none !important; }
+#fullscreen-hint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 10; padding: 8px 16px;
+  border-radius: 8px; background: rgba(0, 0, 0, .8); color: #fff; font-size: 13px; pointer-events: none; }
+#fullscreen-hint kbd { border: 1px solid #777; border-radius: 4px; padding: 0 5px; }
+
 #home-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; background: var(--bg); padding-bottom: 12vh; }
 #home-greeting, #home-date { margin: 0; color: var(--muted); font-size: 16px; }

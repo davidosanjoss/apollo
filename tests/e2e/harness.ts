@@ -101,6 +101,11 @@ export async function startSite(): Promise<TestSite> {
           'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
         });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/fs':
+        // Como o player do YouTube: botão põe um elemento em tela cheia.
+        return html(`<div id="player" style="background:#000;color:#fff;height:200px">vídeo</div>
+          <button id="cheia" style="width:200px;height:50px">Tela cheia</button><script>
+          document.getElementById('cheia').onclick = () => document.getElementById('player').requestFullscreen();</script>`, 'Player');
       case '/find':
         return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
       case '/ctx':
