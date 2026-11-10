@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Removido
+- Cópia das versões para o repositório antigo `apollo-releases` (descontinuado): as versões ficam só em davidosanjoss/apollo.
+
 ## [0.8.0] - 2026-11-10
 
 ### Corrigido

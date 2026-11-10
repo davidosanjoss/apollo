@@ -5,7 +5,6 @@
 | Repositório | Visibilidade | Conteúdo |
 |---|---|---|
 | `davidosanjoss/apollo` | público | Código, branches, CI e as Releases (instaladores e manifestos de atualização) |
-| `davidosanjoss/apollo-releases` | público | Antigo lugar das Releases (até a 0.7.0). Recebe uma cópia de cada versão enquanto houver instalações antigas, que procuram atualização lá |
 
 ## Branches
 
@@ -36,7 +35,7 @@ O CI roda em todo push na `dev` e em PRs para a `dev` (Linux) e em PRs para a `m
    git checkout main && git pull
    git tag v0.2.0 && git push origin v0.2.0
    ```
-4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** nas Releases deste repositório e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG. Depois, copia a versão para o `apollo-releases` (transição; precisa do secret `RELEASES_TOKEN`).
+4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** nas Releases deste repositório e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
 5. Sincronizar: `git checkout dev && git merge main`.
 
 ## Atualização automática
@@ -47,18 +46,9 @@ O app consulta as Releases deste repositório (API pública do GitHub, sem dados
 - `zip` e `tar.gz`: atualização manual.
 - Em desenvolvimento (`npm start`) o atualizador e o aviso ficam desligados (os testes usam `APOLLO_UPDATES_API` com uma API falsa).
 
-## Token da cópia para o apollo-releases (transição)
+## Token de publicação
 
-A publicação neste repositório usa o `GITHUB_TOKEN` do próprio workflow. Só a cópia para o `apollo-releases` precisa do secret `RELEASES_TOKEN` (sem ele, a cópia é pulada):
-
-1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
-   - Repository access: **Only select repositories** → `apollo-releases`
-   - Permissions: **Contents: Read and write** (o resto fica sem acesso)
-   - Expiração: a que preferir (anote para renovar)
-2. Salvar como secret neste repositório (o valor é pedido no terminal):
-   ```bash
-   gh secret set RELEASES_TOKEN -R davidosanjoss/apollo
-   ```
+Não precisa de nenhum: o workflow publica com o `GITHUB_TOKEN` dele (permissão `contents: write` só nos jobs de build e publicação). Até a 0.7.0 as versões ficavam num repositório separado (`apollo-releases`, descontinuado); todas foram trazidas para cá.
 
 ## DRM no Windows (opcional)
 
@@ -74,4 +64,3 @@ Sem isso, o build sai normalmente, só sem a assinatura.
 | Repositório | Proteção |
 |---|---|
 | `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |
-| `apollo-releases` | `main`: sem push direto (só PR), sem force-push, sem apagar, vale para admins. Tags `v*` imutáveis. |

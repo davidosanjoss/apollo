@@ -1,17 +1,12 @@
 name: Release
 
 # Tag vX.Y.Z na main → builds Linux/Windows publicados nas Releases deste repositório.
-# Transição: também copia a versão para davidosanjoss/apollo-releases (onde as instalações
-# até a 0.7.0 procuram atualização), se o secret RELEASES_TOKEN existir.
 on:
   push:
     tags: ['v*.*.*']
 
 permissions:
   contents: read
-
-env:
-  MIRROR_REPO: davidosanjoss/apollo-releases
 
 jobs:
   validate:
@@ -95,8 +90,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      HAS_MIRROR: ${{ secrets.RELEASES_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Publicar release com notas do CHANGELOG
@@ -108,16 +101,3 @@ jobs:
           [ -s notes.md ] || echo "Veja o histórico de mudanças." > notes.md
           gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
             --title "Apollo $GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest
-      # Transição: instalações até a 0.7.0 procuram atualização no apollo-releases.
-      # Remover quando ninguém mais usar essas versões.
-      - name: Copiar para o apollo-releases (transição)
-        if: env.HAS_MIRROR == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-        run: |
-          # Pasta temporária do runner (o repositório já tem uma pasta "assets").
-          dir="$RUNNER_TEMP/mirror"
-          mkdir -p "$dir"
-          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$dir"
-          gh release create "$GITHUB_REF_NAME" -R "$MIRROR_REPO" --title "Apollo $GITHUB_REF_NAME" \
-            --notes-file notes.md --latest "$dir"/*
