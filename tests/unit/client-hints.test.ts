@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { clientHintsModule, hintValues, parseAcceptCh, secureUrl } from '../../src/main/client-hints';
-import { cleanUserAgent, firefoxUserAgent, needsFirefoxIdentity, setGoogleCompat, uaMetadata } from '../../src/main/user-agent';
+import { cleanUserAgent, needsNativeIdentity, setGoogleCompat, setNativeUserAgent, uaMetadata } from '../../src/main/user-agent';
 
 const CHROME = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.8078.75 Safari/537.36';
 const send = (m: ReturnType<typeof clientHintsModule>, url: string, headers: Record<string, string>) => {
@@ -51,24 +51,33 @@ describe('client hints nas requisições', () => {
   });
 });
 
-describe('compatibilidade: login do Google como Firefox', () => {
-  it('só accounts.google.com, só com a opção ligada', () => {
+// Regressão: o Google recusava o Apollo "igual ao Chrome" (e também como Firefox); aceita a
+// identificação original do Electron. Só nas páginas de login.
+describe('login do Google: identificação original do Electron', () => {
+  const NATIVE = CHROME.replace(' Safari', ' apollo/0.8.0 Electron/45.2.1 Safari');
+  setNativeUserAgent(NATIVE);
+
+  it('só accounts.google.com / accounts.youtube.com, só com a opção ligada', () => {
     setGoogleCompat(true);
-    expect(needsFirefoxIdentity('https://accounts.google.com/v3/signin/identifier')).toBe(true);
-    expect(needsFirefoxIdentity('https://mail.google.com/')).toBe(false);
+    expect(needsNativeIdentity('https://accounts.google.com/v3/signin/identifier')).toBe(true);
+    expect(needsNativeIdentity('https://accounts.youtube.com/accounts/SetSID')).toBe(true);
+    expect(needsNativeIdentity('https://mail.google.com/')).toBe(false);
     setGoogleCompat(false);
-    expect(needsFirefoxIdentity('https://accounts.google.com/')).toBe(false);
+    expect(needsNativeIdentity('https://accounts.google.com/')).toBe(false);
     setGoogleCompat(true);
   });
 
-  it('navegação para o login sai como Firefox, sem client hints; outros pedidos não mudam', () => {
+  it('a navegação para o login sai com a identificação original e client hints de Chromium; outros pedidos não mudam', () => {
     const m = clientHintsModule('156.0.8078.75');
-    const nav = { 'User-Agent': CHROME, 'sec-ch-ua': 'x', 'Sec-CH-UA-Platform': '"Linux"' };
+    const nav: Record<string, string> = { 'User-Agent': CHROME };
     m.onBeforeSendHeaders!({ url: 'https://accounts.google.com/signin', resourceType: 'mainFrame' } as never, nav, {} as never);
-    expect(nav).toEqual({ 'User-Agent': firefoxUserAgent() });
+    expect(nav['User-Agent']).toBe(NATIVE);
+    expect(nav['sec-ch-ua']).toContain('"Chromium"');
     const xhr = { 'User-Agent': CHROME };
     m.onBeforeSendHeaders!({ url: 'https://accounts.google.com/ListAccounts', resourceType: 'xhr' } as never, xhr, {} as never);
     expect(xhr['User-Agent']).toBe(CHROME);
-    expect(firefoxUserAgent('linux')).toMatch(/^Mozilla\/5\.0 \(X11; Linux x86_64; rv:\d+\.0\) Gecko\/20100101 Firefox\/\d+\.0$/);
+    const other: Record<string, string> = { 'User-Agent': CHROME };
+    m.onBeforeSendHeaders!({ url: 'https://mail.google.com/', resourceType: 'mainFrame' } as never, other, {} as never);
+    expect(other['User-Agent']).toBe(CHROME);
   });
 });

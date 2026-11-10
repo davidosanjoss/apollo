@@ -3,7 +3,7 @@
 // nenhuma (ver user-agent.ts). Mesmas regras do Chromium: só em conexão segura; as de
 // "alta entropia" só para quem pediu (Accept-CH).
 import type { NetworkModule } from './network';
-import { firefoxUserAgent, needsFirefoxIdentity, uaMetadata, type UaMetadata } from './user-agent';
+import { nativeUserAgent, needsNativeIdentity, uaMetadata, type UaMetadata } from './user-agent';
 
 const brandList = (list: { brand: string; version: string }[]) => list.map((b) => `"${b.brand}";v="${b.version}"`).join(', ');
 const q = (s: string) => `"${s}"`;
@@ -50,17 +50,17 @@ export function clientHintsModule(chromeVersion = process.versions.chrome): Netw
   return {
     name: 'client-hints',
     onBeforeSendHeaders(details, headers) {
-      // Página de login do Google: a própria navegação já sai como Firefox (sem hints).
-      if ((details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') && needsFirefoxIdentity(details.url)) {
-        for (const k of Object.keys(headers)) if (/^(user-agent|sec-ch-ua)/i.test(k)) delete headers[k];
-        headers['User-Agent'] = firefoxUserAgent();
-        return;
+      // Página de login do Google: a própria navegação já sai com a identificação original
+      // do Electron (ver user-agent.ts); as client hints seguem iguais (Chromium).
+      if ((details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') && needsNativeIdentity(details.url)) {
+        for (const k of Object.keys(headers)) if (k.toLowerCase() === 'user-agent') delete headers[k];
+        headers['User-Agent'] = nativeUserAgent();
       }
       if (!secureUrl(details.url)) return;
       const keys = new Set(Object.keys(headers).map((k) => k.toLowerCase()));
       if (keys.has('sec-ch-ua')) return; // o Chromium já mandou: não mexe
       const ua = Object.entries(headers).find(([k]) => k.toLowerCase() === 'user-agent')?.[1] ?? '';
-      if (!/Chrome\//.test(ua)) return; // identificado como outro navegador (ex.: Firefox no login do Google): sem hints
+      if (!/Chrome\//.test(ua)) return; // identificado como outro navegador: sem hints
       const values = /Android/.test(ua) ? mobile : desktop; // painel "versão para celular"
       const origin = originOf(details.url);
       for (const name of [...LOW_ENTROPY, ...(origin ? requested.get(origin) ?? [] : [])]) headers[name] = values[name] ?? headers[name];

@@ -117,8 +117,8 @@
             <p class="hint">Padrão de todos os workspaces. Cada workspace e cada site podem mudar isso (escudo na barra de endereço).</p>
             <div id="global-privacy"></div>
             <h3>Compatibilidade</h3>
-            <label class="remember"><input type="checkbox" id="google-compat"> Login do Google: identificar o Apollo como Firefox na página de login</label>
-            <p class="hint">O Google recusa navegadores feitos com Electron ("This browser or app may not be secure"). Com isto ligado, só em accounts.google.com o Apollo se apresenta como Firefox; nos outros sites, como Chromium.</p>
+            <label class="remember"><input type="checkbox" id="google-compat"> Login do Google: usar a identificação original do Apollo na página de login</label>
+            <p class="hint">O Google recusa o Apollo quando ele se apresenta igual ao Chrome ("This browser or app may not be secure") e aceita a identificação original (com "Electron"). Com isto ligado, só nas páginas de login do Google vai a original; nos outros sites, a identificação limpa.</p>
           </div>
 
           <div class="settings-section" data-section="dns" hidden>

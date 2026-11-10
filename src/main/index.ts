@@ -19,7 +19,7 @@ import { loadSettings, applyDns, saveSettings, type Settings } from './settings'
 import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
 import { SyncService } from './sync/service';
-import { cleanUserAgent } from './user-agent';
+import { cleanUserAgent, setNativeUserAgent } from './user-agent';
 import { isDefaultBrowser, launchCommand, makeDefaultLinux, urlFromArgv } from './default-browser';
 import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
@@ -64,6 +64,7 @@ if (process.platform === 'linux') {
 // Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
 // tratam UA de Electron como navegador desconhecido/inseguro.
 // (Os metadados — client hints — são aplicados por página: ver user-agent.ts.)
+setNativeUserAgent(app.userAgentFallback); // a original, para o login do Google
 const cleanUA = cleanUserAgent(app.userAgentFallback);
 app.userAgentFallback = cleanUA;
 

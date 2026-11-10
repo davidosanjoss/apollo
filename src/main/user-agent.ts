@@ -42,27 +42,31 @@ export function uaMetadata(chromeVersion: string, mobile: boolean, os = process.
   };
 }
 
-// ------------------------------------------------------------ compatibilidade por site
+// ------------------------------------------------------------ login do Google
 
 /**
- * O login do Google recusa navegadores feitos com Electron mesmo bem identificados
- * ("This browser or app may not be secure"). Outros navegadores Electron (Ferdium, Rambox,
- * Min) passam se identificando como Firefox SÓ nessas páginas — como as intervenções de
- * compatibilidade por site do próprio Firefox. Opção nas Configurações (ligada por padrão).
+ * O login do Google recusa o Chromium do Electron quando ele se apresenta como o Chrome
+ * ("This browser or app may not be secure") e aceita a identificação ORIGINAL do Electron
+ * (com "Electron/x" e o nome do app). Medido por outro navegador Electron (Orca, issue
+ * #11518): identidade original 12/12 aceitas; "igual ao Chrome" 12/12 recusadas; como
+ * Firefox, metade recusada; client hints não decidem. Por isso, só nas páginas de login do
+ * Google vai a identificação original; nos outros sites fica a limpa (Cloudflare e afins).
+ * Opção nas Configurações (ligada por padrão).
  */
 let googleCompat = true;
+let nativeUA = '';
 export const setGoogleCompat = (on: boolean) => { googleCompat = on; };
+/** O user agent original do Electron (guardado antes de limpar). */
+export const setNativeUserAgent = (ua: string) => { nativeUA = ua; };
+export const nativeUserAgent = () => nativeUA;
 
-export function firefoxUserAgent(os = process.platform): string {
-  const platform = os === 'win32' ? 'Windows NT 10.0; Win64; x64' : os === 'darwin' ? 'Macintosh; Intel Mac OS X 10.15' : 'X11; Linux x86_64';
-  return `Mozilla/5.0 (${platform}; rv:140.0) Gecko/20100101 Firefox/140.0`;
-}
+export const GOOGLE_SIGNIN_HOSTS = ['accounts.google.com', 'accounts.youtube.com'];
 
-/** Endereços que usam a identificação de Firefox (com a opção ligada). */
-export function needsFirefoxIdentity(url: string): boolean {
-  if (!googleCompat) return false;
+/** Endereços que usam a identificação original (com a opção ligada). */
+export function needsNativeIdentity(url: string): boolean {
+  if (!googleCompat || !nativeUA) return false;
   // Testes: um host local no lugar do Google.
-  const hosts = ['accounts.google.com', ...(process.env.APOLLO_TEST_COMPAT_HOST ? [process.env.APOLLO_TEST_COMPAT_HOST] : [])];
+  const hosts = [...GOOGLE_SIGNIN_HOSTS, ...(process.env.APOLLO_TEST_COMPAT_HOST ? [process.env.APOLLO_TEST_COMPAT_HOST] : [])];
   try { return hosts.includes(new URL(url).hostname); } catch { return false; }
 }
 
@@ -75,7 +79,7 @@ const navigatorPlatform = (mobile: boolean, os = process.platform) =>
  * Se as ferramentas do desenvolvedor tomarem o lugar, reaplica quando fecharem.
  */
 export function applyUserAgent(wc: WebContents, userAgent: string, mobile = false): void {
-  let firefox = false;
+  let native = false;
   const send = () => {
     if (wc.isDestroyed()) return;
     try {
@@ -83,9 +87,11 @@ export function applyUserAgent(wc: WebContents, userAgent: string, mobile = fals
     } catch {
       return; // devtools aberto: tenta de novo quando fechar
     }
-    void wc.debugger.sendCommand('Emulation.setUserAgentOverride', firefox
-      ? { userAgent: firefoxUserAgent(), platform: navigatorPlatform(false) } // Firefox não tem client hints
-      : { userAgent, platform: navigatorPlatform(mobile), userAgentMetadata: uaMetadata(process.versions.chrome, mobile) }).catch(() => {});
+    void wc.debugger.sendCommand('Emulation.setUserAgentOverride', {
+      userAgent: native ? nativeUA : userAgent,
+      platform: navigatorPlatform(native ? false : mobile),
+      userAgentMetadata: uaMetadata(process.versions.chrome, native ? false : mobile),
+    }).catch(() => {});
   };
   wc.setUserAgent(userAgent); // texto também no nível do Electron (workers, primeiras requisições)
   send();
@@ -93,10 +99,10 @@ export function applyUserAgent(wc: WebContents, userAgent: string, mobile = fals
   // Entrou/saiu das páginas de login do Google: troca a identificação (antes de a página carregar).
   wc.on('did-start-navigation', (d) => {
     if (!d.isMainFrame || d.isSameDocument) return;
-    const want = needsFirefoxIdentity(d.url);
-    if (want === firefox) return;
-    firefox = want;
-    wc.setUserAgent(want ? firefoxUserAgent() : userAgent);
+    const want = needsNativeIdentity(d.url);
+    if (want === native) return;
+    native = want;
+    wc.setUserAgent(want ? nativeUA : userAgent);
     send();
   });
 }
