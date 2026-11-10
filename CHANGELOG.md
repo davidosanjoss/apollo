@@ -10,6 +10,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Personalizações por site: seu CSS e JavaScript nos sites escolhidos (ex.: esconder comentários do YouTube, acelerar vídeos do Moodle). O JavaScript roda num mundo isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo. Valem a partir do próximo carregamento da página.
 - Paleta de comandos (Ctrl+K ou a lupa na barra): busca abas de todos os workspaces, troca de workspace, ações (nova aba, reabrir, fixar, duplicar, agrupar, hibernar, monitor de memória, pausar proteção, Bitwarden, gerar senha, configurações) e abre endereços ou pesquisas. Busca tolerante, sem se importar com acentos.
 
+### Corrigido
+- ⚙ → "Módulos e personalizações…" deixava a tela escura sem mostrar o diálogo (a página voltava por cima ao trocar de um diálogo para outro).
+
 ## [0.5.0] - 2026-11-10
 
 ### Adicionado

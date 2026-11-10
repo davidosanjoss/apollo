@@ -375,12 +375,10 @@ function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
     return label;
   }) : []));
   $('#ws-delete').hidden = !ws || (state?.workspaces.length ?? 0) <= 1;
-  send({ type: 'layout:overlay', open: true }); // a página nativa cobriria o diálogo
   dialog.showModal();
   $('#ws-name').focus();
 }
 
-dialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 
 $('#ws-form').addEventListener('submit', () => {
   const name = $<HTMLInputElement>('#ws-name').value.trim();
@@ -440,13 +438,11 @@ function openSettings(): void {
   if (!state) return;
   $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
   $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
-  send({ type: 'layout:overlay', open: true });
   settingsDialog.showModal();
   renderSettings(state);
 }
 
 $('#settings-btn').onclick = openSettings;
-settingsDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 $('#dns-save').onclick = () => {
   const url = $<HTMLInputElement>('#dns-url').value.trim();
   if (url && !/^https:\/\/[^\s]+$/.test(url)) {
@@ -501,7 +497,6 @@ function renderVault(s: UiState): void {
 
 function openVault(): void {
   if (!state) return;
-  send({ type: 'layout:overlay', open: true });
   vaultDialog.showModal();
   renderVault(state);
   const focus = state.vault.status === 'locked' ? '#vault-password' : state.vault.status === 'disconnected' ? '#vault-client-id' : null;
@@ -525,7 +520,6 @@ $('#save-yes').onclick = () => {
 $('#save-no').onclick = () => answerSave('dismiss');
 $('#save-never').onclick = () => answerSave('never');
 vaultDialog.addEventListener('close', () => {
-  send({ type: 'layout:overlay', open: false });
   for (const sel of ['#vault-client-secret', '#vault-connect-password', '#vault-password']) $<HTMLInputElement>(sel).value = '';
 });
 $('#vault-close').onclick = () => vaultDialog.close();
@@ -620,11 +614,9 @@ $('#panel-add').onclick = () => {
   $('#panel-ws').replaceChildren(...state.workspaces.map((w) => el('option', { value: w.id, textContent: w.name, selected: w.id === state!.activeWorkspaceId })));
   $<HTMLInputElement>('#panel-url').value = '';
   $<HTMLInputElement>('#panel-mobile').checked = false;
-  send({ type: 'layout:overlay', open: true });
   panelDialog.showModal();
   $('#panel-url').focus();
 };
-panelDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 $('#panel-cancel').onclick = () => panelDialog.close();
 $('#panel-form').addEventListener('submit', (e) => {
   const raw = $<HTMLInputElement>('#panel-url').value.trim();
@@ -673,7 +665,6 @@ function openModules(): void {
   if (!state) return;
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== modulesDialog) d.close();
   showModulesView(false);
-  send({ type: 'layout:overlay', open: true });
   if (!modulesDialog.open) modulesDialog.showModal();
   renderModules(state);
 }
@@ -693,7 +684,6 @@ function openCustomEditor(id: string | null): void {
 }
 
 $('#open-modules').onclick = openModules;
-modulesDialog.addEventListener('close', () => { if (!document.querySelector('dialog[open]')) send({ type: 'layout:overlay', open: false }); });
 $('#custom-new').onclick = () => openCustomEditor(null);
 $('#custom-cancel').onclick = () => showModulesView(false);
 $('#custom-save').onclick = () => {
@@ -744,7 +734,6 @@ function openPalette(): void {
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
   paletteInput.value = '';
   paletteSel = 0;
-  send({ type: 'layout:overlay', open: true });
   send({ type: 'palette:toggle', open: true });
   palette.showModal();
   paletteInput.focus();
@@ -765,7 +754,6 @@ function runPalette(index: number): void {
 
 palette.addEventListener('close', () => {
   send({ type: 'palette:toggle', open: false });
-  if (!document.querySelector('dialog[open]')) send({ type: 'layout:overlay', open: false });
 });
 paletteInput.addEventListener('input', () => { paletteSel = 0; renderPalette(); });
 $('#palette-btn').onclick = openPalette;
@@ -804,12 +792,10 @@ function openGroupDialog(groupId: string): void {
   editingGroup = g;
   $<HTMLInputElement>('#group-name').value = g.name;
   for (const r of document.querySelectorAll<HTMLInputElement>('input[name="group-color"]')) r.checked = r.value === g.color;
-  send({ type: 'layout:overlay', open: true });
   groupDialog.showModal();
   $('#group-name').focus();
 }
 
-groupDialog.addEventListener('close', () => send({ type: 'layout:overlay', open: false }));
 $('#group-cancel').onclick = () => groupDialog.close();
 $('#group-form').addEventListener('submit', () => {
   if (!editingGroup) return;
@@ -865,6 +851,21 @@ $<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
   }
 });
 $<HTMLInputElement>('#address').addEventListener('blur', () => render());
+
+// ------------------------------------------------------------ diálogos × página nativa
+// A página é desenhada pelo processo principal POR CIMA desta interface: enquanto houver
+// QUALQUER diálogo aberto, ela fica escondida. Regra única (observa o atributo "open").
+// Regressão: cada diálogo avisava sozinho; ao trocar de um diálogo para outro, o aviso
+// "fechou" chegava depois do "abriu" e a página cobria o diálogo novo (tela escura).
+let overlayShown = false;
+const syncOverlay = () => {
+  const open = document.querySelector('dialog[open]') !== null;
+  if (open === overlayShown) return;
+  overlayShown = open;
+  send({ type: 'layout:overlay', open });
+};
+const dialogObserver = new MutationObserver(syncOverlay);
+for (const d of document.querySelectorAll('dialog')) dialogObserver.observe(d, { attributes: true, attributeFilter: ['open'] });
 
 window.apollo.onState((next) => {
   // Trocou de site: fecha o painel de permissões.
