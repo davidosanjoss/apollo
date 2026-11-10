@@ -2,7 +2,7 @@
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
 import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
+import { GENERATOR_LENGTHS, GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -591,8 +591,39 @@ function renderPanels(s: UiState): void {
   });
   const active = s.panels.find((p) => p.id === s.activePanelId);
   panelArea.hidden = !active;
-  if (active) panelArea.style.width = `${active.width}px`;
+  $('#panel-resizer').hidden = !active;
+  if (active && !resizing) panelArea.style.width = `${active.width}px`;
 }
+
+// Arrastar a borda: largura ao vivo (o main acompanha pelo ResizeObserver) e salva ao soltar.
+let resizing: { id: string; startX: number; startWidth: number } | null = null;
+const resizer = $('#panel-resizer');
+const clampWidth = (w: number) => Math.round(Math.min(Math.max(w, PANEL_MIN_WIDTH),
+  Math.min(PANEL_MAX_WIDTH, window.innerWidth - 300)));
+resizer.addEventListener('pointerdown', (e) => {
+  if (!state?.activePanelId) return;
+  e.preventDefault();
+  resizer.setPointerCapture(e.pointerId); // continua recebendo o mouse mesmo sobre a página
+  resizer.classList.add('dragging');
+  resizing = { id: state.activePanelId, startX: e.clientX, startWidth: panelArea.getBoundingClientRect().width };
+});
+resizer.addEventListener('pointermove', (e) => {
+  if (!resizing) return;
+  panelArea.style.width = `${clampWidth(resizing.startWidth + (resizing.startX - e.clientX))}px`;
+});
+const endResize = (e: PointerEvent) => {
+  if (!resizing) return;
+  const { id } = resizing;
+  resizing = null;
+  resizer.classList.remove('dragging');
+  if (resizer.hasPointerCapture(e.pointerId)) resizer.releasePointerCapture(e.pointerId);
+  send({ type: 'panel:set', panelId: id, width: clampWidth(panelArea.getBoundingClientRect().width) });
+};
+resizer.addEventListener('pointerup', endResize);
+resizer.addEventListener('pointercancel', endResize);
+resizer.addEventListener('dblclick', () => {
+  if (state?.activePanelId) send({ type: 'panel:set', panelId: state.activePanelId, width: PANEL_DEFAULT_WIDTH });
+});
 
 const sendPanelBounds = () => {
   const r = panelArea.getBoundingClientRect();

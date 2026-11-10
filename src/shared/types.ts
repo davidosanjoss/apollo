@@ -194,7 +194,10 @@ export interface ModuleInfo { id: ModuleId; name: string; description: string; e
 
 export interface CustomizationInfo { id: string; name: string; sites: string; css: string; js: string; enabled: boolean }
 
-export const PANEL_WIDTHS = [320, 420, 520, 640] as const;
+/** Largura do painel (px): ajustada arrastando a borda; salva por painel. */
+export const PANEL_MIN_WIDTH = 260;
+export const PANEL_MAX_WIDTH = 1600;
+export const PANEL_DEFAULT_WIDTH = 420;
 
 /** Sugestões para o diálogo de novo painel. */
 export const PANEL_SUGGESTIONS: { name: string; url: string; mobile?: boolean }[] = [

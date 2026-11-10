@@ -89,6 +89,35 @@ describe('painéis laterais', () => {
     expect(app.activeTab(s).url).toBe(`${site.url}/page?title=Aberto+do+painel`);
   });
 
+  it('arrastar a borda muda a largura do painel e salva só para ele', async () => {
+    let s = await app.state();
+    const [a, b] = s.panels;
+    await app.send({ type: 'panel:toggle', panelId: a.id });
+    await app.until((x) => x.activePanelId === a.id, 'painel A aberto');
+    await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('panel-resizer').hidden`), 'alça visível');
+    await app.ui.drag('#panel-resizer', -150); // para a esquerda = mais largo
+    s = await app.until((x) => x.panels.find((p) => p.id === a.id)!.width === 570, 'A salvo com 570');
+    expect(s.panels.find((p) => p.id === b.id)!.width).toBe(420); // o outro não muda
+    expect(await app.ui.eval<number>(`Math.round(document.getElementById('panel-area').getBoundingClientRect().width)`)).toBe(570);
+
+    // Abrir o outro painel usa a largura DELE.
+    await app.send({ type: 'panel:toggle', panelId: b.id });
+    await app.until((x) => x.activePanelId === b.id, 'B aberto');
+    await waitFor(async () => (await app.ui.eval<number>(`Math.round(document.getElementById('panel-area').getBoundingClientRect().width)`)) === 420, 'B com 420');
+    await app.ui.drag('#panel-resizer', 100); // para a direita = mais estreito
+    await app.until((x) => x.panels.find((p) => p.id === b.id)!.width === 320, 'B salvo com 320');
+  });
+
+  it('não passa dos limites; duplo clique volta à largura padrão', async () => {
+    const b = (await app.state()).activePanelId!;
+    await app.ui.drag('#panel-resizer', 2000);
+    await app.until((x) => x.panels.find((p) => p.id === b)!.width === 260, 'mínimo 260');
+    await app.ui.doubleClick('#panel-resizer');
+    await app.until((x) => x.panels.find((p) => p.id === b)!.width === 420, 'padrão 420');
+    await app.send({ type: 'panel:set', panelId: b, width: 333 });
+    await app.until((x) => x.panels.find((p) => p.id === b)!.width === 333, 'salvo');
+  });
+
   it('remover fecha o site; ao reabrir o Apollo os painéis voltam, sem carregar sozinhos', async () => {
     const s0 = await app.state();
     const links = s0.panels.find((p) => p.url.endsWith('/links'))!;
@@ -100,6 +129,7 @@ describe('painéis laterais', () => {
     app = await Apollo.launch(profile.dir);
     const s = await app.state();
     expect(s.panels.map((p) => p.loaded)).toEqual([false, false]);
+    expect(s.panels.map((p) => p.width)).toEqual([570, 333]); // larguras escolhidas sobrevivem
     expect(s.activePanelId).toBeNull();
     await sleep(300);
     expect(await pageTargets(`${site.url}/cookie`)).toHaveLength(0); // não carregou sem pedir

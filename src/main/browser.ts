@@ -49,7 +49,7 @@ import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
 import type { MemoryReport, ModuleId, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS, PANEL_WIDTHS } from '../shared/types';
+import { GROUP_COLORS, PANEL_DEFAULT_WIDTH } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -702,8 +702,9 @@ export class Browser {
       { type: 'separator' },
       { label: 'Recarregar', enabled: this.panelViews.has(id), click: () => this.panelViews.get(id)?.webContents.reload() },
       { label: 'Versão para celular', type: 'checkbox', checked: p.mobile, click: this.run({ type: 'panel:set', panelId: id, mobile: !p.mobile }) },
-      { label: 'Largura', submenu: PANEL_WIDTHS.map((w) => ({ label: `${w} px`, type: 'radio' as const, checked: p.width === w,
-        click: this.run({ type: 'panel:set', panelId: id, width: w }) })) },
+      // Largura: arrastando a borda esquerda do painel (salva por painel).
+      { label: `Voltar à largura padrão (${PANEL_DEFAULT_WIDTH} px)`, enabled: p.width !== PANEL_DEFAULT_WIDTH,
+        click: this.run({ type: 'panel:set', panelId: id, width: PANEL_DEFAULT_WIDTH }) },
       { type: 'separator' },
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);

@@ -201,6 +201,34 @@ export class Cdp {
     }
   }
 
+  /** Arrastar com o mouse de verdade: pressiona no elemento, move dx/dy em passos e solta. */
+  async drag(selector: string, dx: number, dy = 0): Promise<void> {
+    const p = await this.eval<{ x: number; y: number } | null>(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    })()`);
+    if (!p) throw new Error(`elemento não encontrado: ${selector}`);
+    await this.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y });
+    await this.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', buttons: 1, clickCount: 1 });
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      await this.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x + (dx * i) / steps, y: p.y + (dy * i) / steps, button: 'left', buttons: 1 });
+    }
+    await this.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x + dx, y: p.y + dy, button: 'left', buttons: 0, clickCount: 1 });
+  }
+
+  /** Duplo clique de verdade. */
+  async doubleClick(selector: string): Promise<void> {
+    const p = await this.eval<{ x: number; y: number }>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    for (const clickCount of [1, 2]) {
+      await this.call('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount });
+      await this.call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount });
+    }
+  }
+
   /** Enter de verdade (evento confiável) no elemento, como o usuário faria. */
   async pressEnter(selector: string): Promise<void> {
     await this.eval(`document.querySelector(${JSON.stringify(selector)}).focus(); true`);
@@ -321,7 +349,9 @@ export class Apollo {
   static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
     const port = await freePort();
     // Sem janelas na tela (Linux): o Chromium desenha em memória. APOLLO_E2E_SHOW=1 mostra as janelas.
-    const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
+    // Tela virtual do tamanho de um monitor comum (o padrão do modo headless é pequeno demais).
+    const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW
+      ? ['--ozone-platform=headless', '--ozone-override-screen-size=1600,1000'] : [];
     const proc = spawn(electronBin, [ROOT, `--remote-debugging-port=${port}`, ...headless], {
       env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
