@@ -1,9 +1,10 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
+import { downloadFraction, downloadStatus } from '../shared/format';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -77,6 +78,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderDownloads(s);
   renderFind(s);
   renderBookmarks(s);
   renderPermissionPrompt(s);
@@ -273,6 +275,79 @@ $('#home-search').addEventListener('submit', (e) => {
   q.value = '';
   send({ type: 'tab:navigate', url });
 });
+
+// ------------------------------------------------------------ downloads
+
+const downloadsDialog = $<HTMLDialogElement>('#downloads-dialog');
+let knownDownloads = new Set<string>();
+
+function renderDownloads(s: UiState): void {
+  const btn = $('#downloads-btn');
+  const running = s.downloads.filter((d) => d.state === 'progressing' || d.state === 'paused');
+  btn.hidden = s.downloads.length === 0;
+  // Anel de progresso: soma de tudo o que está baixando (tamanho conhecido).
+  const known = running.filter((d) => d.total > 0);
+  const p = known.length ? known.reduce((a, d) => a + d.received, 0) / known.reduce((a, d) => a + d.total, 0) : 0;
+  btn.classList.toggle('running', running.length > 0);
+  btn.style.setProperty('--p', String(p));
+  const badge = $('#downloads-active');
+  badge.hidden = running.length === 0;
+  badge.textContent = String(running.length);
+  btn.title = running.length ? `Downloads: ${running.length} em andamento` : 'Downloads';
+  // Download novo: o botão pisca (sem abrir nada por cima da página).
+  const ids = new Set(s.downloads.map((d) => d.id));
+  if ([...ids].some((id) => !knownDownloads.has(id)) && knownDownloads.size + ids.size > 0) {
+    btn.classList.remove('pulse');
+    void btn.offsetWidth; // reinicia a animação
+    btn.classList.add('pulse');
+  }
+  knownDownloads = ids;
+  if (downloadsDialog.open) renderDownloadList(s);
+}
+
+function renderDownloadList(s: UiState): void {
+  const act = (id: string, action: DownloadAction) => () => send({ type: 'download:action', downloadId: id, action });
+  const button = (label: string, title: string, onclick: () => void) => {
+    const b = el('button', { type: 'button', className: 'icon-btn', textContent: label, title });
+    b.onclick = onclick;
+    return b;
+  };
+  if (!s.downloads.length) {
+    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download nesta sessão.' }));
+    return;
+  }
+  $('#downloads-list').replaceChildren(...s.downloads.map((d) => {
+    const li = el('li');
+    li.dataset.downloadId = d.id;
+    const done = d.state === 'completed';
+    const name = el('span', { className: `name${done ? ' done' : ''}`, textContent: d.filename, title: d.url });
+    if (done) name.onclick = act(d.id, 'open');
+    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`, textContent: downloadStatus(d) });
+    const actions = el('span', { className: 'actions' });
+    if (d.state === 'progressing') actions.append(button('⏸', 'Pausar', act(d.id, 'pause')));
+    if (d.state === 'paused' || d.state === 'interrupted') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
+    if (d.state === 'progressing' || d.state === 'paused') actions.append(button('✕', 'Cancelar', act(d.id, 'cancel')));
+    if (done) actions.append(button('📂', 'Mostrar na pasta', act(d.id, 'show')));
+    if (!(d.state === 'progressing' || d.state === 'paused')) actions.append(button('🗑', 'Tirar da lista', act(d.id, 'remove')));
+    li.append(name, actions, status);
+    const f = downloadFraction(d);
+    if ((d.state === 'progressing' || d.state === 'paused') && f !== null) {
+      const bar = el('progress');
+      bar.max = 1;
+      bar.value = f;
+      li.append(bar);
+    }
+    return li;
+  }));
+}
+
+$('#downloads-btn').onclick = () => {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  renderDownloadList(state);
+  downloadsDialog.showModal();
+};
+$('#downloads-clear').onclick = () => send({ type: 'download:clear' });
 
 // ------------------------------------------------------------ localizar na página (Ctrl+F)
 
@@ -604,6 +679,7 @@ const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
 
 function renderSettings(s: UiState): void {
   if (!settingsDialog.open) return;
+  $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
   const t = s.settings.dnsTest;
@@ -635,6 +711,7 @@ function openSettings(): void {
 }
 
 $('#settings-btn').onclick = openSettings;
+$<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
 $<HTMLSelectElement>('#spellcheck').onchange = (e) =>
   send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });
 $('#dns-save').onclick = () => {

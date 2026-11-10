@@ -27,6 +27,7 @@
       <span id="ws-badge"></span>
       <button id="palette-btn" class="icon-btn" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
       <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
+      <button id="downloads-btn" class="icon-btn" title="Downloads" hidden>↓<span id="downloads-active" class="badge" hidden></span></button>
       <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
       <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
       <button id="shield-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg><span id="blocked-count" hidden></span></button>
@@ -162,6 +163,10 @@
       <h3>Privacidade (padrão de todos os workspaces)</h3>
       <div id="global-privacy"></div>
 
+      <h3>Downloads</h3>
+      <label class="remember"><input type="checkbox" id="download-ask"> Perguntar onde salvar cada arquivo</label>
+      <p class="hint">Desmarcado: vai direto para a pasta Downloads (com "(1)", "(2)"… se o nome já existir). "Salvar como…" no botão direito sempre pergunta.</p>
+
       <h3>Corretor ortográfico</h3>
       <label>Idiomas <select id="spellcheck">
         <option value="pt-en">Português (Brasil) e inglês</option>
@@ -225,6 +230,18 @@
           <button type="button" id="custom-cancel">Voltar</button>
           <button type="button" id="custom-save" class="primary">Salvar</button>
         </div>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="downloads-dialog">
+    <form method="dialog">
+      <h2>Downloads</h2>
+      <ul id="downloads-list"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="downloads-clear">Limpar a lista</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
       </div>
     </form>
   </dialog>

@@ -121,6 +121,29 @@ export async function startSite(): Promise<TestSite> {
       case '/track/pixel.gif':
         res.writeHead(200, { 'content-type': 'image/gif' });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/file': {
+        // Download: anexo pequeno com o nome pedido.
+        const name = u.searchParams.get('name') ?? 'arquivo.txt';
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': '2048',
+          'content-disposition': `attachment; filename="${name}"` });
+        return res.end(Buffer.alloc(2048, 65));
+      }
+      case '/slow-file': {
+        // Download lento (1 MB em ~6 s): dá tempo de pausar/cancelar.
+        const total = 1024 * 1024;
+        res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': String(total),
+          'content-disposition': 'attachment; filename="grande.bin"' });
+        let sent = 0;
+        const timer = setInterval(() => {
+          if (res.destroyed) { clearInterval(timer); return; }
+          const n = Math.min(16 * 1024, total - sent);
+          sent += n;
+          res.write(Buffer.alloc(n, 66));
+          if (sent >= total) { clearInterval(timer); res.end(); }
+        }, 100);
+        req.on('close', () => clearInterval(timer));
+        return;
+      }
       case '/slow': {
         // Página lenta: responde depois de ?ms (simula rede/CI lentos).
         const ms = Number(u.searchParams.get('ms') ?? 1500);

@@ -51,6 +51,7 @@ import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTa
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
+import { DownloadManager } from './downloads';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
@@ -115,7 +116,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -185,6 +186,7 @@ export class Browser {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
       this.applySpellcheck(ses);
+      this.downloads.attach(ses);
       ses.setDisplayMediaRequestHandler((request, callback) => { void this.handleDisplayMedia(request, callback); });
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
@@ -578,6 +580,14 @@ export class Browser {
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
   }
+
+  // ------------------------------------------------------------ downloads
+
+  private readonly downloads = new DownloadManager({
+    dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
+    ask: () => this.store.getKv('download-ask') === '1',
+    onChange: () => this.push(),
+  });
 
   // ------------------------------------------------------------ localizar na página (Ctrl+F)
 
@@ -1366,7 +1376,7 @@ export class Browser {
       case 'search': newTab(a.url, true); break;
       case 'copy-text': clipboard.writeText(a.text); break;
       case 'copy-image': wc.copyImageAt(params.x, params.y); break;
-      case 'save-url': wc.downloadURL(a.url); break;
+      case 'save-url': this.downloads.saveAs(wc, a.url); break;
       case 'replace-misspelling': wc.replaceMisspelling(a.word); break;
       case 'add-to-dictionary': wc.session.addWordToSpellCheckerDictionary(a.word); break;
       case 'edit': wc[a.op](); break;
@@ -1553,6 +1563,9 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
+      case 'download:clear': this.downloads.clear(); break;
+      case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
       case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
       case 'find:close': this.stopFind(); break;
       case 'bookmark:add': this.addBookmark(); break;
@@ -1787,7 +1800,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -1863,13 +1876,14 @@ export class Browser {
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')) },
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1' },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      downloads: this.downloads.list(),
       find: this.findState && this.findState.tabId === ws.activeTabId
         ? { text: this.findState.text, active: this.findState.active, matches: this.findState.matches } : null,
       activeBookmarkId: active && !isHomeUrl(active.url) ? this.store.findBookmark(ws.id, active.url)?.id ?? null : null,

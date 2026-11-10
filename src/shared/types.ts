@@ -159,6 +159,8 @@ export interface SettingsInfo {
   /** Camada global de privacidade (null = padrão do Apollo). */
   privacy: Record<PrivacyFeature, boolean | null>;
   spellcheck: SpellcheckMode;
+  /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
+  downloadAsk: boolean;
 }
 
 export interface UiState {
@@ -193,9 +195,23 @@ export interface UiState {
   bookmarks: BookmarkInfo[];
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
   activeBookmarkId: string | null;
+  /** Downloads desta sessão do Apollo (mais recente primeiro). */
+  downloads: DownloadInfo[];
   /** Busca na página (Ctrl+F) da aba ativa: resultado atual / total. */
   find: { text: string; active: number; matches: number } | null;
 }
+
+export interface DownloadInfo {
+  id: string;
+  filename: string;
+  url: string;
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted';
+  received: number;
+  /** 0 = tamanho desconhecido. */
+  total: number;
+}
+
+export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove';
 
 export interface BookmarkInfo {
   id: string;
@@ -310,6 +326,10 @@ export type UiCommand =
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  | { type: 'download:action'; downloadId: string; action: DownloadAction }
+  /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
+  | { type: 'download:clear' }
+  | { type: 'settings:download-ask'; ask: boolean }
   /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
   | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
   | { type: 'find:close' }

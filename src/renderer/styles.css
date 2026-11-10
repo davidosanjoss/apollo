@@ -309,6 +309,22 @@ dialog .error[hidden] { display: none; }
 #find-input.none { border-color: #d64545; }
 #find-count { color: var(--muted); font-size: 12px; min-width: 90px; }
 
+#downloads-btn { position: relative; }
+#downloads-btn.running { background: conic-gradient(var(--accent) calc(var(--p, 0) * 1turn), transparent 0); border-radius: 50%; }
+#downloads-btn.pulse { animation: pulse .8s ease-out 2; }
+@keyframes pulse { 50% { transform: scale(1.25); } }
+#downloads-dialog { width: 560px; max-width: calc(100vw - 32px); }
+#downloads-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 60vh; overflow-y: auto; }
+#downloads-list li { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; padding: 8px 4px; border-bottom: 1px solid var(--panel-2); }
+#downloads-list .name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+#downloads-list .name.done { cursor: pointer; }
+#downloads-list .name.done:hover { text-decoration: underline; }
+#downloads-list .status { grid-column: 1; color: var(--muted); font-size: 12px; }
+#downloads-list .status.failed { color: #d64545; }
+#downloads-list .actions { grid-row: 1 / span 3; grid-column: 2; display: flex; gap: 4px; align-items: center; }
+#downloads-list progress { grid-column: 1; width: 100%; height: 4px; }
+#downloads-list .empty { color: var(--muted); border: 0; }
+
 #home-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; background: var(--bg); padding-bottom: 12vh; }
 #home-greeting, #home-date { margin: 0; color: var(--muted); font-size: 16px; }
