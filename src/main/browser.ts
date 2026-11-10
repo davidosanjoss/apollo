@@ -328,6 +328,11 @@ export class Browser {
     };
 
     wc.on('page-title-updated', (_e, title) => update({ title }));
+    wc.on('found-in-page', (_e, r) => {
+      if (this.findState?.tabId !== tabId) return;
+      this.findState = { ...this.findState, active: r.activeMatchOrdinal, matches: r.matches };
+      this.push();
+    });
     wc.on('page-favicon-updated', (_e, favicons) => update({ favicon: favicons[0] ?? null }));
     wc.on('did-navigate', (_e, url) => {
       // Código-fonte: o evento traz a URL de dentro; a aba guarda "view-source:…" (senão,
@@ -572,6 +577,31 @@ export class Browser {
       tabPaused: this.pausedTabs.has(tab.id),
       blocked: this.blocked.get(tab.id) ?? { ads: 0, trackers: 0 },
     };
+  }
+
+  // ------------------------------------------------------------ localizar na página (Ctrl+F)
+
+  private findState: { tabId: string; text: string; active: number; matches: number } | null = null;
+
+  private find(text: string, forward: boolean, findNext: boolean): void {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (!tab || !wc || wc.isDestroyed()) return;
+    if (!text) { this.stopFind(); this.findState = { tabId: tab.id, text: '', active: 0, matches: 0 }; this.push(); return; }
+    // Outra aba ou texto novo: começa do zero (contagem chega pelo found-in-page).
+    if (this.findState?.tabId !== tab.id || this.findState.text !== text) {
+      this.findState = { tabId: tab.id, text, active: 0, matches: 0 };
+      findNext = false;
+    }
+    wc.findInPage(text, { forward, findNext, matchCase: false });
+  }
+
+  private stopFind(): void {
+    const st = this.findState;
+    this.findState = null;
+    const wc = st ? this.views.get(st.tabId)?.webContents : undefined;
+    if (wc && !wc.isDestroyed()) wc.stopFindInPage('keepSelection');
+    this.push();
   }
 
   // ------------------------------------------------------------ favoritos (por workspace)
@@ -1044,6 +1074,7 @@ export class Browser {
         this.win.contentView.removeChildView(old);
       }
       this.lastSeen.set(this.attachedTabId, Date.now());
+      if (this.findState?.tabId === this.attachedTabId) this.stopFind();
       this.attachedTabId = null;
       this.scheduleHibernation();
     }
@@ -1465,6 +1496,12 @@ export class Browser {
       case 'memory-monitor': this.toggleMemoryMonitor(!this.memoryTimer); break;
       case 'autofill': this.autofill(); break;
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
+      case 'find': this.focusUi(); this.emit({ type: 'open-find' }); break;
+      case 'find-next':
+      case 'find-prev':
+        if (this.findState?.text) this.find(this.findState.text, action === 'find-next', true);
+        else { this.focusUi(); this.emit({ type: 'open-find' }); }
+        break;
       case 'bookmark': {
         const b = this.addBookmark();
         if (b) { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); }
@@ -1516,6 +1553,8 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
+      case 'find:close': this.stopFind(); break;
       case 'bookmark:add': this.addBookmark(); break;
       case 'bookmark:update': this.updateBookmark(cmd.bookmarkId, cmd.title, cmd.url); break;
       case 'bookmark:remove': this.store.removeBookmark(cmd.bookmarkId); break;
@@ -1831,6 +1870,8 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      find: this.findState && this.findState.tabId === ws.activeTabId
+        ? { text: this.findState.text, active: this.findState.active, matches: this.findState.matches } : null,
       activeBookmarkId: active && !isHomeUrl(active.url) ? this.store.findBookmark(ws.id, active.url)?.id ?? null : null,
     };
   }

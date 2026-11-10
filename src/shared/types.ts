@@ -193,6 +193,8 @@ export interface UiState {
   bookmarks: BookmarkInfo[];
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
   activeBookmarkId: string | null;
+  /** Busca na página (Ctrl+F) da aba ativa: resultado atual / total. */
+  find: { text: string; active: number; matches: number } | null;
 }
 
 export interface BookmarkInfo {
@@ -308,6 +310,9 @@ export type UiCommand =
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
+  | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
+  | { type: 'find:close' }
   /** Marca a página da aba ativa como favorita (no workspace dela). */
   | { type: 'bookmark:add' }
   | { type: 'bookmark:update'; bookmarkId: string; title: string; url: string }
@@ -362,6 +367,8 @@ export type UiEvent =
   | { type: 'open-vault' }
   /** Abrir o diálogo de nome/cor do grupo (ex.: logo depois de criá-lo). */
   | { type: 'edit-group'; groupId: string }
+  /** Abrir a barra de busca na página (Ctrl+F). */
+  | { type: 'open-find' }
   /** Abrir o diálogo do favorito (Ctrl+D: acabou de marcar ou já estava marcado). */
   | { type: 'edit-bookmark'; bookmarkId: string };
 

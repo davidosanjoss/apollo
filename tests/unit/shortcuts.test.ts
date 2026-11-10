@@ -24,6 +24,11 @@ describe('shortcutFor', () => {
     [key('L', { control: true, shift: true }), 'autofill'],
     [key('k', { control: true }), 'palette'],
     [key('d', { control: true }), 'bookmark'],
+    [key('f', { control: true }), 'find'],
+    [key('F3'), 'find-next'],
+    [key('F3', { shift: true }), 'find-prev'],
+    [key('g', { control: true }), 'find-next'],
+    [key('G', { control: true, shift: true }), 'find-prev'],
   ])('%o → %s', (input, action) => {
     expect(shortcutFor(input)).toBe(action);
   });

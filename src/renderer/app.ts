@@ -77,6 +77,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderFind(s);
   renderBookmarks(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
@@ -272,6 +273,52 @@ $('#home-search').addEventListener('submit', (e) => {
   q.value = '';
   send({ type: 'tab:navigate', url });
 });
+
+// ------------------------------------------------------------ localizar na página (Ctrl+F)
+
+const findBar = $('#find-bar');
+const findInput = $<HTMLInputElement>('#find-input');
+let findTabId: string | null = null;
+
+function openFind(): void {
+  const tab = state?.tabs.find((t) => t.id === state?.activeTabId);
+  if (!tab?.live) return; // página inicial / aba sem página: nada para buscar
+  findTabId = tab.id;
+  findBar.hidden = false;
+  findInput.focus();
+  findInput.select();
+  if (findInput.value) send({ type: 'find:query', text: findInput.value, forward: true, findNext: false });
+}
+
+function closeFind(focusPage = true): void {
+  if (findBar.hidden) return;
+  findBar.hidden = true;
+  findTabId = null;
+  send({ type: 'find:close' });
+  if (focusPage) send({ type: 'tab:focus' });
+}
+
+function renderFind(s: UiState): void {
+  if (findBar.hidden) return;
+  if (s.activeTabId !== findTabId) { closeFind(false); return; } // trocou de aba
+  const f = s.find;
+  const count = $('#find-count');
+  if (!f || !f.text) { count.textContent = ''; findInput.classList.remove('none'); return; }
+  count.textContent = f.matches ? `${f.active} de ${f.matches}` : 'Nenhum resultado';
+  findInput.classList.toggle('none', f.matches === 0);
+}
+
+const findStep = (forward: boolean) => {
+  if (findInput.value) send({ type: 'find:query', text: findInput.value, forward, findNext: true });
+};
+findInput.addEventListener('input', () => send({ type: 'find:query', text: findInput.value, forward: true, findNext: false }));
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); findStep(!e.shiftKey); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+});
+$('#find-next').onclick = () => findStep(true);
+$('#find-prev').onclick = () => findStep(false);
+$('#find-close').onclick = () => closeFind();
 
 // ------------------------------------------------------------ favoritos
 
@@ -1129,6 +1176,8 @@ window.apollo.onEvent((event) => {
     openPalette();
   } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
+  } else if (event.type === 'open-find') {
+    openFind();
   } else if (event.type === 'edit-bookmark') {
     openBookmarkDialog(event.bookmarkId);
   } else if (event.type === 'edit-group') {

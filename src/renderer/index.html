@@ -34,6 +34,15 @@
       <button id="bookmark-btn" class="icon-btn" title="Adicionar aos favoritos (Ctrl+D)" hidden>☆</button>
     </nav>
 
+    <div id="find-bar" class="bar" hidden>
+      <input id="find-input" type="search" spellcheck="false" placeholder="Localizar na página" aria-label="Localizar na página">
+      <span id="find-count" aria-live="polite"></span>
+      <button id="find-prev" class="icon-btn" title="Anterior (Shift+Enter)">↑</button>
+      <button id="find-next" class="icon-btn" title="Próximo (Enter)">↓</button>
+      <span class="spacer"></span>
+      <button id="find-close" class="icon-btn" title="Fechar (Esc)">✕</button>
+    </div>
+
     <div id="permission-bar" class="bar" hidden>
       <span id="permission-text"></span>
       <label class="remember"><input type="checkbox" id="permission-remember" checked> Lembrar</label>

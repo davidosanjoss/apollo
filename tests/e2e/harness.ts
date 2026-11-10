@@ -101,6 +101,8 @@ export async function startSite(): Promise<TestSite> {
           'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
         });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/find':
+        return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
       case '/ctx':
         // Menu de contexto: link, imagem, campo com palavra errada, texto.
         return html(`<p id="texto">Universidade Federal</p>

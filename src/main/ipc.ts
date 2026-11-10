@@ -118,6 +118,9 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && typeof c.css === 'string' && c.css.length <= MAX_CODE && typeof c.js === 'string' && c.js.length <= MAX_CODE
         && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
+    case 'find:query':
+      return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'find:close':
     case 'bookmark:add': return { type: c.type } as UiCommand;
     case 'bookmark:update':
       return id(c.bookmarkId) && str(c.title, 300) && url(c.url) ? (c as UiCommand) : null;

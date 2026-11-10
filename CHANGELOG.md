@@ -7,6 +7,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
 - Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Localizar na página (Ctrl+F): barra com contagem ("2 de 5"), Enter/F3/Ctrl+G para o próximo e Shift para o anterior, Esc fecha; fecha sozinha ao trocar de aba.
 - Menu de contexto nas páginas e painéis (botão direito): link (abrir em nova aba ou em segundo plano, copiar endereço/texto, salvar), imagem (abrir, copiar, copiar endereço, salvar), vídeo/áudio, texto selecionado (copiar, pesquisar no Google), campos (desfazer, recortar, colar, colar sem formatação, sugestões do corretor e "adicionar ao dicionário", Bitwarden), página (voltar, avançar, recarregar, ver código-fonte) e Inspecionar.
 - Aba de código-fonte guarda o "view-source:" (antes reabria a página normal ao restaurar).
 - Favoritos por workspace: estrela na barra de endereço ou Ctrl+D (abre um diálogo para editar nome e endereço, ou remover); aparecem como blocos na página inicial (clique abre na mesma aba, Ctrl/botão do meio em nova aba, botão direito edita, arrastar reordena) e no Ctrl+K.
