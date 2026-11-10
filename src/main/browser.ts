@@ -57,7 +57,7 @@ import { buildContextMenu, type ContextAction, type ContextInfo, type ContextIte
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -1062,6 +1062,21 @@ export class Browser {
         click: this.run({ type: 'panel:set', panelId: id, hibernateMin: m }),
       })) },
       { type: 'separator' },
+      // Painel não tem a barra de permissão das abas: notificações decididas aqui.
+      ...(() => {
+        const origin = originOf(p.url);
+        if (!origin) return [];
+        const cur = this.store.getPermission(p.workspaceId, origin, 'notifications');
+        const set = (decision: PermissionDecision | null) => () => {
+          this.permissions.set(p.workspaceId, origin, 'notifications', decision);
+          this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
+        };
+        return [{ label: 'Notificações', submenu: [
+          { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
+          { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
+          { label: 'Perguntar (o site pede)', type: 'radio' as const, checked: cur === null, click: set(null) },
+        ] }, { type: 'separator' as const }];
+      })(),
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);
   }
@@ -1108,6 +1123,32 @@ export class Browser {
   }
 
   /** Mostra a aba, trocando de workspace se preciso. */
+  private panelIdOf(wc: WebContents): string | null {
+    for (const [id, view] of this.panelViews) if (view.webContents === wc) return id;
+    return null;
+  }
+
+  /** Estado das notificações para a página que está carregando (aba ou painel). */
+  notificationState(wc: WebContents, url: string): 'ask' | 'allow' | 'deny' | null {
+    const origin = originOf(url);
+    const tabId = this.tabIdOf(wc);
+    const panelId = tabId ? null : this.panelIdOf(wc);
+    const ws = tabId ? this.store.getTab(tabId)?.workspaceId : panelId ? this.store.getPanel(panelId)?.workspaceId : undefined;
+    return origin && ws ? this.permissions.notificationState(ws, origin) : null;
+  }
+
+  /** Clicou numa notificação: mostra a aba (mesmo em outro workspace) ou abre o painel. */
+  showFromNotification(wc: WebContents): void {
+    const tabId = this.tabIdOf(wc);
+    const panelId = tabId ? null : this.panelIdOf(wc);
+    if (tabId) this.revealTab(tabId);
+    else if (panelId && this.activePanelId !== panelId) this.openPanel(panelId);
+    else if (!panelId) return;
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
+  }
+
   revealTab(tabId: string): void {
     const tab = this.store.getTab(tabId);
     if (!tab) return;

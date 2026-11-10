@@ -101,6 +101,15 @@ export async function startSite(): Promise<TestSite> {
           'set-cookie': `tp=${u.searchParams.get('v')}; SameSite=None; Secure; Path=/; Max-Age=86400`,
         });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
+      case '/notify':
+        // Como o WhatsApp: consulta a permissão, pede no clique e mostra notificações.
+        return html(`<button id="pedir" style="width:200px;height:50px">Ativar notificações</button>
+          <button id="simular" style="width:200px;height:50px">clique real</button><script>
+          window.log = [];
+          document.getElementById('pedir').onclick = async () => { window.log.push('pedido:' + await Notification.requestPermission()); };
+          // Simula o clique na notificação: o Chromium dá ativação ao clicar nela; aqui, um clique real na página.
+          document.getElementById('simular').onclick = () => document.dispatchEvent(new CustomEvent('apollo-notification-click'));
+          </script>`, u.searchParams.get('title') ?? 'Mensagens');
       case '/fs':
         // Como o player do YouTube: botão põe um elemento em tela cheia.
         return html(`<div id="player" style="background:#000;color:#fff;height:200px">vídeo</div>

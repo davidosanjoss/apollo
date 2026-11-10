@@ -7,6 +7,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
 - Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Notificações: sem decisão, o site agora vê "perguntar" (antes via "negado" e WhatsApp/Gmail nem pediam) e o pedido aparece na barra do Apollo. "Permitir" sem "Lembrar" vale até fechar o Apollo (antes a notificação falhava logo depois de permitir). Clicar numa notificação leva à aba (mesmo em outro workspace) ou abre o painel. Menu do painel → Notificações: permitir, bloquear ou perguntar.
 - Imprimir (Ctrl+P, também no botão direito), tela cheia (F11: só a página, sem abas/barras; aviso de como sair) e ferramentas do desenvolvedor (F12 ou Ctrl+Shift+I, em janela própria). Também no Ctrl+K.
 - Vídeo em tela cheia (YouTube etc.) agora cobre a janela inteira — antes ficava preso no espaço da aba, com a interface visível.
 - Histórico pesquisável no Ctrl+K: páginas visitadas do workspace, sem acento e com as palavras em qualquer ordem, mais visitadas e recentes primeiro (sem repetir abas abertas e favoritos). Nunca nos workspaces temporários; últimos 90 dias. Configurações → Histórico: desligar ou apagar tudo.

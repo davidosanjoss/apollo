@@ -105,6 +105,30 @@ describe('pedidos de permissão', () => {
     expect(request('geolocation').value).toBe('pendente');
   });
 
+  // Regressão: "Permitir" sem "Lembrar" liberava o pedido, mas a checagem logo depois
+  // dizia "não" — new Notification() falhava mesmo depois de o usuário permitir.
+  it('permitir sem "lembrar" vale nesta execução (pedido e checagem), sem salvar', () => {
+    const r = request('notifications');
+    pm.answer(pm.promptFor('tab1')!.id, 'allow', false);
+    expect(r.value).toBe(true);
+    expect(store.getPermission('w', SITE, 'notifications')).toBeNull();
+    expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(true);
+    expect(request('notifications').value).toBe(true); // não pergunta de novo
+    expect(pm.notificationState('w', SITE)).toBe('allow');
+    expect(pm.notificationState('outro', SITE)).toBe('ask');
+    pm.set('w', SITE, 'notifications', 'deny'); // escolha explícita no painel do site vale
+    expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(false);
+    expect(pm.notificationState('w', SITE)).toBe('deny');
+  });
+
+  it('estado das notificações: perguntar / permitir / bloquear', () => {
+    expect(pm.notificationState('w', SITE)).toBe('ask');
+    store.setPermission('w', SITE, 'notifications', 'allow');
+    expect(pm.notificationState('w', SITE)).toBe('allow');
+    store.setPermission('w', SITE, 'notifications', 'deny');
+    expect(pm.notificationState('w', SITE)).toBe('deny');
+  });
+
   it('decisão é do workspace: outro workspace não herda', () => {
     store.setPermission('outro', SITE, 'geolocation', 'allow');
     expect(request('geolocation').value).toBe('pendente');

@@ -181,6 +181,19 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
   });
   ipcMain.handle('apollo:cosmetics-dom', (event, features) => { cosmeticsFor(event, features); });
 
+  // Notificações: o que o site enxerga (só o frame principal de uma aba ou painel).
+  ipcMain.on('apollo:notification-state', (event) => {
+    try {
+      const frame = event.senderFrame;
+      event.returnValue = frame && frame === event.sender.mainFrame ? b.notificationState(event.sender, frame.url) : null;
+    } catch {
+      event.returnValue = null;
+    }
+  });
+  ipcMain.on('apollo:notification-click', (event) => {
+    if (event.senderFrame === event.sender.mainFrame) b.showFromNotification(event.sender);
+  });
+
   win.once('ready-to-show', () => {
     if (state.maximized) win.maximize();
     win.show();
