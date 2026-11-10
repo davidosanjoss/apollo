@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { pathToFileURL } from 'node:url';
 import { desktopEntry, launchCommand, urlFromArgv } from '../../src/main/default-browser';
 
 describe('navegador padrão', () => {
   it('link da linha de comando: http(s), file:// e arquivo local; ignora opções', () => {
     expect(urlFromArgv(['apollo', '--no-sandbox', 'https://moodle.ufmg.br/x?y=1'])).toBe('https://moodle.ufmg.br/x?y=1');
     expect(urlFromArgv(['/usr/bin/electron', '/app', 'http://a.com'])).toBe('http://a.com');
-    expect(urlFromArgv(['apollo', '/tmp/nao.html'], () => true)).toBe('file:///tmp/nao.html');
+    // Regressão (CI no Windows): lá o caminho ganha a letra do disco (file:///D:/tmp/…).
+    expect(urlFromArgv(['apollo', '/tmp/nao.html'], () => true)).toBe(pathToFileURL('/tmp/nao.html').toString());
     expect(urlFromArgv(['apollo', '/tmp/nao-existe.html'], () => false)).toBeNull();
     expect(urlFromArgv(['apollo', 'javascript:alert(1)'])).toBeNull();
     expect(urlFromArgv(['apollo'])).toBeNull();

@@ -26,8 +26,10 @@ describe('client hints nas requisições', () => {
   // Regressão: com o user agent trocado, o Electron não mandava nenhuma (login do Google recusado).
   it('https recebe as básicas; http comum não; quem já tem não é alterado', () => {
     const m = clientHintsModule('156.0.8078.75');
+    // Regressão (CI no Windows): a plataforma é a da máquina, não sempre "Linux".
     expect(send(m, 'https://accounts.google.com/', { 'User-Agent': CHROME })).toMatchObject({
-      'sec-ch-ua': '"Chromium";v="156", "Not-A.Brand";v="24"', 'sec-ch-ua-mobile': '?0', 'sec-ch-ua-platform': '"Linux"' });
+      'sec-ch-ua': '"Chromium";v="156", "Not-A.Brand";v="24"', 'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': `"${uaMetadata('156.0.8078.75', false).platform}"` });
     expect(Object.keys(send(m, 'http://example.com/', { 'User-Agent': CHROME }))).toEqual(['User-Agent']);
     expect(send(m, 'https://a.com/', { 'User-Agent': CHROME, 'Sec-CH-UA': 'x' })).toEqual({ 'User-Agent': CHROME, 'Sec-CH-UA': 'x' });
   });
