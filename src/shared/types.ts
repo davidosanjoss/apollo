@@ -187,6 +187,26 @@ export interface UiState {
   activePanelId: string | null;
   modules: ModuleInfo[];
   customizations: CustomizationInfo[];
+  /** Pedido de compartilhar tela aguardando a escolha do usuário. */
+  screenPicker: ScreenPickerInfo | null;
+}
+
+export interface ScreenSource {
+  id: string;
+  name: string;
+  /** system = seletor do próprio sistema (Wayland: tela ou janela). */
+  kind: 'screen' | 'window' | 'tab' | 'system';
+  /** Miniatura (data: URL) ou null. */
+  thumbnail: string | null;
+}
+
+export interface ScreenPickerInfo {
+  id: string;
+  origin: string;
+  audioRequested: boolean;
+  /** Áudio do sistema (loopback) só existe no Windows; áudio de aba em qualquer sistema. */
+  systemAudio: boolean;
+  sources: ScreenSource[];
 }
 
 export interface PanelInfo {
@@ -277,6 +297,8 @@ export type UiCommand =
   | { type: 'panel:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'panel:menu'; panelId: string; x: number; y: number }
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
+  /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
+  | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
   /** Cria (sem id) ou edita uma personalização. */
   | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
   | { type: 'custom:delete'; id: string }

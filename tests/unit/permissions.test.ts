@@ -60,8 +60,14 @@ describe('pedidos de permissão', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('nega o que não é conhecido (captura de tela, sistema de arquivos…)', () => {
-    for (const p of ['display-capture', 'fileSystem', 'idle-detection', 'window-management', 'inventada']) {
+  // Compartilhar tela passa para o seletor do Apollo (que é onde o usuário consente).
+  it('compartilhar tela segue para o seletor (não é negado aqui)', () => {
+    expect(request('display-capture').value).toBe(true);
+    expect(h.check!(TAB_WC, 'display-capture', SITE, {})).toBe(true);
+  });
+
+  it('nega o que não é conhecido (sistema de arquivos…)', () => {
+    for (const p of ['fileSystem', 'idle-detection', 'window-management', 'inventada']) {
       expect(request(p).value, p).toBe(false);
     }
   });
@@ -136,7 +142,7 @@ describe('verificação síncrona (permission check)', () => {
     store.setPermission('w', SITE, 'notifications', 'allow');
     expect(h.check!(TAB_WC, 'notifications', SITE, {})).toBe(true);
     expect(h.check!(TAB_WC, 'fullscreen', SITE, {})).toBe(true);
-    expect(h.check!(TAB_WC, 'display-capture', SITE, {})).toBe(false);
+    expect(h.check!(TAB_WC, 'window-management', SITE, {})).toBe(false);
   });
 
   it('mídia: mediaType "unknown" exige câmera e microfone', () => {

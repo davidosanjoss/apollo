@@ -94,6 +94,17 @@ dialog h3 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weigh
 dialog textarea { background: var(--bg); border: 1px solid var(--panel-2); color: var(--text); border-radius: 6px; padding: 7px 9px;
   font: 12px ui-monospace, monospace; resize: vertical; }
 
+/* ---------- compartilhar tela ---------- */
+#screen-dialog { width: 720px; max-width: calc(100vw - 32px); }
+#screen-sources { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; margin-bottom: 12px; }
+#screen-sources .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.screen-src { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; border: 2px solid transparent;
+  background: var(--panel-2); color: var(--text); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
+.screen-src img, .screen-src .nothumb { width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 4px; }
+.screen-src .nothumb { display: grid; place-items: center; color: var(--muted); font-size: 22px; }
+.screen-src span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.screen-src.selected { border-color: var(--accent); }
+
 /* ---------- paleta de comandos ---------- */
 #palette { width: 620px; max-width: calc(100vw - 32px); margin-top: 12vh; padding: 0; overflow: hidden; }
 #palette-input { width: 100%; border: 0 !important; border-bottom: 1px solid var(--panel-2) !important; border-radius: 0 !important;

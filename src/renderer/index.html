@@ -218,6 +218,20 @@
     </form>
   </dialog>
 
+  <dialog id="screen-dialog">
+    <form method="dialog" id="screen-form">
+      <h2>Compartilhar a tela</h2>
+      <p class="hint" id="screen-origin"></p>
+      <div id="screen-sources"></div>
+      <label class="remember" id="screen-audio-row"><input type="checkbox" id="screen-audio"> <span id="screen-audio-label">Compartilhar o áudio</span></label>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="screen-cancel">Cancelar</button>
+        <button type="submit" id="screen-share" class="primary" disabled>Compartilhar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="palette">
     <input id="palette-input" autocomplete="off" spellcheck="false" placeholder="Buscar abas, workspaces, ações — ou digitar um endereço">
     <ul id="palette-list" role="listbox"></ul>

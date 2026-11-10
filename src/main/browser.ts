@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
@@ -42,14 +42,18 @@ interface PendingSave {
 const SAVE_PROMPT_TTL_MS = 5 * 60_000;
 
 const CLIPBOARD_CLEAR_MS = 30_000;
+
+/** Promessa com prazo: se o sistema não responder, segue sem ela (null). */
+const within = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
+  Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
 import type { RequestContext } from './network';
 import { joinGroupInPlace, moveTab, normalize, setGroup, setPinned, type OrderTab } from './tab-order';
 import { captureSessionCookies, restoreSessionCookies, type Cipher } from './session-cookies';
 import { newId } from './store';
 import type { NetworkPipeline } from './network';
-import { PermissionManager } from './permissions';
+import { PermissionManager, originOf } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import type { MemoryReport, ModuleId, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -179,6 +183,7 @@ export class Browser {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
       this.applySpellcheck(ses);
+      ses.setDisplayMediaRequestHandler((request, callback) => { void this.handleDisplayMedia(request, callback); });
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
     return ses;
@@ -562,6 +567,133 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ compartilhar tela (Teams, Meet…)
+
+  private screenRequest: {
+    info: ScreenPickerInfo;
+    callback: (streams: Electron.Streams | null) => void;
+    requesterTabId: string | null;
+    screens: Map<string, Electron.DesktopCapturerSource>;
+    timer: NodeJS.Timeout;
+  } | null = null;
+
+  private static isWayland(): boolean {
+    return process.platform === 'linux' && app.commandLine.getSwitchValue('ozone-platform') !== 'headless'
+      && (process.env.XDG_SESSION_TYPE === 'wayland' || Boolean(process.env.WAYLAND_DISPLAY));
+  }
+
+  /** getDisplayMedia(): mostra o seletor do Apollo. A escolha do usuário é o consentimento. */
+  private async handleDisplayMedia(request: Electron.DisplayMediaRequestHandlerHandlerRequest,
+    callback: (streams: Electron.Streams | null) => void): Promise<void> {
+    if (this.screenRequest || !request.videoRequested) { callback(null); return; } // um pedido por vez
+    const requesterTabId = request.frame ? this.tabIdOfWebContentsId(this.webContentsIdOfFrame(request.frame)) : null;
+    const sources: ScreenSource[] = [];
+    const screens = new Map<string, Electron.DesktopCapturerSource>();
+    if (Browser.isWayland()) {
+      // No Wayland só o sistema (portal) pode listar telas/janelas: ele mostra o seletor dele.
+      sources.push({ id: 'system', name: 'Tela ou janela (escolher no seletor do sistema)', kind: 'system', thumbnail: null });
+    } else {
+      // Prazo: um sistema que não responde não pode impedir o seletor de abrir.
+      const list = await within(desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } }), 4000);
+      if (!list) console.warn('[apollo] não foi possível listar telas/janelas (sem resposta do sistema)');
+      for (const src of list ?? []) {
+        screens.set(src.id, src);
+        sources.push({ id: src.id, name: src.name, kind: src.id.startsWith('screen:') ? 'screen' : 'window',
+          thumbnail: src.thumbnail.isEmpty() ? null : src.thumbnail.toDataURL() });
+      }
+    }
+    for (const [tabId, view] of this.views) {
+      const wc = view.webContents;
+      if (tabId === requesterTabId || wc.isDestroyed()) continue;
+      const tab = this.store.getTab(tabId);
+      if (!tab) continue;
+      const img = await within(wc.capturePage(), 1500); // aba escondida pode não ter quadro: sem miniatura
+      const thumbnail = img && !img.isEmpty() ? img.resize({ width: 320 }).toDataURL() : null;
+      sources.push({ id: `tab:${tabId}`, name: tab.title || tab.url, kind: 'tab', thumbnail });
+    }
+    const info: ScreenPickerInfo = {
+      id: newId(),
+      origin: originOf(request.securityOrigin) ?? request.securityOrigin,
+      audioRequested: request.audioRequested,
+      systemAudio: process.platform === 'win32',
+      sources,
+    };
+    const timer = setTimeout(() => this.pickScreen(info.id, null, false), 120_000); // sem resposta: nega
+    timer.unref();
+    this.screenRequest = { info, callback, requesterTabId, screens, timer };
+    this.push();
+  }
+
+  private webContentsIdOfFrame(frame: Electron.WebFrameMain): number | undefined {
+    for (const view of this.views.values()) {
+      if (!view.webContents.isDestroyed() && view.webContents.mainFrame === frame.top) return view.webContents.id;
+    }
+    return undefined;
+  }
+
+  /** Abas sendo compartilhadas: precisam continuar desenhando quadros mesmo fora da tela. */
+  private readonly sharedTabs = new Set<string>();
+  private sharedTimer: NodeJS.Timeout | null = null;
+
+  /** Bounds fora da área visível, do tamanho normal: o Chromium desenha, ninguém vê. */
+  private offscreenBounds() {
+    return { x: -(this.bounds.width + 200), y: 0, width: Math.max(this.bounds.width, 640), height: Math.max(this.bounds.height, 360) };
+  }
+
+  /**
+   * Página escondida não desenha quadros, e a captura ficaria esperando para sempre.
+   * Enquanto a aba é compartilhada, ela fica anexada à janela, mas fora da área visível.
+   */
+  private keepRendering(tabId: string): void {
+    const view = this.views.get(tabId);
+    if (!view) return;
+    this.sharedTabs.add(tabId);
+    if (this.attachedTabId !== tabId) {
+      this.win.contentView.addChildView(view, 0);
+      view.setBounds(this.offscreenBounds());
+      view.setVisible(true);
+    }
+    this.sharedTimer ??= setInterval(() => this.checkSharedTabs(), 3000);
+  }
+
+  /** Compartilhamento acabou: a aba volta a ficar só na memória (ou é a da tela). */
+  private checkSharedTabs(): void {
+    for (const tabId of [...this.sharedTabs]) {
+      const view = this.views.get(tabId);
+      if (view && !view.webContents.isDestroyed() && view.webContents.isBeingCaptured()) continue;
+      this.sharedTabs.delete(tabId);
+      if (view && this.attachedTabId !== tabId) this.win.contentView.removeChildView(view);
+    }
+    if (!this.sharedTabs.size && this.sharedTimer) { clearInterval(this.sharedTimer); this.sharedTimer = null; }
+  }
+
+  pickScreen(requestId: string, sourceId: string | null, audio: boolean): void {
+    const req = this.screenRequest;
+    if (!req || req.info.id !== requestId) return;
+    clearTimeout(req.timer);
+    this.screenRequest = null;
+    this.push();
+    const done = (streams: Electron.Streams | null) => { try { req.callback(streams); } catch { /* pedido já encerrado */ } };
+    if (!sourceId) return done(null);
+    if (sourceId === 'system') {
+      // Wayland: o portal do sistema mostra o seletor e devolve só a escolha do usuário.
+      void desktopCapturer.getSources({ types: ['screen', 'window'] })
+        .then((list) => done(list[0] ? { video: list[0] } : null))
+        .catch(() => done(null));
+      return;
+    }
+    if (sourceId.startsWith('tab:')) {
+      const tabId = sourceId.slice(4);
+      const wc = this.views.get(tabId)?.webContents;
+      if (!wc || wc.isDestroyed()) return done(null);
+      this.keepRendering(tabId);
+      return done({ video: wc.mainFrame, ...(audio ? { audio: wc.mainFrame } : {}) });
+    }
+    const src = req.screens.get(sourceId);
+    if (!src) return done(null);
+    done({ video: src, ...(audio && process.platform === 'win32' ? { audio: 'loopback' as const } : {}) });
+  }
+
   // ------------------------------------------------------------ corretor ortográfico
 
   /** Público: o index aplica à sessão padrão (a da interface) antes de a janela carregar. */
@@ -832,7 +964,7 @@ export class Browser {
         alive: true,
         visible: tabId === this.attachedTabId,
         keepAwake: tab.keepAwake,
-        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible(),
+        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured(),
         unloadBlocked: this.unloadBlocked.has(tabId),
         lastSeenAt: this.lastSeen.get(tabId) ?? now,
         memoryMb: perTab.get(tabId) ?? null,
@@ -866,7 +998,12 @@ export class Browser {
     const tab = this.activeTab();
     if (this.attachedTabId && this.attachedTabId !== tab?.id) {
       const old = this.views.get(this.attachedTabId);
-      if (old) this.win.contentView.removeChildView(old);
+      if (old && this.sharedTabs.has(this.attachedTabId)) {
+        this.win.contentView.addChildView(old, 0); // compartilhada: continua desenhando, fora da tela
+        old.setBounds(this.offscreenBounds());
+      } else if (old) {
+        this.win.contentView.removeChildView(old);
+      }
       this.lastSeen.set(this.attachedTabId, Date.now());
       this.attachedTabId = null;
       this.scheduleHibernation();
@@ -927,6 +1064,7 @@ export class Browser {
     this.blocked.delete(tabId);
     this.pendingSaves.delete(tabId);
     this.usernameSteps.delete(tabId);
+    if (this.screenRequest?.requesterTabId === tabId) this.pickScreen(this.screenRequest.info.id, null, false);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
       this.closedTabs.push({ workspaceId: closed.workspaceId, index: idx, url: closed.url, title: closed.title, history: closed.history, groupId: closed.groupId });
@@ -1279,6 +1417,7 @@ export class Browser {
       case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
+      case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
       case 'custom:save':
         this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
         break;
@@ -1587,6 +1726,7 @@ export class Browser {
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
+      screenPicker: this.screenRequest?.info ?? null,
     };
   }
 }

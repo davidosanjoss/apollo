@@ -118,6 +118,8 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && typeof c.css === 'string' && c.css.length <= MAX_CODE && typeof c.js === 'string' && c.js.length <= MAX_CODE
         && typeof c.enabled === 'boolean' ? (c as UiCommand) : null;
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
+    case 'screen:pick':
+      return id(c.requestId) && (c.sourceId === null || str(c.sourceId, 256)) && typeof c.audio === 'boolean' ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

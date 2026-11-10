@@ -68,6 +68,17 @@ export async function startSite(): Promise<TestSite> {
         return html(`<form onsubmit="return false"><input id="email" type="email" name="loginfmt"><button id="avancar">Avançar</button></form>`, 'Etapa 1');
       case '/step2':
         return html(`<form onsubmit="return false"><input id="senha" type="password" name="passwd"><button id="entrar">Entrar</button></form>`, 'Etapa 2');
+      case '/share':
+        // Como o Teams/Meet: botão chama getDisplayMedia (precisa de clique do usuário).
+        return html(`<button id="compartilhar" style="width:200px;height:60px">Compartilhar</button><script>
+          window.resultado = 'nada';
+          document.getElementById('compartilhar').onclick = async () => {
+            try {
+              const s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+              window.resultado = 'ok:' + s.getTracks().map((t) => t.kind).sort().join('+');
+              s.getTracks().forEach((t) => t.stop());
+            } catch (e) { window.resultado = 'erro:' + e.name; }
+          };</script>`, 'Reunião');
       case '/custom':
         // A página tem uma variável própria: a personalização (mundo isolado) não pode vê-la.
         return html(`<p id="alvo">texto</p><script>window.segredoDaPagina = 'só da página';</script>`, 'Custom');

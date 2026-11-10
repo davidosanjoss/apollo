@@ -19,6 +19,9 @@ const ALWAYS_ALLOW = new Set([
   'keyboardLock',
   'mediaKeySystem', // Widevine/DRM
   'speaker-selection',
+  // Compartilhar tela: o consentimento é o seletor do Apollo (setDisplayMediaRequestHandler),
+  // que sempre pergunta o que compartilhar; aqui só deixa o pedido chegar até ele.
+  'display-capture',
 ]);
 
 /** Permissões que o usuário pode ajustar no painel do site. */

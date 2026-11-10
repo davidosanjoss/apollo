@@ -1,7 +1,7 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { DnsMode, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
@@ -86,6 +86,7 @@ function render(): void {
   renderVault(s);
   renderPanels(s);
   renderModules(s);
+  renderScreenPicker(s);
   renderPalette();
 }
 
@@ -775,6 +776,76 @@ $('#custom-delete').onclick = () => {
   if (editingCustom) send({ type: 'custom:delete', id: editingCustom });
   showModulesView(false);
 };
+
+// ------------------------------------------------------------ compartilhar tela
+
+const screenDialog = $<HTMLDialogElement>('#screen-dialog');
+let screenRequestId: string | null = null;
+let screenSelected: string | null = null;
+
+const SCREEN_GROUPS: [ScreenSource['kind'], string][] = [
+  ['system', 'Tela ou janela'], ['screen', 'Tela inteira'], ['window', 'Janela'], ['tab', 'Aba do Apollo'],
+];
+
+function renderScreenPicker(s: UiState): void {
+  const p = s.screenPicker;
+  if (!p) {
+    if (screenDialog.open) { screenRequestId = null; screenDialog.close(); }
+    return;
+  }
+  if (screenRequestId === p.id) return; // já desenhado
+  screenRequestId = p.id;
+  screenSelected = null;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== screenDialog) d.close();
+  $('#screen-origin').textContent = `${new URL(p.origin).host} quer ver o que você escolher.`;
+  const select = (id: string, btn: HTMLElement) => {
+    screenSelected = id;
+    for (const b of document.querySelectorAll('.screen-src.selected')) b.classList.remove('selected');
+    btn.classList.add('selected');
+    $<HTMLButtonElement>('#screen-share').disabled = false;
+    // Áudio: da aba (qualquer sistema) ou do computador (só Windows).
+    const kind = p.sources.find((x) => x.id === id)!.kind;
+    const audioOk = p.audioRequested && (kind === 'tab' || (p.systemAudio && kind !== 'system'));
+    $('#screen-audio-row').hidden = !audioOk;
+    $('#screen-audio-label').textContent = kind === 'tab' ? 'Compartilhar o áudio da aba' : 'Compartilhar o som do computador';
+  };
+  $('#screen-sources').replaceChildren(...SCREEN_GROUPS.flatMap(([kind, title]) => {
+    const items = p.sources.filter((x) => x.kind === kind);
+    if (!items.length) return [];
+    const grid = el('div', { className: 'grid' });
+    grid.append(...items.map((src) => {
+      const b = el('button', { type: 'button', className: 'screen-src' });
+      b.dataset.sourceId = src.id;
+      b.append(src.thumbnail ? el('img', { src: src.thumbnail, alt: '' }) : el('div', { className: 'nothumb', textContent: kind === 'system' ? '🖥' : '▢' }),
+        el('span', { textContent: src.name, title: src.name }));
+      b.onclick = () => select(src.id, b);
+      b.ondblclick = () => { select(src.id, b); $<HTMLFormElement>('#screen-form').requestSubmit(); };
+      return b;
+    }));
+    const section = el('section');
+    section.append(el('h3', { textContent: title }), grid);
+    return [section];
+  }));
+  $('#screen-audio-row').hidden = true;
+  $<HTMLInputElement>('#screen-audio').checked = false;
+  $<HTMLButtonElement>('#screen-share').disabled = true;
+  if (!screenDialog.open) screenDialog.showModal();
+}
+
+const answerScreen = (sourceId: string | null) => {
+  const id = screenRequestId;
+  screenRequestId = null;
+  if (id) send({ type: 'screen:pick', requestId: id, sourceId, audio: $<HTMLInputElement>('#screen-audio').checked });
+};
+$('#screen-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!screenSelected) return;
+  answerScreen(screenSelected);
+  screenDialog.close();
+});
+$('#screen-cancel').onclick = () => screenDialog.close();
+// Fechar de qualquer jeito (Esc, Cancelar) sem escolher = negar.
+screenDialog.addEventListener('close', () => { if (screenRequestId) answerScreen(null); });
 
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 
