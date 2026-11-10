@@ -20,6 +20,7 @@ const USER_SCRIPT_WORLD = 1001;
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
 import type { NewLogin, UnlockedVault } from './vault/vault';
+import { MATCH } from './vault/match';
 import { decideSave, itemName, type SaveDecision } from './vault/save';
 import { DEFAULT_GENERATOR, generatePassword } from './vault/generator';
 
@@ -127,7 +128,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'sync'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -2084,6 +2085,7 @@ export class Browser {
       case 'split:swap': this.swapSplit(); break;
       case 'split:ratio': this.setSplitRatio(cmd.ratio); break;
       case 'reader:style': this.setReaderStyle(cmd.style); break;
+      case 'settings:vault-match': this.store.setKv('vault-match', String(cmd.match)); break;
       case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
       case 'settings:pip-on-top':
         this.store.setKv('pip-on-top', cmd.on ? '1' : '0');
@@ -2207,7 +2209,7 @@ export class Browser {
   private decide(p: PendingSave): boolean {
     const v = this.vaultProvider?.vault();
     if (!v) return true; // bloqueado: pergunta depois de desbloquear
-    if (p.decision === undefined) p.decision = decideSave(v.logins, (id) => v.password(id), p.url, p.username, p.password);
+    if (p.decision === undefined) p.decision = decideSave(v.logins, (id) => v.password(id), p.url, p.username, p.password, this.vaultMatch());
     return p.decision !== null;
   }
 
@@ -2241,7 +2243,7 @@ export class Browser {
       if (!this.decide(p) || p.decision === undefined) return; // ainda bloqueado: barra continua
       const d = p.decision!;
       if (d.mode === 'save') {
-        void this.vaultProvider!.saveLogin({ name: itemName(p.url), username: p.username, password: p.password, uri: new URL(p.url).origin });
+        void this.vaultProvider!.saveLogin({ name: itemName(p.url), username: p.username, password: p.password, uri: new URL(p.url).origin, match: this.vaultMatch() === MATCH.Host ? MATCH.Host : null });
       } else {
         void this.vaultProvider!.updatePassword(d.itemId, p.password);
       }
@@ -2289,18 +2291,23 @@ export class Browser {
     return wc && !wc.isDestroyed() ? wc.mainFrame.url : null;
   }
 
+  /** Correspondência padrão dos logins sem regra própria: host (subdomínio exato, padrão) ou domínio base. */
+  private vaultMatch(): number {
+    return this.store.getKv('vault-match') === '0' ? MATCH.Domain : MATCH.Host;
+  }
+
   private vaultSite(url: string | null | undefined): UiState['vaultSite'] {
     const status = this.vaultProvider?.status() ?? 'disconnected';
     if (status === 'disconnected' || !url || !/^https?:/.test(url)) return null;
     const v = this.vaultProvider!.vault();
-    return { status: status as 'locked' | 'unlocked', count: v ? loginsFor(v.logins, url).length : 0 };
+    return { status: status as 'locked' | 'unlocked', count: v ? loginsFor(v.logins, url, this.vaultMatch()).length : 0 };
   }
 
   showVaultMenu(x: number, y: number): void {
     const url = this.liveUrl() ?? this.activeTab()?.url ?? '';
     const v = this.vaultProvider?.vault();
     const site = siteOf(url) ?? url;
-    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url) : [], site)), x, y);
+    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url, this.vaultMatch()) : [], site)), x, y);
   }
 
   /** Preenche só se a página ATUAL ainda casa com o login (e só no frame principal). */
@@ -2311,7 +2318,7 @@ export class Browser {
     if (!v || !wc || wc.isDestroyed()) return;
     const url = wc.mainFrame.url;
     const login = v.logins.find((l) => l.id === itemId);
-    if (!login || !login.uris.some((u) => uriMatches(u, url))) return;
+    if (!login || !login.uris.some((u) => uriMatches(u, url, this.vaultMatch()))) return;
     wc.mainFrame.send('apollo:fill', { username: login.username, password: v.password(itemId) });
   }
 
@@ -2320,7 +2327,7 @@ export class Browser {
     const status = this.vaultProvider?.status() ?? 'disconnected';
     if (status !== 'unlocked') { this.emit({ type: 'open-vault' }); return; }
     const url = this.liveUrl();
-    const first = url ? loginsFor(this.vaultProvider!.vault()!.logins, url)[0] : undefined;
+    const first = url ? loginsFor(this.vaultProvider!.vault()!.logins, url, this.vaultMatch())[0] : undefined;
     if (first) this.fillLogin(first.id);
   }
 
@@ -2346,7 +2353,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'sync'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'sync'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -2449,7 +2456,7 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(),
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(), vaultMatch: this.vaultMatch() === MATCH.Domain ? 'domain' : 'host',
         sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),

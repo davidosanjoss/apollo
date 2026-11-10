@@ -26,7 +26,7 @@ interface StoredCipher {
   raw: unknown;
 }
 
-export interface NewLogin { name: string; username: string | null; password: string; uri: string }
+export interface NewLogin { name: string; username: string | null; password: string; uri: string; match?: number | null }
 
 const PASSWORD_HISTORY_MAX = 5;
 
@@ -152,7 +152,7 @@ export class UnlockedVault {
         key: encrypt(raw, userKey),
         name: encrypt(login.name, key),
         login: { username: enc(login.username), password: enc(login.password), totp: null,
-          uris: [{ uri: encrypt(login.uri, key), uriChecksum: encrypt(uriChecksum(login.uri), key), match: null }] },
+          uris: [{ uri: encrypt(login.uri, key), uriChecksum: encrypt(uriChecksum(login.uri), key), match: login.match ?? null }] },
       };
     } finally {
       wipe(key);

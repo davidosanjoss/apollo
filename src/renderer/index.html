@@ -222,6 +222,11 @@
             <h2>Bitwarden</h2>
             <p class="hint" id="settings-vault-status"></p>
             <p><button type="button" id="settings-open-vault">Abrir o Bitwarden…</button></p>
+            <label>Oferecer cada senha em <select id="vault-match">
+              <option value="1">Só no subdomínio onde foi salva (ex.: moodle.ufmg.br)</option>
+              <option value="0">Em todo o domínio (ex.: qualquer *.ufmg.br)</option>
+            </select></label>
+            <p class="hint">Vale para logins sem regra própria; a "detecção de correspondência" de cada login no Bitwarden tem prioridade.</p>
           </div>
 
           <div class="settings-section" data-section="modules" hidden>

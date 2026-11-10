@@ -124,6 +124,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'settings:vault-match': return c.match === 0 || c.match === 1 ? (c as UiCommand) : null;
     case 'settings:auto-pip':
     case 'settings:pip-on-top': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
     case 'reader:toggle': return { type: c.type } as UiCommand;

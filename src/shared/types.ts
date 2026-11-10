@@ -197,6 +197,8 @@ export interface SettingsInfo {
   autoPip: boolean;
   /** Vídeo flutuante sempre por cima das outras janelas (KDE Wayland: via KWin). */
   pipOnTop: boolean;
+  /** Senhas: logins sem regra própria valem no subdomínio exato (host) ou no domínio base. */
+  vaultMatch: 'host' | 'domain';
   sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
@@ -422,6 +424,7 @@ export type UiCommand =
   | { type: 'tab:pip' }
   | { type: 'settings:auto-pip'; on: boolean }
   | { type: 'settings:pip-on-top'; on: boolean }
+  | { type: 'settings:vault-match'; match: 0 | 1 }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }
   /** Zoom da aba ativa (guardado por site, em cada workspace). */

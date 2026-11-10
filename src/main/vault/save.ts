@@ -5,8 +5,8 @@ import type { VaultLogin } from './vault';
 export type SaveDecision = { mode: 'save' } | { mode: 'update'; itemId: string } | null;
 
 export function decideSave(logins: VaultLogin[], passwordOf: (id: string) => string | null, url: string,
-  username: string | null, password: string): SaveDecision {
-  const forSite = loginsFor(logins, url);
+  username: string | null, password: string, defaultMatch?: number): SaveDecision {
+  const forSite = loginsFor(logins, url, defaultMatch);
   const sameUser = forSite.filter((l) => (l.username ?? '').toLowerCase() === (username ?? '').toLowerCase());
   if (sameUser.some((l) => passwordOf(l.id) === password)) return null; // já salvo assim
   if (sameUser.length) return { mode: 'update', itemId: sameUser[0].id };
