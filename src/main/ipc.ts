@@ -1,6 +1,6 @@
 import type { IpcMainEvent, WebContents } from 'electron';
 import type { PermissionKind, UiCommand } from '../shared/types';
-import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
+import { DOWNLOAD_KEEP_DAYS, GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_HIBERNATE_OPTIONS_MIN, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS } from '../shared/types';
 import { UI_URL } from './protocol';
 import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
@@ -8,6 +8,7 @@ import { validVaultServer } from './vault/api';
 import { MODULES } from './modules';
 import { SPELLCHECK_MODES } from './spellcheck';
 import { MAX_CODE } from './customizations';
+import { READER_SIZES } from '../reader/template';
 
 /**
  * Toda mensagem da UI é validada: tem que vir do frame principal da janela do
@@ -123,10 +124,33 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'default-browser:set': return { type: c.type } as UiCommand;
+    case 'settings:vault-match': return c.match === 0 || c.match === 1 ? (c as UiCommand) : null;
+    case 'settings:auto-pip':
+    case 'settings:google-compat':
+    case 'settings:pip-on-top': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
+    case 'reader:toggle': return { type: c.type } as UiCommand;
+    case 'sync:connect':
+      return (c.provider === 'google' || c.provider === 'onedrive') && str(c.clientId, 300) && (c.clientId as string).trim()
+        && (c.clientSecret === null || str(c.clientSecret, 300)) && (c.provider === 'onedrive' || (typeof c.clientSecret === 'string' && c.clientSecret.trim()))
+        && typeof c.passphrase === 'string' && c.passphrase.length >= 8 && c.passphrase.length <= 200 ? (c as UiCommand) : null;
+    case 'sync:now':
+    case 'sync:cancel':
+    case 'sync:disconnect': return { type: c.type } as UiCommand;
+    case 'split:open': return id(c.tabId) ? (c as UiCommand) : null;
+    case 'split:close':
+    case 'split:swap': return { type: c.type } as UiCommand;
+    case 'split:ratio': return typeof c.ratio === 'number' && c.ratio >= 0.15 && c.ratio <= 0.85 ? (c as UiCommand) : null;
+    case 'reader:style': {
+      const st = c.style as Record<string, unknown> | undefined;
+      return st && READER_SIZES.includes(st.size as number) && (st.font === 'serif' || st.font === 'sans')
+        && ['light', 'sepia', 'dark'].includes(st.theme as string) && Object.keys(st).length === 3 ? (c as UiCommand) : null;
+    }
     case 'update:check':
     case 'update:dismiss':
     case 'update:skip':
     case 'update:open-page':
+    case 'tab:pip':
     case 'view:fullscreen':
     case 'tab:print':
     case 'tab:devtools': return { type: c.type } as UiCommand;
@@ -134,6 +158,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'download:action':
       return id(c.downloadId) && ['pause', 'resume', 'cancel', 'open', 'show', 'remove'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'settings:download-ask': return typeof c.ask === 'boolean' ? (c as UiCommand) : null;
+    case 'settings:download-days': return (DOWNLOAD_KEEP_DAYS as readonly unknown[]).includes(c.days) ? (c as UiCommand) : null;
     case 'download:clear':
     case 'find:close':
     case 'bookmark:add': return { type: c.type } as UiCommand;

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Bookmark, Store, Tab, Workspace } from './store';
@@ -19,6 +20,7 @@ const USER_SCRIPT_WORLD = 1001;
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
 import type { NewLogin, UnlockedVault } from './vault/vault';
+import { MATCH } from './vault/match';
 import { decideSave, itemName, type SaveDecision } from './vault/save';
 import { DEFAULT_GENERATOR, generatePassword } from './vault/generator';
 
@@ -52,12 +54,20 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { applyUserAgent, setGoogleCompat } from './user-agent';
+import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
+import { parseReaderStyle, type ReaderStyle } from '../reader/template';
+import { KdePipKeeper } from './kde-pip';
+import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
+import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
 import type { UpdateCheck } from './update-check';
+import type { SyncService } from './sync/service';
+import type { ApplyHooks } from './sync/local';
 import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
-import { shortcutFor, type ShortcutAction } from './shortcuts';
+import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
 import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
@@ -118,7 +128,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -143,9 +153,23 @@ export class Browser {
     private readonly cipher: Cipher | null = null,
   ) {
     this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    this.downloads = new DownloadManager({
+      dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
+      ask: () => this.store.getKv('download-ask') === '1',
+      onChange: () => this.push(),
+      persist: {
+        load: (since) => this.store.listDownloads(since),
+        save: (d) => this.store.saveDownload(d),
+        remove: (id) => this.store.deleteDownload(id),
+        prune: (before) => this.store.pruneDownloads(before),
+        keepDays: () => this.downloadKeepDays(),
+      },
+    });
+
     // Temporários de uma execução anterior (ex.: o app caiu) não sobrevivem.
     store.deleteTemporaryWorkspaces();
     store.pruneHistory();
+    setGoogleCompat(store.getKv('google-compat') !== '0');
 
     if (store.listWorkspaces().length === 0) {
       store.createWorkspace({ id: newId(), name: 'Principal', color: '#7c5cff', home: APOLLO_HOME });
@@ -278,6 +302,7 @@ export class Browser {
     this.views.set(tab.id, view);
     this.tabByWebContents.set(wc.id, tab.id);
     this.wireTab(tab.id, tab.workspaceId, wc);
+    applyUserAgent(wc, app.userAgentFallback); // antes de carregar: com as client hints
     void this.loadTab(tab, wc);
     return view;
   }
@@ -338,6 +363,10 @@ export class Browser {
       this.push();
     };
 
+    // Clique na outra metade da tela dividida: ela vira a ativa (o 'focus' nem sempre chega).
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown' && this.secondaryTabId === tabId) setImmediate(() => this.activateTab(tabId));
+    });
     wc.on('page-title-updated', (_e, title) => {
       update({ title });
       if (this.historyOn(workspaceId)) this.store.setVisitTitle(workspaceId, wc.getURL(), title);
@@ -375,7 +404,12 @@ export class Browser {
 
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
+      this.videoTabs.delete(tabId);
+      this.readerAvailable.delete(tabId);
+      this.readerActive.delete(tabId);
     });
+    // Parece um artigo? (um pouco depois de carregar, sem atrapalhar a página)
+    wc.on('did-finish-load', () => { setTimeout(() => this.probeReader(wc, tabId), 600); });
     // Contador de bloqueios é por página. Zera no INÍCIO da navegação: as requisições
     // da página nova chegam pelo serviço de rede e podem ser contadas antes do evento
     // did-navigate (commit) — zerar ali apagava bloqueios já contados (visto no CI).
@@ -389,7 +423,7 @@ export class Browser {
     });
     wc.on('did-start-loading', () => { this.loading.add(tabId); this.push(); });
     wc.on('dom-ready', () => this.applyCustomizations(wc));
-    wc.on('media-started-playing', () => { this.playing.add(tabId); });
+    wc.on('media-started-playing', () => { this.playing.add(tabId); this.checkVideo(wc, tabId); });
     wc.on('media-paused', () => { this.playing.delete(tabId); });
     wc.on('did-stop-loading', () => { this.loading.delete(tabId); this.push(); });
 
@@ -409,11 +443,13 @@ export class Browser {
 
     wc.on('before-input-event', (event, input) => {
       const action = shortcutFor(input);
-      if (!action) return;
+      if (!action || PAGE_FIRST.has(action)) return; // esses a página recebe primeiro (preload avisa se ela não usou)
       event.preventDefault();
       this.runShortcut(action);
     });
     wc.on('context-menu', (_e, params) => this.showPageMenu(wc, params, workspaceId, tabId));
+    // Popups (login "Entrar com o Google" etc.): a mesma identificação das abas.
+    wc.on('did-create-window', (popup) => applyUserAgent(popup.webContents, app.userAgentFallback));
 
     wc.setWindowOpenHandler(({ url, disposition }) => {
       // "Abrir em nova aba" → aba no mesmo workspace.
@@ -454,6 +490,10 @@ export class Browser {
       if (this.attachedTabId === tabId) {
         this.win.contentView.removeChildView(view);
         this.attachedTabId = null;
+      }
+      if (this.secondaryTabId === tabId) {
+        this.win.contentView.removeChildView(view);
+        this.secondaryTabId = null;
       }
       this.tabByWebContents.delete(wcId);
       this.views.delete(tabId);
@@ -615,6 +655,119 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ modo leitura
+
+  private static readonly READER_WORLD = 1003;
+  private readerCode: string | null = null;
+  /** Abas cuja página parece um artigo / que estão em leitura. */
+  private readonly readerAvailable = new Set<string>();
+  private readonly readerActive = new Set<string>();
+
+  private readerScript(): string {
+    this.readerCode ??= fs.readFileSync(path.join(__dirname, 'reader.js'), 'utf8');
+    return this.readerCode;
+  }
+
+  /**
+   * Biblioteca + chamada num único script: com vários scripts, o Electron devolve o
+   * resultado do primeiro (a biblioteca), não o da chamada.
+   */
+  private readerCall(expr: string): string {
+    return `${this.readerScript()}\n;${expr}`;
+  }
+
+  private readerStyle(): ReaderStyle {
+    return parseReaderStyle(this.store.getKv('reader-style'));
+  }
+
+  /** Depois de carregar: a página parece um artigo? (para mostrar o botão) */
+  private probeReader(wc: WebContents, tabId: string): void {
+    if (wc.isDestroyed() || !/^https?:/i.test(wc.getURL()) || this.readerActive.has(tabId)) return;
+    void wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD,
+      [{ code: this.readerCall('globalThis.__apolloReader.probe()') }], false)
+      .then((ok) => {
+        const had = this.readerAvailable.has(tabId);
+        if (ok) this.readerAvailable.add(tabId); else this.readerAvailable.delete(tabId);
+        if (had !== Boolean(ok)) this.push();
+      }).catch(() => {});
+  }
+
+  /** Entra (troca a página pela versão de leitura) ou sai (recarrega a original). */
+  private async toggleReader(): Promise<void> {
+    const tab = this.activeTab();
+    const wc = tab ? this.views.get(tab.id)?.webContents : undefined;
+    if (!tab || !wc || wc.isDestroyed()) return;
+    if (this.readerActive.has(tab.id)) {
+      this.readerActive.delete(tab.id);
+      wc.reload();
+      this.push();
+      return;
+    }
+    if (!/^https?:/i.test(wc.getURL())) return;
+    const r = await wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD, [{ code: this.readerCall(`globalThis.__apolloReader.enter(${JSON.stringify(this.readerStyle())})`) }], false).catch(() => 'error');
+    if (r === 'ok') this.readerActive.add(tab.id);
+    this.push();
+  }
+
+  private setReaderStyle(style: ReaderStyle): void {
+    this.store.setKv('reader-style', JSON.stringify(style));
+    for (const tabId of this.readerActive) {
+      const wc = this.views.get(tabId)?.webContents;
+      if (wc && !wc.isDestroyed()) {
+        void wc.executeJavaScriptInIsolatedWorld(Browser.READER_WORLD, [{ code: this.readerCall(`globalThis.__apolloReader.style(${JSON.stringify(style)})`) }], false).catch(() => {});
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ vídeo flutuante (picture-in-picture)
+
+  /** Abas com vídeo flutuante aberto (não hibernam). */
+  private readonly pipTabs = new Set<string>();
+  /** Abas que têm vídeo (para mostrar o botão). */
+  private readonly videoTabs = new Set<string>();
+
+  /** Abre/fecha o vídeo flutuante da página (gesto do usuário: o clique dele no Apollo). */
+  private async togglePip(wc: WebContents, tabId: string | null): Promise<void> {
+    if (wc.isDestroyed()) return;
+    let r: string;
+    try {
+      r = String(await wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_TOGGLE }], true));
+    } catch {
+      return;
+    }
+    if (!tabId) return;
+    if (r === 'opened') {
+      this.pipTabs.add(tabId);
+      if (this.pipOnTop()) void this.pipKeeper.ensure(true);
+      // Quando o vídeo flutuante fechar (pelo ✕ dele também), o botão volta ao normal.
+      void wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_WAIT_CLOSE }], false)
+        .catch(() => {}).finally(() => { this.pipTabs.delete(tabId); this.push(); });
+    } else if (r === 'closed') {
+      this.pipTabs.delete(tabId);
+    }
+    this.push();
+  }
+
+  private checkVideo(wc: WebContents, tabId: string): void {
+    if (wc.isDestroyed()) return;
+    void wc.executeJavaScriptInIsolatedWorld(PIP_WORLD, [{ code: PIP_HAS_VIDEO }], false).then((has) => {
+      const had = this.videoTabs.has(tabId);
+      if (has) this.videoTabs.add(tabId); else this.videoTabs.delete(tabId);
+      if (had !== Boolean(has)) this.push();
+    }).catch(() => {});
+  }
+
+  /** KDE Wayland: mantém o vídeo flutuante por cima (script do KWin). */
+  readonly pipKeeper = new KdePipKeeper();
+
+  private pipOnTop(): boolean {
+    return this.store.getKv('pip-on-top') !== '0';
+  }
+
+  private autoPipOn(): boolean {
+    return this.store.getKv('auto-pip') === '1';
+  }
+
   // ------------------------------------------------------------ tela cheia, imprimir, devtools
 
   private windowFullscreen = false;
@@ -668,11 +821,13 @@ export class Browser {
 
   // ------------------------------------------------------------ downloads
 
-  private readonly downloads = new DownloadManager({
-    dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
-    ask: () => this.store.getKv('download-ask') === '1',
-    onChange: () => this.push(),
-  });
+  /** Criado no construtor: lê a lista guardada (precisa do store). */
+  private readonly downloads: DownloadManager;
+
+  private downloadKeepDays(): number {
+    const v = Number(this.store.getKv('download-days') ?? DEFAULT_DOWNLOAD_KEEP_DAYS);
+    return (DOWNLOAD_KEEP_DAYS as readonly number[]).includes(v) ? v : DEFAULT_DOWNLOAD_KEEP_DAYS;
+  }
 
   // ------------------------------------------------------------ localizar na página (Ctrl+F)
 
@@ -1019,14 +1174,14 @@ export class Browser {
     });
     view.setBackgroundColor('#ffffff');
     const wc = view.webContents;
-    if (p.mobile) wc.setUserAgent(Browser.mobileUA());
+    applyUserAgent(wc, p.mobile ? Browser.mobileUA() : app.userAgentFallback, p.mobile);
     wc.on('page-title-updated', (_e, title) => { this.store.updatePanel(id, { title }); this.push(); });
     wc.on('page-favicon-updated', (_e, icons) => { this.store.updatePanel(id, { favicon: icons[0] ?? null }); this.push(); });
     wc.on('render-process-gone', () => this.destroyPanelView(id));
     wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('before-input-event', (event, input) => {
       const action = shortcutFor(input);
-      if (!action) return;
+      if (!action || PAGE_FIRST.has(action)) return; // esses a página recebe primeiro (preload avisa se ela não usou)
       event.preventDefault();
       this.runShortcut(action);
     });
@@ -1211,6 +1366,11 @@ export class Browser {
   }
 
   /** Mostra a aba, trocando de workspace se preciso. */
+  /** É a página de uma aba ou painel (não a interface nem um popup)? */
+  isPageWebContents(wc: WebContents): boolean {
+    return this.tabIdOf(wc) !== null || this.panelIdOf(wc) !== null;
+  }
+
   private panelIdOf(wc: WebContents): string | null {
     for (const [id, view] of this.panelViews) if (view.webContents === wc) return id;
     return null;
@@ -1254,9 +1414,9 @@ export class Browser {
         id: tabId,
         workspaceId: tab.workspaceId,
         alive: true,
-        visible: tabId === this.attachedTabId,
+        visible: tabId === this.attachedTabId || tabId === this.secondaryTabId,
         keepAwake: tab.keepAwake,
-        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured(),
+        playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured() || this.pipTabs.has(tabId),
         unloadBlocked: this.unloadBlocked.has(tabId),
         lastSeenAt: this.lastSeen.get(tabId) ?? now,
         memoryMb: perTab.get(tabId) ?? null,
@@ -1286,8 +1446,86 @@ export class Browser {
   }
 
   /** Mostra a aba ativa do workspace ativo (criando a view se preciso). */
+  // ------------------------------------------------------------ tela dividida
+
+  private splitsCache: Record<string, Split> | null = null;
+  /** A outra metade (anexada ao lado da aba ativa). */
+  private secondaryTabId: string | null = null;
+
+  private splits(): Record<string, Split> {
+    this.splitsCache ??= parseSplits(this.store.getKv('splits'));
+    return this.splitsCache;
+  }
+
+  private saveSplits(): void {
+    this.store.setKv('splits', JSON.stringify(this.splits()));
+  }
+
+  private splitOf(workspaceId: string): Split | undefined {
+    const s = this.splits()[workspaceId];
+    // Aba que sumiu (fechada, movida): desfaz.
+    if (s && (this.store.getTab(s.a)?.workspaceId !== workspaceId || this.store.getTab(s.b)?.workspaceId !== workspaceId)) {
+      delete this.splits()[workspaceId];
+      this.saveSplits();
+      return undefined;
+    }
+    return s;
+  }
+
+  /** Aba ativa e `tabId` lado a lado (a ativa fica à esquerda). */
+  private openSplit(tabId: string): void {
+    const active = this.activeTab();
+    const other = this.store.getTab(tabId);
+    if (!active || !other || other.id === active.id || other.workspaceId !== active.workspaceId) return;
+    this.splits()[active.workspaceId] = { a: active.id, b: other.id, ratio: 0.5 };
+    this.saveSplits();
+    this.showActive();
+  }
+
+  private closeSplit(): void {
+    delete this.splits()[this.activeWorkspaceId];
+    this.saveSplits();
+    this.showActive();
+  }
+
+  private swapSplit(): void {
+    const s = this.splitOf(this.activeWorkspaceId);
+    if (!s) return;
+    this.splits()[this.activeWorkspaceId] = { a: s.b, b: s.a, ratio: 1 - s.ratio };
+    this.saveSplits();
+    this.layout();
+    this.push();
+  }
+
+  private setSplitRatio(ratio: number): void {
+    const s = this.splitOf(this.activeWorkspaceId);
+    if (!s) return;
+    s.ratio = clampRatio(ratio);
+    this.saveSplits();
+    this.layout();
+    this.push();
+  }
+
+  private detachSecondary(): void {
+    if (!this.secondaryTabId) return;
+    const v = this.views.get(this.secondaryTabId);
+    if (v && this.secondaryTabId !== this.attachedTabId) this.win.contentView.removeChildView(v);
+    this.lastSeen.set(this.secondaryTabId, Date.now());
+    this.secondaryTabId = null;
+  }
+
   private showActive(): void {
     const tab = this.activeTab();
+    const partner = tab ? partnerOf(this.splitOf(tab.workspaceId), tab.id) : null;
+    // Trocou para a outra metade da tela dividida: a antiga ativa vira a metade de lado.
+    if (this.attachedTabId && this.attachedTabId !== tab?.id && this.attachedTabId === partner) {
+      this.secondaryTabId = this.attachedTabId;
+      this.attachedTabId = null;
+    }
+    if (this.secondaryTabId && this.secondaryTabId !== partner) {
+      if (this.secondaryTabId === tab?.id) this.secondaryTabId = null; // vira a ativa
+      else this.detachSecondary();
+    }
     if (this.attachedTabId && this.attachedTabId !== tab?.id) {
       const old = this.views.get(this.attachedTabId);
       if (old && this.sharedTabs.has(this.attachedTabId)) {
@@ -1298,6 +1536,9 @@ export class Browser {
       }
       this.lastSeen.set(this.attachedTabId, Date.now());
       if (this.findState?.tabId === this.attachedTabId) this.stopFind();
+      // Vídeo flutuante automático: saiu de uma aba com vídeo tocando.
+      if (old && this.autoPipOn() && this.playing.has(this.attachedTabId) && this.videoTabs.has(this.attachedTabId)
+        && !this.pipTabs.has(this.attachedTabId)) void this.togglePip(old.webContents, this.attachedTabId);
       if (this.pageFullscreenTabId === this.attachedTabId) {
         old?.webContents.executeJavaScript('document.fullscreenElement && document.exitFullscreen()', true).catch(() => {});
         this.pageFullscreenTabId = null;
@@ -1307,10 +1548,19 @@ export class Browser {
     }
     // Nova aba na página inicial: a interface desenha a página; nenhum processo é criado
     // até você abrir um endereço (economiza ~40 MB e deixa o Ctrl+T instantâneo).
-    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) {
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id) && !partner) {
       this.focusAddress();
       this.push();
       return;
+    }
+    // A outra metade da tela dividida.
+    if (tab && partner && this.secondaryTabId !== partner) {
+      const p = this.store.getTab(partner);
+      if (p) {
+        this.win.contentView.addChildView(this.ensureView(p));
+        this.secondaryTabId = partner;
+        this.lastSeen.set(partner, Date.now());
+      }
     }
     if (tab) {
       const view = this.ensureView(tab);
@@ -1336,13 +1586,23 @@ export class Browser {
     if (this.pageFullscreenTabId === this.attachedTabId) {
       const [width, height] = this.win.getContentSize();
       this.win.contentView.addChildView(view); // para o topo (acima de painéis)
+      if (this.secondaryTabId) this.views.get(this.secondaryTabId)?.setVisible(false);
       view.setVisible(true);
       view.setBounds({ x: 0, y: 0, width, height });
       return;
     }
     // A view é nativa e fica POR CIMA do HTML da UI: com um diálogo aberto, escondemos a página.
     view.setVisible(!this.overlayOpen && this.bounds.width > 0);
-    view.setBounds(this.bounds);
+    const second = this.secondaryTabId ? this.views.get(this.secondaryTabId) : undefined;
+    const split = this.splitOf(this.activeWorkspaceId);
+    if (second && split) {
+      const b = splitBounds(this.bounds, split, this.attachedTabId);
+      view.setBounds(this.attachedTabId === split.a ? b.a : b.b);
+      second.setVisible(!this.overlayOpen && this.bounds.width > 0);
+      second.setBounds(this.secondaryTabId === split.a ? b.a : b.b);
+    } else {
+      view.setBounds(this.bounds);
+    }
   }
 
   /** Foco na interface do navegador (para a paleta/diálogos receberem o teclado). */
@@ -1369,6 +1629,10 @@ export class Browser {
     this.blocked.delete(tabId);
     this.pendingSaves.delete(tabId);
     this.usernameSteps.delete(tabId);
+    this.pipTabs.delete(tabId);
+    this.videoTabs.delete(tabId);
+    this.readerAvailable.delete(tabId);
+    this.readerActive.delete(tabId);
     if (this.screenRequest?.requesterTabId === tabId) this.pickScreen(this.screenRequest.info.id, null, false);
     const closed = this.store.getTab(tabId)!;
     if (!isHomeUrl(closed.url)) {
@@ -1617,6 +1881,7 @@ export class Browser {
         break;
       case 'view-source': newTab(`view-source:${wc.getURL()}`, true); break;
       case 'print': this.print(wc); break;
+      case 'pip': void this.togglePip(wc, tabId); break;
       case 'inspect': wc.inspectElement(params.x, params.y); break;
       case 'vault': if (a.op === 'autofill') this.autofill(); else this.generate(true); break;
     }
@@ -1643,6 +1908,17 @@ export class Browser {
       { label: 'Hibernar agora', enabled: this.views.has(tabId) && tabId !== this.attachedTabId,
         click: this.run({ type: 'tab:hibernate', tabId }) },
       { label: 'Hibernar outras abas', click: this.run({ type: 'tab:hibernate-others', tabId }) },
+      { type: 'separator' },
+      ...(() => {
+        const split = this.splitOf(tab.workspaceId);
+        if (split && (split.a === tabId || split.b === tabId)) {
+          return [{ label: 'Trocar os lados', click: this.run({ type: 'split:swap' }) },
+            { label: 'Sair da tela dividida', click: this.run({ type: 'split:close' }) }];
+        }
+        const active = this.activeTab();
+        return [{ label: 'Dividir a tela com a aba atual', enabled: Boolean(active && active.id !== tabId),
+          click: this.run({ type: 'split:open', tabId }) }];
+      })(),
       { type: 'separator' },
       { label: 'Adicionar a um novo grupo', click: this.run({ type: 'group:create', tabId }) },
       ...(groups.length ? [{ label: 'Mover para o grupo', submenu: groups.map((g) => ({
@@ -1741,6 +2017,7 @@ export class Browser {
       case 'bookmark-bar': this.store.setKv('bookmark-bar', this.bookmarkBarOn() ? '0' : '1'); this.push(); break;
       case 'history': this.focusUi(); this.emit({ type: 'open-history' }); break;
       case 'zoom-in': this.zoomActive('in'); break;
+      case 'reader': void this.toggleReader(); break;
       case 'print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'fullscreen': this.toggleFullscreen(); break;
       case 'devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
@@ -1807,11 +2084,27 @@ export class Browser {
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
       case 'zoom:set': this.zoomActive(cmd.dir); break;
       case 'view:fullscreen': this.toggleFullscreen(); break;
+      case 'tab:pip': { const t = this.activeTab(); this.withActiveWc((wc) => void this.togglePip(wc, t?.id ?? null)); break; }
+      case 'reader:toggle': void this.toggleReader(); break;
+      case 'split:open': this.openSplit(cmd.tabId); break;
+      case 'split:close': this.closeSplit(); break;
+      case 'split:swap': this.swapSplit(); break;
+      case 'split:ratio': this.setSplitRatio(cmd.ratio); break;
+      case 'reader:style': this.setReaderStyle(cmd.style); break;
+      case 'settings:google-compat': this.store.setKv('google-compat', cmd.on ? '1' : '0'); setGoogleCompat(cmd.on); break;
+      case 'settings:vault-match': this.store.setKv('vault-match', String(cmd.match)); break;
+      case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
+      case 'settings:pip-on-top':
+        this.store.setKv('pip-on-top', cmd.on ? '1' : '0');
+        // Já carregado: troca para o modo escolhido (desligar devolve o vídeo ao normal).
+        void this.pipKeeper.ensure(cmd.on);
+        break;
       case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'tab:devtools': this.withActiveWc((wc) => this.toggleDevTools(wc)); break;
       case 'download:action': this.downloads.action(cmd.downloadId, cmd.action); break;
       case 'download:clear': this.downloads.clear(); break;
       case 'settings:download-ask': this.store.setKv('download-ask', cmd.ask ? '1' : '0'); break;
+      case 'settings:download-days': this.store.setKv('download-days', String(cmd.days)); this.downloads.applyKeepDays(); break;
       case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
       case 'find:close': this.stopFind(); break;
       case 'bookmark:add': this.addBookmark(); break;
@@ -1923,7 +2216,7 @@ export class Browser {
   private decide(p: PendingSave): boolean {
     const v = this.vaultProvider?.vault();
     if (!v) return true; // bloqueado: pergunta depois de desbloquear
-    if (p.decision === undefined) p.decision = decideSave(v.logins, (id) => v.password(id), p.url, p.username, p.password);
+    if (p.decision === undefined) p.decision = decideSave(v.logins, (id) => v.password(id), p.url, p.username, p.password, this.vaultMatch());
     return p.decision !== null;
   }
 
@@ -1957,7 +2250,7 @@ export class Browser {
       if (!this.decide(p) || p.decision === undefined) return; // ainda bloqueado: barra continua
       const d = p.decision!;
       if (d.mode === 'save') {
-        void this.vaultProvider!.saveLogin({ name: itemName(p.url), username: p.username, password: p.password, uri: new URL(p.url).origin });
+        void this.vaultProvider!.saveLogin({ name: itemName(p.url), username: p.username, password: p.password, uri: new URL(p.url).origin, match: this.vaultMatch() === MATCH.Host ? MATCH.Host : null });
       } else {
         void this.vaultProvider!.updatePassword(d.itemId, p.password);
       }
@@ -2005,18 +2298,23 @@ export class Browser {
     return wc && !wc.isDestroyed() ? wc.mainFrame.url : null;
   }
 
+  /** Correspondência padrão dos logins sem regra própria: host (subdomínio exato, padrão) ou domínio base. */
+  private vaultMatch(): number {
+    return this.store.getKv('vault-match') === '0' ? MATCH.Domain : MATCH.Host;
+  }
+
   private vaultSite(url: string | null | undefined): UiState['vaultSite'] {
     const status = this.vaultProvider?.status() ?? 'disconnected';
     if (status === 'disconnected' || !url || !/^https?:/.test(url)) return null;
     const v = this.vaultProvider!.vault();
-    return { status: status as 'locked' | 'unlocked', count: v ? loginsFor(v.logins, url).length : 0 };
+    return { status: status as 'locked' | 'unlocked', count: v ? loginsFor(v.logins, url, this.vaultMatch()).length : 0 };
   }
 
   showVaultMenu(x: number, y: number): void {
     const url = this.liveUrl() ?? this.activeTab()?.url ?? '';
     const v = this.vaultProvider?.vault();
     const site = siteOf(url) ?? url;
-    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url) : [], site)), x, y);
+    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url, this.vaultMatch()) : [], site)), x, y);
   }
 
   /** Preenche só se a página ATUAL ainda casa com o login (e só no frame principal). */
@@ -2027,7 +2325,7 @@ export class Browser {
     if (!v || !wc || wc.isDestroyed()) return;
     const url = wc.mainFrame.url;
     const login = v.logins.find((l) => l.id === itemId);
-    if (!login || !login.uris.some((u) => uriMatches(u, url))) return;
+    if (!login || !login.uris.some((u) => uriMatches(u, url, this.vaultMatch()))) return;
     wc.mainFrame.send('apollo:fill', { username: login.username, password: v.password(itemId) });
   }
 
@@ -2036,7 +2334,7 @@ export class Browser {
     const status = this.vaultProvider?.status() ?? 'disconnected';
     if (status !== 'unlocked') { this.emit({ type: 'open-vault' }); return; }
     const url = this.liveUrl();
-    const first = url ? loginsFor(this.vaultProvider!.vault()!.logins, url)[0] : undefined;
+    const first = url ? loginsFor(this.vaultProvider!.vault()!.logins, url, this.vaultMatch())[0] : undefined;
     if (first) this.fillLogin(first.id);
   }
 
@@ -2062,13 +2360,45 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
 
+  /** Navegador padrão do sistema (index atualiza). */
+  defaultBrowser: boolean | null = null;
+
+  /** Link vindo de fora (outro app, linha de comando): abre numa aba e traz a janela. */
+  openExternalUrl(url: string): void {
+    const tab = this.activeTab();
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) this.navigate(url); // aba vazia: usa ela
+    else this.createTab(this.activeWorkspaceId, url, { activate: true });
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
+  }
+
   /** Verificação de versões (index liga depois de criar o Browser). */
   updateCheck: UpdateCheck | null = null;
+  /** Sincronização entre computadores (index liga depois de criar o Browser). */
+  syncService: SyncService | null = null;
+
+  /** O que a sincronização precisa fazer no navegador (não só no banco). */
+  syncHooks(): ApplyHooks {
+    return {
+      deleteWorkspace: (id) => { void this.deleteWorkspace(id); },
+      removePanel: (id) => this.removePanel(id),
+      reloadPanel: (id) => {
+        const open = this.activePanelId === id;
+        this.destroyPanelView(id);
+        if (open) this.openPanel(id);
+      },
+      done: (prefs) => {
+        if (prefs.includes('spellcheck')) this.setSpellcheck(parseSpellcheck(this.store.getKv('spellcheck')));
+        this.push();
+      },
+    };
+  }
 
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
@@ -2146,7 +2476,8 @@ export class Browser {
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
-        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1',
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(), vaultMatch: this.vaultMatch() === MATCH.Domain ? 'domain' : 'host', defaultBrowser: this.defaultBrowser, googleCompat: this.store.getKv('google-compat') !== '0',
+        sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
         historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
@@ -2160,6 +2491,10 @@ export class Browser {
       },
       fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
         : this.windowFullscreen ? 'window' : null,
+      split: this.splitOf(ws.id) ?? null,
+      reader: { available: Boolean(active && (this.readerAvailable.has(active.id) || this.readerActive.has(active.id))),
+        active: Boolean(active && this.readerActive.has(active.id)), style: this.readerStyle() },
+      pip: { available: Boolean(active && (this.videoTabs.has(active.id) || this.pipTabs.has(active.id))), active: Boolean(active && this.pipTabs.has(active.id)) },
       zoom: (() => {
         const wc = active ? this.views.get(active.id)?.webContents : undefined;
         return wc && !wc.isDestroyed() ? zoomPercent(wc.getZoomFactor()) : 100;

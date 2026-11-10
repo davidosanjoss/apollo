@@ -204,6 +204,10 @@ body { display: flex; }
 }
 .tab:hover { background: var(--panel-2); }
 .tab.active { background: var(--panel-2); color: var(--text); }
+.tab.in-split .title::before { content: '◧ '; color: var(--accent); }
+#split-divider { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; background: var(--panel-2); z-index: 1; }
+#split-divider:hover, #split-divider.dragging { background: var(--accent); }
+#split-bar { position: absolute; top: 0; height: 3px; background: var(--ws-color, var(--accent)); z-index: 1; }
 .tab img { width: 16px; height: 16px; flex-shrink: 0; }
 .tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab .close { border: 0; background: none; color: inherit; cursor: pointer; border-radius: 4px; padding: 0 4px; }
@@ -388,6 +392,11 @@ body.fullscreen #bookmark-bar { display: none !important; }
   color: var(--text); font: inherit; font-size: 15px; outline: none; }
 #home-q:focus { border-color: var(--accent); }
 #bookmark-btn.on { color: #f5b301; }
+#pip-btn svg, #reader-btn svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round; }
+#reader-btn.on { color: var(--accent); }
+#reader-bar select { background: var(--bg); color: var(--text); border: 1px solid var(--panel-2); border-radius: 6px; padding: 3px 6px; font: inherit; }
+#pip-btn.on { color: var(--accent); }
+#pip-btn.on svg rect:last-child { fill: currentColor; }
 #zoom-btn { background: var(--panel-2); color: var(--text); border: 0; border-radius: 10px; padding: 2px 8px; font: inherit;
   font-size: 12px; cursor: pointer; }
 #home-bookmarks { list-style: none; margin: 26px 0 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center;

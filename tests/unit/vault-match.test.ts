@@ -52,3 +52,14 @@ describe('loginsFor', () => {
     expect(loginsFor(list, 'https://outlook.office.com/mail/').map((l) => l.name)).toEqual(['Office', 'Outlook']);
   });
 });
+
+// Pedido do usuário: senhas por subdomínio (padrão "host"), domínio base como opção.
+describe('correspondência padrão', () => {
+  const login = (uri: string) => ({ id: 'x', name: 'x', username: null, uris: [{ uri, match: null }] }) as never;
+  it('host: só o subdomínio exato; domínio: qualquer subdomínio', () => {
+    const l = [login('https://moodle.ufmg.br')];
+    expect(loginsFor(l, 'https://sistemas.ufmg.br/', MATCH.Host)).toHaveLength(0);
+    expect(loginsFor(l, 'https://moodle.ufmg.br/login', MATCH.Host)).toHaveLength(1);
+    expect(loginsFor(l, 'https://sistemas.ufmg.br/', MATCH.Domain)).toHaveLength(1);
+  });
+});

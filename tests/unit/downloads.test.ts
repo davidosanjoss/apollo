@@ -28,7 +28,7 @@ describe('formatação', () => {
     expect(fmtBytes(3.25 * 1024 ** 2)).toBe('3,3 MB');
     expect(fmtBytes(1.5 * 1024 ** 3)).toBe('1,5 GB');
   });
-  const d = (over: Partial<DownloadInfo>): DownloadInfo => ({ id: '1', filename: 'a', url: '', state: 'progressing', received: 1024 ** 2, total: 4 * 1024 ** 2, ...over });
+  const d = (over: Partial<DownloadInfo>): DownloadInfo => ({ id: '1', filename: 'a', url: '', state: 'progressing', received: 1024 ** 2, total: 4 * 1024 ** 2, startedAt: 0, ...over });
   it('status e fração', () => {
     expect(downloadStatus(d({}))).toBe('1 MB de 4 MB');
     expect(downloadStatus(d({ state: 'paused' }))).toBe('Pausado — 1 MB de 4 MB');

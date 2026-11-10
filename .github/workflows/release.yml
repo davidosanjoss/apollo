@@ -1,7 +1,8 @@
 name: Release
 
-# Tag vX.Y.Z na main → builds Linux/Windows publicados em davidosanjoss/apollo-releases (público).
-# Requer o secret RELEASES_TOKEN: token fine-grained com "Contents: read and write" só no apollo-releases.
+# Tag vX.Y.Z na main → builds Linux/Windows publicados nas Releases deste repositório.
+# Transição: também copia a versão para davidosanjoss/apollo-releases (onde as instalações
+# até a 0.7.0 procuram atualização), se o secret RELEASES_TOKEN existir.
 on:
   push:
     tags: ['v*.*.*']
@@ -10,7 +11,7 @@ permissions:
   contents: read
 
 env:
-  RELEASES_REPO: davidosanjoss/apollo-releases
+  MIRROR_REPO: davidosanjoss/apollo-releases
 
 jobs:
   validate:
@@ -52,6 +53,11 @@ jobs:
 
   build:
     needs: test
+    permissions:
+      contents: write # cria a release (rascunho) neste repositório
+    # O "if" de um passo não enxerga o env do próprio passo: o teste fica no job.
+    env:
+      HAS_EVS: ${{ secrets.EVS_ACCOUNT_NAME != '' }}
     strategy:
       matrix:
         include:
@@ -69,7 +75,7 @@ jobs:
       - run: npm ci
       # Assinatura VMP (DRM no Windows). Opcional: só roda se os secrets existirem.
       - name: castLabs EVS (VMP)
-        if: runner.os == 'Windows' && env.EVS_ACCOUNT_NAME != ''
+        if: runner.os == 'Windows' && env.HAS_EVS == 'true'
         env:
           EVS_ACCOUNT_NAME: ${{ secrets.EVS_ACCOUNT_NAME }}
           EVS_PASSWD: ${{ secrets.EVS_PASSWD }}
@@ -77,9 +83,9 @@ jobs:
           pip install --upgrade castlabs-evs
           python -m castlabs_evs.account reauth -A "$env:EVS_ACCOUNT_NAME" -P "$env:EVS_PASSWD"
       # Publica como RASCUNHO; só vira pública no job seguinte, com tudo pronto.
-      - name: Build e upload para apollo-releases
+      - name: Build e upload (rascunho)
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           node scripts/build.mjs --prod
           npx electron-builder ${{ matrix.args }} --publish always
@@ -87,14 +93,29 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      HAS_MIRROR: ${{ secrets.RELEASES_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Publicar release com notas do CHANGELOG
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           awk "/^## \[${version//./\\.}\]/{f=1;next} /^## \[/{f=0} f" CHANGELOG.md > notes.md
           [ -s notes.md ] || echo "Veja o histórico de mudanças." > notes.md
-          gh release edit "$GITHUB_REF_NAME" -R "$RELEASES_REPO" \
+          gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
             --title "Apollo $GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest
+      # Transição: instalações até a 0.7.0 procuram atualização no apollo-releases.
+      # Remover quando ninguém mais usar essas versões.
+      - name: Copiar para o apollo-releases (transição)
+        if: env.HAS_MIRROR == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          mkdir assets
+          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D assets
+          gh release create "$GITHUB_REF_NAME" -R "$MIRROR_REPO" --title "Apollo $GITHUB_REF_NAME" \
+            --notes-file notes.md --latest assets/*

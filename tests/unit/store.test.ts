@@ -547,3 +547,67 @@ describe('v11: pastas de favoritos', () => {
     expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['fora']);
   });
 });
+
+describe('v12: lista de downloads', () => {
+  const d = (id: string, startedAt: number, state: 'completed' | 'progressing' = 'completed') =>
+    ({ id, filename: `${id}.pdf`, url: `https://x.com/${id}`, path: `/tmp/${id}.pdf`, state, received: 10, total: 10, startedAt });
+  it('grava, atualiza, lista desde uma data (recentes primeiro), poda e apaga', () => {
+    store.saveDownload(d('a', 100));
+    store.saveDownload(d('b', 200, 'progressing'));
+    store.saveDownload({ ...d('b', 200), filename: 'b (1).pdf' });
+    expect(store.listDownloads(0).map((x) => [x.id, x.state, x.filename])).toEqual([['b', 'completed', 'b (1).pdf'], ['a', 'completed', 'a.pdf']]);
+    expect(store.listDownloads(150).map((x) => x.id)).toEqual(['b']);
+    store.pruneDownloads(150);
+    expect(store.listDownloads(0).map((x) => x.id)).toEqual(['b']);
+    store.deleteDownload('b');
+    store.saveDownload(d('c', 1));
+    store.pruneDownloads(Infinity);
+    expect(store.listDownloads(0)).toEqual([]);
+  });
+});
+
+describe('sincronização: ponte com os dados locais', () => {
+  it('retrato com ids dos outros computadores; aplicar cria, move e apaga', async () => {
+    const { snapshot, apply, matchWorkspaces } = await import('../../src/main/sync/local');
+    const { merge3, diff, emptyData } = await import('../../src/main/sync/merge');
+    ws('loc'); // "Principal" deste computador
+    store.updateWorkspace('loc', { name: 'Principal', color: '#111111', home: '' });
+    store.addFolder({ id: 'f', workspaceId: 'loc', title: 'Faculdade' });
+    store.addBookmark({ id: 'm', workspaceId: 'loc', title: 'Moodle', url: 'https://moodle.ufmg.br', favicon: null, parentId: 'f' });
+    store.createWorkspace({ id: 'tmp', name: 'Temp', color: '#000000', home: '', temporary: true });
+    store.setKv('spellcheck', 'pt');
+
+    // Nuvem (outro PC): "Principal" com outro id, um favorito e um workspace "Banco".
+    const remote = emptyData();
+    remote.workspaces.R = { name: 'principal ', color: '#222222', home: '', hibernateAfterMin: 30, hiddenHibernateMin: 10, position: 0 };
+    remote.workspaces.B = { name: 'Banco', color: '#333333', home: '', hibernateAfterMin: 30, hiddenHibernateMin: 10, position: 1 };
+    remote.bookmarks.x = { workspaceId: 'R', parentId: null, folder: false, title: 'Outlook', url: 'https://outlook.com', position: 0 };
+
+    const map = matchWorkspaces(store, remote, {});
+    expect(map).toEqual({ loc: 'R' });
+    const local = snapshot(store, map);
+    expect(Object.keys(local.workspaces)).toEqual(['R']); // temporário fica de fora
+    expect(local.bookmarks.m).toMatchObject({ workspaceId: 'R', parentId: 'f' });
+    expect(local.prefs).toEqual({ spellcheck: 'pt' });
+
+    const merged = merge3(emptyData(), local, remote);
+    const hooks = { deleted: [] as string[], done: [] as string[][] };
+    apply(store, map, merged, diff(local, merged), {
+      deleteWorkspace: (id) => hooks.deleted.push(id), removePanel: () => {}, reloadPanel: () => {}, done: (p) => hooks.done.push(p),
+    });
+    expect(store.getWorkspace('B')?.name).toBe('Banco'); // criado com o id de lá
+    expect(store.listBookmarks('loc').map((b) => b.title).sort()).toEqual(['Faculdade', 'Moodle', 'Outlook']); // no workspace local
+    expect(snapshot(store, map)).toEqual(merged); // ida e volta batem
+
+    // Remoto apagou o favorito da pasta e o workspace Banco.
+    const remote2 = structuredClone(merged);
+    delete remote2.bookmarks.m;
+    delete remote2.workspaces.B;
+    const merged2 = merge3(merged, snapshot(store, map), remote2);
+    apply(store, map, merged2, diff(snapshot(store, map), merged2), {
+      deleteWorkspace: (id) => hooks.deleted.push(id), removePanel: () => {}, reloadPanel: () => {}, done: () => {},
+    });
+    expect(store.listBookmarks('loc').map((b) => b.title).sort()).toEqual(['Faculdade', 'Outlook']);
+    expect(hooks.deleted).toEqual(['B']);
+  });
+});

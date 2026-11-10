@@ -36,8 +36,8 @@ export function uriMatches(saved: LoginUri, pageUrl: string, defaultMatch: numbe
 }
 
 /** Logins que servem para a página, em ordem alfabética. */
-export function loginsFor(logins: VaultLogin[], pageUrl: string): VaultLogin[] {
+export function loginsFor(logins: VaultLogin[], pageUrl: string, defaultMatch: number = MATCH.Domain): VaultLogin[] {
   return logins
-    .filter((l) => l.uris.some((u) => uriMatches(u, pageUrl)))
+    .filter((l) => l.uris.some((u) => uriMatches(u, pageUrl, defaultMatch)))
     .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR') || (a.username ?? '').localeCompare(b.username ?? ''));
 }

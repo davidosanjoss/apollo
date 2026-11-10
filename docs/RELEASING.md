@@ -4,8 +4,8 @@
 
 | Repositório | Visibilidade | Conteúdo |
 |---|---|---|
-| `davidosanjoss/apollo` | privado | Código, branches, CI |
-| `davidosanjoss/apollo-releases` | público | Só as Releases (instaladores e manifestos de atualização) |
+| `davidosanjoss/apollo` | público | Código, branches, CI e as Releases (instaladores e manifestos de atualização) |
+| `davidosanjoss/apollo-releases` | público | Antigo lugar das Releases (até a 0.7.0). Recebe uma cópia de cada versão enquanto houver instalações antigas, que procuram atualização lá |
 
 ## Branches
 
@@ -14,7 +14,7 @@
 | `main` | Só versões **estáveis**. Cada commit na `main` corresponde a uma versão com tag. |
 | `dev` | Desenvolvimento. Todo trabalho entra aqui (direto ou via branches `feat/*`, `fix/*`). |
 
-O CI roda em todo push na `dev` (só Linux, para poupar a cota de minutos do repo privado) e em PRs para a `main` (Linux e Windows).
+O CI roda em todo push na `dev` e em PRs para a `dev` (Linux) e em PRs para a `main` (Linux e Windows). PRs de quem contribui pela primeira vez esperam a aprovação de um mantenedor para rodar.
 
 ## Versionamento
 
@@ -36,26 +36,26 @@ O CI roda em todo push na `dev` (só Linux, para poupar a cota de minutos do rep
    git checkout main && git pull
    git tag v0.2.0 && git push origin v0.2.0
    ```
-4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** no `apollo-releases` e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
+4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** nas Releases deste repositório e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG. Depois, copia a versão para o `apollo-releases` (transição; precisa do secret `RELEASES_TOKEN`).
 5. Sincronizar: `git checkout dev && git merge main`.
 
 ## Atualização automática
 
-O app consulta o `apollo-releases` (API pública do GitHub, sem dados do usuário) 15 s depois de abrir e a cada 6 h, em **qualquer** instalação empacotada. Se houver versão nova, mostra uma janela com as notas da versão (a seção do CHANGELOG publicada na release) e **Baixar e instalar** (AppImage/Windows) ou **Abrir a página de download** (zip/tar.gz), **Depois** e **Pular esta versão**. Na primeira abertura depois de atualizar, mostra as novidades uma vez. Configurações → Sobre tem **Verificar atualizações**. Nada é baixado nem instalado sem aceitar. O download é conferido pelo hash SHA-512 do manifesto (`latest.yml` / `latest-linux.yml`).
+O app consulta as Releases deste repositório (API pública do GitHub, sem dados do usuário) 15 s depois de abrir e a cada 6 h, em **qualquer** instalação empacotada. Se houver versão nova, mostra uma janela com as notas da versão (a seção do CHANGELOG publicada na release) e **Baixar e instalar** (AppImage/Windows) ou **Abrir a página de download** (zip/tar.gz), **Depois** e **Pular esta versão**. Na primeira abertura depois de atualizar, mostra as novidades uma vez. Configurações → Sobre tem **Verificar atualizações**. Nada é baixado nem instalado sem aceitar. O download é conferido pelo hash SHA-512 do manifesto (`latest.yml` / `latest-linux.yml`).
 
 - Atualiza sozinho: instalador `.exe` (Windows) e **AppImage** (Linux).
 - `zip` e `tar.gz`: atualização manual.
 - Em desenvolvimento (`npm start`) o atualizador e o aviso ficam desligados (os testes usam `APOLLO_UPDATES_API` com uma API falsa).
 
-## Configuração única: token de publicação
+## Token da cópia para o apollo-releases (transição)
 
-O repo privado publica no público usando o secret `RELEASES_TOKEN`:
+A publicação neste repositório usa o `GITHUB_TOKEN` do próprio workflow. Só a cópia para o `apollo-releases` precisa do secret `RELEASES_TOKEN` (sem ele, a cópia é pulada):
 
 1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
    - Repository access: **Only select repositories** → `apollo-releases`
    - Permissions: **Contents: Read and write** (o resto fica sem acesso)
    - Expiração: a que preferir (anote para renovar)
-2. Salvar como secret no repo privado (o valor é pedido no terminal):
+2. Salvar como secret neste repositório (o valor é pedido no terminal):
    ```bash
    gh secret set RELEASES_TOKEN -R davidosanjoss/apollo
    ```
@@ -73,5 +73,5 @@ Sem isso, o build sai normalmente, só sem a assinatura.
 
 | Repositório | Proteção |
 |---|---|
-| `apollo-releases` | `main`: sem push direto (só PR), sem force-push, sem apagar, vale para admins. Tags `v*` imutáveis (não podem ser apagadas nem movidas); criar novas continua liberado para o release. |
-| `apollo` (privado) | **Sem proteção no servidor**: o GitHub só oferece proteção de branch/rulesets em repositório privado no plano Pro. Na prática, a `main` só recebe merges de PR com o CI verde, e o workflow de release recusa tags fora da `main`. |
+| `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |
+| `apollo-releases` | `main`: sem push direto (só PR), sem force-push, sem apagar, vale para admins. Tags `v*` imutáveis. |

@@ -29,6 +29,7 @@ describe('shortcutFor', () => {
     [key('f', { control: true }), 'find'],
     [key('p', { control: true }), 'print'],
     [key('F11'), 'fullscreen'],
+    [key('F9'), 'reader'],
     [key('F12'), 'devtools'],
     [key('I', { control: true, shift: true }), 'devtools'],
     [key('=', { control: true }), 'zoom-in'],
@@ -51,5 +52,13 @@ describe('shortcutFor', () => {
     expect(shortcutFor(key('ArrowLeft'))).toBeNull();
     expect(shortcutFor(key('Escape'))).toBeNull(); // Esc sozinho é das páginas
     expect(shortcutFor(key('Escape', { shift: true, control: true }))).toBeNull();
+  });
+});
+
+describe('quem recebe primeiro', () => {
+  it('página: recarregar, buscar, imprimir, zoom, Ctrl+K…; navegador: abas e workspaces', async () => {
+    const { PAGE_FIRST } = await import('../../src/main/shortcuts');
+    for (const a of ['reload', 'find', 'print', 'zoom-in', 'palette', 'bookmark']) expect(PAGE_FIRST.has(a as never)).toBe(true);
+    for (const a of ['new-tab', 'close-tab', 'next-tab', 'reopen-tab', 'workspace-1', 'fullscreen', 'memory-monitor']) expect(PAGE_FIRST.has(a as never)).toBe(false);
   });
 });

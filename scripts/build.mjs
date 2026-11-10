@@ -19,6 +19,17 @@ await Promise.all([
     target: 'node24',
     external: ['electron', 'electron-updater'],
   }),
+  // Modo leitura: injetado num mundo isolado da página (texto lido pelo processo principal).
+  build({
+    ...common,
+    entryPoints: ['src/reader/inject.ts'],
+    outfile: 'build/reader.js',
+    sourcemap: false, // injetado em páginas: pequeno sempre
+    minify: true,
+    platform: 'browser',
+    format: 'iife',
+    target: 'chrome140',
+  }),
   // Preload das abas (filtros cosméticos e scriptlets). Sandbox: só o módulo electron.
   build({
     ...common,

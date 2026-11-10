@@ -1,4 +1,4 @@
-// Atualização automática a partir das Releases públicas (davidosanjoss/apollo-releases).
+// Atualização automática a partir das Releases do próprio repositório (davidosanjoss/apollo).
 // Nada é baixado ou instalado sem o usuário aceitar.
 import { app } from 'electron';
 import type { UpdateStatus } from '../shared/types';

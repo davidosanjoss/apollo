@@ -83,6 +83,15 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface SyncInfo {
+  status: 'off' | 'connecting' | 'syncing' | 'ok' | 'error';
+  provider: 'google' | 'onedrive' | null;
+  lastSync: number | null;
+  error: string | null;
+  /** Há chaveiro do sistema: a conexão fica lembrada entre reinícios. */
+  remembered: boolean;
+}
+
 export interface UpdateNotice {
   /** available = versão nova; whats-new = acabou de atualizar (mostra uma vez). */
   kind: 'available' | 'whats-new';
@@ -182,6 +191,19 @@ export interface SettingsInfo {
   spellcheck: SpellcheckMode;
   /** Perguntar onde salvar cada download (senão: pasta Downloads, nome único). */
   downloadAsk: boolean;
+  /** Dias que a lista de downloads fica guardada (0 = só nesta sessão). */
+  downloadKeepDays: number;
+  /** Vídeo flutuante automático ao trocar de aba com um vídeo tocando. */
+  autoPip: boolean;
+  /** Vídeo flutuante sempre por cima das outras janelas (KDE Wayland: via KWin). */
+  pipOnTop: boolean;
+  /** Login do Google: identificar como Firefox em accounts.google.com (compatibilidade). */
+  googleCompat: boolean;
+  /** O Apollo é o navegador padrão do sistema (null = não dá para saber, ex.: Windows). */
+  defaultBrowser: boolean | null;
+  /** Senhas: logins sem regra própria valem no subdomínio exato (host) ou no domínio base. */
+  vaultMatch: 'host' | 'domain';
+  sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
@@ -229,6 +251,12 @@ export interface UiState {
   activeBookmarkId: string | null;
   /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
   fullscreen: 'window' | 'page' | null;
+  /** Tela dividida do workspace ativo (a = esquerda, b = direita), ou null. */
+  split: { a: string; b: string; ratio: number } | null;
+  /** Modo leitura da aba ativa: available = parece um artigo; active = em leitura. */
+  reader: { available: boolean; active: boolean; style: import('../reader/template').ReaderStyle };
+  /** Vídeo flutuante na aba ativa: available = tem vídeo; active = está flutuando. */
+  pip: { available: boolean; active: boolean };
   /** Zoom da aba ativa, em % (100 = padrão). */
   zoom: number;
   /** Downloads desta sessão do Apollo (mais recente primeiro). */
@@ -245,7 +273,12 @@ export interface DownloadInfo {
   received: number;
   /** 0 = tamanho desconhecido. */
   total: number;
+  startedAt: number;
 }
+
+/** Por quantos dias a lista de downloads fica guardada (0 = só enquanto o Apollo está aberto). */
+export const DOWNLOAD_KEEP_DAYS = [0, 1, 7, 30, 90] as const;
+export const DEFAULT_DOWNLOAD_KEEP_DAYS = 7;
 
 export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | 'remove';
 
@@ -378,6 +411,27 @@ export type UiCommand =
   | { type: 'module:set'; moduleId: ModuleId; enabled: boolean }
   /** F11 / Ctrl+P / F12 a partir da interface (paleta). */
   | { type: 'view:fullscreen' }
+  /** Sincronização: conectar (login no navegador do sistema), agora, cancelar, desconectar. */
+  | { type: 'sync:connect'; provider: 'google' | 'onedrive'; clientId: string; clientSecret: string | null; passphrase: string }
+  | { type: 'sync:now' }
+  | { type: 'sync:cancel' }
+  | { type: 'sync:disconnect' }
+  /** Tela dividida: a aba ativa + `tabId` lado a lado. */
+  | { type: 'split:open'; tabId: string }
+  | { type: 'split:close' }
+  | { type: 'split:swap' }
+  | { type: 'split:ratio'; ratio: number }
+  /** Modo leitura da aba ativa: entra/sai. */
+  | { type: 'reader:toggle' }
+  | { type: 'reader:style'; style: import('../reader/template').ReaderStyle }
+  /** Vídeo flutuante (picture-in-picture) da aba ativa: abre/fecha. */
+  | { type: 'tab:pip' }
+  | { type: 'settings:auto-pip'; on: boolean }
+  | { type: 'settings:pip-on-top'; on: boolean }
+  | { type: 'settings:google-compat'; on: boolean }
+  /** Tornar o Apollo o navegador padrão do sistema. */
+  | { type: 'default-browser:set' }
+  | { type: 'settings:vault-match'; match: 0 | 1 }
   | { type: 'tab:print' }
   | { type: 'tab:devtools' }
   /** Zoom da aba ativa (guardado por site, em cada workspace). */
@@ -386,6 +440,7 @@ export type UiCommand =
   /** Tira da lista os downloads que já terminaram (os arquivos ficam). */
   | { type: 'download:clear' }
   | { type: 'settings:download-ask'; ask: boolean }
+  | { type: 'settings:download-days'; days: number }
   /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
   | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
   | { type: 'find:close' }

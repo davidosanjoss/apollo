@@ -1,10 +1,11 @@
-import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session } from 'electron';
+import { app, BrowserWindow, clipboard, components, ipcMain, net, powerMonitor, safeStorage, screen, session, shell } from 'electron';
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
 import { Browser } from './browser';
-import { shortcutFor } from './shortcuts';
+import { PAGE_FIRST, shortcutFor } from './shortcuts';
 import { NetworkPipeline, gpcModule, type RequestContext } from './network';
 import { Blocker, blockerModule } from './privacy/blocker';
 import { parseFeatures } from './privacy/cosmetics';
@@ -17,6 +18,10 @@ import type { UiCommand } from '../shared/types';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
 import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
+import { SyncService } from './sync/service';
+import { cleanUserAgent, setNativeUserAgent } from './user-agent';
+import { isDefaultBrowser, launchCommand, makeDefaultLinux, urlFromArgv } from './default-browser';
+import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
@@ -58,7 +63,9 @@ if (process.platform === 'linux') {
 
 // Sem "Electron/x" e "apollo/x" no user agent: alguns sites (Microsoft, Google)
 // tratam UA de Electron como navegador desconhecido/inseguro.
-const cleanUA = app.userAgentFallback.replace(/\sElectron\/\S+/i, '').replace(/\sapollo\/\S+/i, '');
+// (Os metadados — client hints — são aplicados por página: ver user-agent.ts.)
+setNativeUserAgent(app.userAgentFallback); // a original, para o login do Google
+const cleanUA = cleanUserAgent(app.userAgentFallback);
 app.userAgentFallback = cleanUA;
 
 // Erro não tratado no processo principal: o Electron abriria uma caixa de diálogo que
@@ -135,6 +142,7 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
       urlCleaningModule(togglesFor),
       blockerModule(blocker, { togglesFor, onBlocked: (ctx, kind) => browser?.onBlocked(ctx, kind) }),
       thirdPartyCookiesModule(togglesFor),
+      clientHintsModule(),
       // GPC obedece ao gerenciador de módulos.
       { ...gpcModule, onBeforeSendHeaders: (d, h, c) => { if (browser?.isModuleOn('gpc') !== false) gpcModule.onBeforeSendHeaders!(d, h, c); } },
     ],
@@ -143,6 +151,8 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
   );
   browser = new Browser(win, store, pipeline, box);
   const b = browser;
+  // Script do KWin (vídeo flutuante por cima) não fica para trás quando o Apollo fecha.
+  app.on('will-quit', () => { void b.pipKeeper.unload(); });
 
   // Antes de a janela (e as abas) sumirem: grava histórico e posição.
   win.on('close', () => {
@@ -190,6 +200,15 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
     } catch {
       event.returnValue = null;
     }
+  });
+  // Atalho que a página recebeu e não usou (ver PAGE_FIRST): o Apollo age. Só de abas e
+  // painéis, só do frame principal, e só atalhos dessa lista.
+  ipcMain.on('apollo:page-shortcut', (event, raw: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame || !b.isPageWebContents(event.sender)) return;
+    const r = raw as Record<string, unknown> | null;
+    if (!r || typeof r.key !== 'string' || r.key.length > 32) return;
+    const action = shortcutFor({ type: 'keyDown', key: r.key, control: r.control === true, meta: r.meta === true, shift: r.shift === true, alt: r.alt === true });
+    if (action && PAGE_FIRST.has(action)) b.runShortcut(action);
   });
   ipcMain.on('apollo:notification-click', (event) => {
     if (event.senderFrame === event.sender.mainFrame) b.showFromNotification(event.sender);
@@ -304,6 +323,20 @@ app.whenReady().then(async () => {
   });
   browser.updateCheck = updateCheck;
   updateCheck.start();
+  // Sincronização (Google Drive / OneDrive), cifrada com a senha do usuário.
+  const sync = new SyncService({
+    store,
+    box,
+    fetch: (url, init) => net.fetch(url, init),
+    // Testes: o endereço de login fica em sync.lastAuthUrl (o teste "faz o login").
+    openExternal: (url) => { if (!process.env.APOLLO_TEST_HOOKS) void shell.openExternal(url); },
+    hooks: browser.syncHooks(),
+    onChange: () => browser.push(),
+    tickMs: Number(process.env.APOLLO_TEST_SYNC_TICK_MS) || undefined,
+    pullMs: Number(process.env.APOLLO_TEST_SYNC_PULL_MS) || undefined,
+  });
+  browser.syncService = sync;
+  void sync.start();
 
   ipcMain.on('ui:command', (event, raw) => {
     if (!isTrustedSender(event, win.webContents)) return;
@@ -321,6 +354,11 @@ app.whenReady().then(async () => {
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
     if (cmd.type === 'update:check') return void updateCheck.check(true);
+    if (cmd.type === 'sync:connect') return void sync.connect({ provider: cmd.provider, clientId: cmd.clientId.trim(), clientSecret: cmd.clientSecret?.trim() || null, passphrase: cmd.passphrase });
+    if (cmd.type === 'sync:now') return void sync.syncNow();
+    if (cmd.type === 'default-browser:set') return void makeDefault();
+    if (cmd.type === 'sync:cancel') return sync.cancelConnect();
+    if (cmd.type === 'sync:disconnect') return sync.disconnect();
     if (cmd.type === 'update:dismiss') return updateCheck.dismiss();
     if (cmd.type === 'update:skip') return updateCheck.skip();
     if (cmd.type === 'update:open-page') { updateCheck.openPage(); return updateCheck.dismiss(); }
@@ -342,10 +380,39 @@ app.whenReady().then(async () => {
     browser.handleCommand(cmd);
   };
 
-  app.on('second-instance', () => {
+  // Outra chamada do Apollo (clicar num link em outro app, com o Apollo já aberto).
+  app.on('second-instance', (_e, argv) => {
+    const url = urlFromArgv(argv);
+    if (url) return browser.openExternalUrl(url);
     if (win.isMinimized()) win.restore();
     win.focus();
   });
+  // Aberto já com um link.
+  const startUrl = urlFromArgv(process.argv);
+  if (startUrl) win.webContents.once('did-finish-load', () => browser.openExternalUrl(startUrl));
+
+  // Navegador padrão: estado e o botão nas Configurações.
+  const refreshDefault = () => void isDefaultBrowser().then((v) => { browser.defaultBrowser = v; browser.push(); });
+  refreshDefault();
+  const makeDefault = async () => {
+    try {
+      if (process.platform === 'linux') {
+        const icon = path.join(app.getAppPath(), 'assets', 'icon.svg');
+        await makeDefaultLinux({
+          exec: launchCommand({ appImage: process.env.APPIMAGE, execPath: process.execPath, packaged: app.isPackaged, appPath: app.getAppPath() }),
+          iconSvg: fs.existsSync(icon) ? fs.readFileSync(icon, 'utf8') : null,
+        });
+      } else {
+        // Windows/macOS: registra e abre a tela do sistema (a escolha final é do usuário).
+        app.setAsDefaultProtocolClient('http');
+        app.setAsDefaultProtocolClient('https');
+        if (process.platform === 'win32') void shell.openExternal('ms-settings:defaultapps');
+      }
+    } catch (err) {
+      console.warn('[apollo] não foi possível tornar o navegador padrão:', (err as Error).message);
+    }
+    refreshDefault();
+  };
 
   // Cookies de sessão: a cada 5 min (protege contra queda) e ao fechar.
   setInterval(() => void browser.saveSessionCookies(), 5 * 60_000).unref();

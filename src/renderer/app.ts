@@ -6,6 +6,8 @@ import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DE
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
 import { compareVersions } from '../shared/release-notes';
+import { nextReaderSize, type ReaderStyle } from '../reader/template';
+import { clampRatio, SPLIT_GAP } from '../main/split';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -80,7 +82,22 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderSplit(s);
   renderFullscreen(s);
+  const readerBtn = $('#reader-btn');
+  readerBtn.hidden = !s.reader.available;
+  readerBtn.classList.toggle('on', s.reader.active);
+  readerBtn.title = s.reader.active ? 'Sair do modo leitura (F9)' : 'Modo leitura (F9)';
+  $('#reader-bar').hidden = !s.reader.active;
+  if (s.reader.active) {
+    const f = $<HTMLSelectElement>('#reader-font'), t = $<HTMLSelectElement>('#reader-theme');
+    if (document.activeElement !== f) f.value = s.reader.style.font;
+    if (document.activeElement !== t) t.value = s.reader.style.theme;
+  }
+  const pipBtn = $('#pip-btn');
+  pipBtn.hidden = !s.pip.available;
+  pipBtn.classList.toggle('on', s.pip.active);
+  pipBtn.title = s.pip.active ? 'Fechar o vídeo flutuante' : 'Vídeo flutuante (picture-in-picture)';
   const zoomBtn = $('#zoom-btn');
   zoomBtn.hidden = s.zoom === 100;
   zoomBtn.textContent = `${s.zoom}%`;
@@ -284,6 +301,50 @@ $('#home-search').addEventListener('submit', (e) => {
   send({ type: 'tab:navigate', url });
 });
 
+// ------------------------------------------------------------ tela dividida
+
+/** Divisória e faixa da metade ativa, na mesma conta do processo principal. */
+function renderSplit(s: UiState): void {
+  const sp = s.split;
+  const divider = $('#split-divider');
+  const bar = $('#split-bar');
+  for (const t of document.querySelectorAll<HTMLElement>('#tabs .tab')) {
+    t.classList.toggle('in-split', Boolean(sp && (t.dataset.tabId === sp.a || t.dataset.tabId === sp.b)));
+  }
+  const shown = Boolean(sp && (s.activeTabId === sp.a || s.activeTabId === sp.b));
+  divider.hidden = !shown;
+  bar.hidden = !shown;
+  if (!sp || !shown) return;
+  const width = $('#views').clientWidth;
+  const usable = Math.max(0, width - SPLIT_GAP);
+  const wa = Math.round(usable * clampRatio(sp.ratio));
+  divider.style.left = `${wa}px`;
+  const activeLeft = s.activeTabId === sp.a;
+  bar.style.left = activeLeft ? '0px' : `${wa + SPLIT_GAP}px`;
+  bar.style.width = `${activeLeft ? wa : usable - wa}px`;
+}
+
+{
+  const divider = $('#split-divider');
+  let raf = 0;
+  divider.addEventListener('pointerdown', (e) => {
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add('dragging');
+  });
+  divider.addEventListener('pointermove', (e) => {
+    if (!divider.hasPointerCapture(e.pointerId)) return;
+    const r = $('#views').getBoundingClientRect();
+    const ratio = clampRatio((e.clientX - r.left - SPLIT_GAP / 2) / Math.max(1, r.width - SPLIT_GAP));
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => send({ type: 'split:ratio', ratio }));
+  });
+  const end = (e: PointerEvent) => { divider.classList.remove('dragging'); if (divider.hasPointerCapture(e.pointerId)) divider.releasePointerCapture(e.pointerId); };
+  divider.addEventListener('pointerup', end);
+  divider.addEventListener('pointercancel', end);
+  divider.addEventListener('dblclick', () => send({ type: 'split:ratio', ratio: 0.5 }));
+  new ResizeObserver(() => { if (state) renderSplit(state); }).observe($('#views'));
+}
+
 // ------------------------------------------------------------ tela cheia (F11)
 
 let lastFullscreen: UiState['fullscreen'] = null;
@@ -336,7 +397,7 @@ function renderDownloadList(s: UiState): void {
     return b;
   };
   if (!s.downloads.length) {
-    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download nesta sessão.' }));
+    $('#downloads-list').replaceChildren(el('li', { className: 'empty', textContent: 'Nenhum download recente.' }));
     return;
   }
   $('#downloads-list').replaceChildren(...s.downloads.map((d) => {
@@ -345,10 +406,12 @@ function renderDownloadList(s: UiState): void {
     const done = d.state === 'completed';
     const name = el('span', { className: `name${done ? ' done' : ''}`, textContent: d.filename, title: d.url });
     if (done) name.onclick = act(d.id, 'open');
-    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`, textContent: downloadStatus(d) });
+    const day = dayLabel(d.startedAt, Date.now());
+    const status = el('span', { className: `status${d.state === 'interrupted' ? ' failed' : ''}`,
+      textContent: day === 'Hoje' ? downloadStatus(d) : `${downloadStatus(d)} · ${day}` });
     const actions = el('span', { className: 'actions' });
     if (d.state === 'progressing') actions.append(button('⏸', 'Pausar', act(d.id, 'pause')));
-    if (d.state === 'paused' || d.state === 'interrupted') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
+    if (d.state === 'paused') actions.append(button('▶', 'Retomar', act(d.id, 'resume')));
     if (d.state === 'progressing' || d.state === 'paused') actions.append(button('✕', 'Cancelar', act(d.id, 'cancel')));
     if (done) actions.append(button('📂', 'Mostrar na pasta', act(d.id, 'show')));
     if (!(d.state === 'progressing' || d.state === 'paused')) actions.append(button('🗑', 'Tirar da lista', act(d.id, 'remove')));
@@ -480,6 +543,14 @@ function bookmarkCurrent(): void {
 
 $('#bookmark-btn').onclick = bookmarkCurrent;
 $('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
+$('#pip-btn').onclick = () => send({ type: 'tab:pip' });
+$('#reader-btn').onclick = () => send({ type: 'reader:toggle' });
+$('#reader-exit').onclick = () => send({ type: 'reader:toggle' });
+const readerStyle = (patch: Partial<ReaderStyle>) => { if (state) send({ type: 'reader:style', style: { ...state.reader.style, ...patch } }); };
+$('#reader-smaller').onclick = () => state && readerStyle({ size: nextReaderSize(state.reader.style.size, -1) });
+$('#reader-bigger').onclick = () => state && readerStyle({ size: nextReaderSize(state.reader.style.size, 1) });
+$<HTMLSelectElement>('#reader-font').onchange = (e) => readerStyle({ font: (e.target as HTMLSelectElement).value as ReaderStyle['font'] });
+$<HTMLSelectElement>('#reader-theme').onchange = (e) => readerStyle({ theme: (e.target as HTMLSelectElement).value as ReaderStyle['theme'] });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
   if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });
@@ -993,8 +1064,8 @@ $('#ws-delete').onclick = () => {
 // ------------------------------------------------------------ configurações
 
 const settingsPage = $('#settings-page');
-type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'languages' | 'vault' | 'modules' | 'about';
-const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'languages', 'vault', 'modules', 'about'];
+type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'media' | 'languages' | 'sync' | 'vault' | 'modules' | 'about';
+const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'media', 'languages', 'sync', 'vault', 'modules', 'about'];
 let settingsSection: SettingsSection = 'privacy';
 /** Aba ativa quando a página abriu: trocar de aba fecha as configurações. */
 let settingsTabId: string | null = null;
@@ -1043,11 +1114,68 @@ $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });
+$('#default-set').onclick = () => send({ type: 'default-browser:set' });
+
+// --- sincronização
+
+const SYNC_HELP = {
+  google: 'Crie em console.cloud.google.com: um projeto, ative a "Google Drive API", e em Credenciais crie um "ID do cliente OAuth" do tipo "App para computador". Passo a passo em docs/SYNC.md.',
+  onedrive: 'Crie em portal.azure.com → Registros de aplicativo: contas pessoais e corporativas, plataforma "Aplicativos móveis e de desktop" com o endereço http://localhost, e a permissão Files.ReadWrite.AppFolder. Passo a passo em docs/SYNC.md.',
+};
+function renderSync(s: UiState): void {
+  const y = s.settings.sync;
+  const connected = y.status === 'ok' || y.status === 'syncing' || (y.status === 'error' && y.provider !== null);
+  $('#sync-connected').hidden = !connected;
+  $('#sync-connecting').hidden = y.status !== 'connecting';
+  $('#sync-form').hidden = connected || y.status === 'connecting';
+  const name = y.provider === 'google' ? 'Google Drive' : y.provider === 'onedrive' ? 'OneDrive' : '';
+  const when = y.lastSync ? `${dayLabel(y.lastSync, Date.now()).toLowerCase()} às ${new Date(y.lastSync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}` : 'ainda não';
+  const status = $('#sync-status');
+  status.className = y.status === 'error' ? 'error' : 'hint';
+  status.textContent = y.status === 'syncing' ? `Sincronizando com o ${name}…`
+    : y.status === 'connecting' ? 'Esperando o login…'
+    : connected ? `${y.error ? `${y.error} ` : ''}Conectado ao ${name}. Última sincronização: ${when}.${y.remembered ? '' : ' Sem chaveiro do sistema: será preciso conectar de novo a cada abertura.'}`
+    : y.error ? `Não conectou: ${y.error}` : 'Desligada.';
+  $<HTMLButtonElement>('#sync-now').disabled = y.status === 'syncing';
+  const provider = $<HTMLSelectElement>('#sync-provider').value as 'google' | 'onedrive';
+  $('#sync-secret-row').hidden = provider !== 'google';
+  $('#sync-app-help').textContent = SYNC_HELP[provider];
+}
+$<HTMLSelectElement>('#sync-provider').onchange = () => state && renderSync(state);
+$('#sync-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const err = $('#sync-form-error');
+  const pass = $<HTMLInputElement>('#sync-pass').value;
+  const provider = $<HTMLSelectElement>('#sync-provider').value as 'google' | 'onedrive';
+  const secret = $<HTMLInputElement>('#sync-client-secret').value.trim();
+  const problem = pass.length < 8 ? 'A senha precisa de pelo menos 8 caracteres.'
+    : pass !== $<HTMLInputElement>('#sync-pass2').value ? 'As senhas não conferem.'
+    : provider === 'google' && !secret ? 'O Google pede também a chave do aplicativo (Client secret).' : '';
+  err.hidden = !problem;
+  err.textContent = problem;
+  if (problem) return;
+  send({ type: 'sync:connect', provider, clientId: $<HTMLInputElement>('#sync-client-id').value.trim(),
+    clientSecret: provider === 'google' ? secret : null, passphrase: pass });
+  $<HTMLInputElement>('#sync-pass').value = '';
+  $<HTMLInputElement>('#sync-pass2').value = '';
+});
+$('#sync-now').onclick = () => send({ type: 'sync:now' });
+$('#sync-cancel').onclick = () => send({ type: 'sync:cancel' });
+$('#sync-disconnect').onclick = () => send({ type: 'sync:disconnect' });
+$<HTMLSelectElement>('#vault-match').onchange = (e) => send({ type: 'settings:vault-match', match: (e.target as HTMLSelectElement).value === '0' ? 0 : 1 });
+$<HTMLInputElement>('#google-compat').onchange = (e) => send({ type: 'settings:google-compat', on: (e.target as HTMLInputElement).checked });
+$<HTMLInputElement>('#pip-on-top').onchange = (e) => send({ type: 'settings:pip-on-top', on: (e.target as HTMLInputElement).checked });
+$<HTMLInputElement>('#auto-pip').onchange = (e) => send({ type: 'settings:auto-pip', on: (e.target as HTMLInputElement).checked });
 
 function renderSettings(s: UiState): void {
   if (!settingsOpen()) return;
   if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
   $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
+  $<HTMLInputElement>('#auto-pip').checked = s.settings.autoPip;
+  $<HTMLInputElement>('#pip-on-top').checked = s.settings.pipOnTop;
+  $<HTMLInputElement>('#google-compat').checked = s.settings.googleCompat;
+  $<HTMLSelectElement>('#vault-match').value = s.settings.vaultMatch === 'domain' ? '0' : '1';
+  renderSync(s);
   $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
     : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
   const a = s.updateAbout;
@@ -1059,7 +1187,13 @@ function renderSettings(s: UiState): void {
     : a.checked ? `Você está na versão mais recente (verificado às ${new Date(a.checked).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`
     : 'Verificação automática a cada 6 horas.';
   $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
+  const d = s.settings.defaultBrowser;
+  $('#default-status').textContent = d === true ? 'O Apollo é o seu navegador padrão: links de outros programas abrem aqui.'
+    : d === false ? 'Outro navegador é o padrão hoje.' : 'Links de outros programas abrem no navegador escolhido pelo sistema.';
+  $('#default-set').hidden = d === true;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
+  const dd = $<HTMLSelectElement>('#download-days');
+  if (document.activeElement !== dd) dd.value = String(s.settings.downloadKeepDays);
   $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
@@ -1090,6 +1224,7 @@ $('#history-clear').onclick = () => {
   $('#history-clear').textContent = 'Histórico apagado';
   setTimeout(() => { $('#history-clear').textContent = 'Apagar todo o histórico'; }, 2500);
 };
+$<HTMLSelectElement>('#download-days').onchange = (e) => send({ type: 'settings:download-days', days: Number((e.target as HTMLSelectElement).value) });
 $<HTMLInputElement>('#download-ask').onchange = (e) => send({ type: 'settings:download-ask', ask: (e.target as HTMLInputElement).checked });
 $<HTMLSelectElement>('#spellcheck').onchange = (e) =>
   send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });

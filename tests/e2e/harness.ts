@@ -115,6 +115,24 @@ export async function startSite(): Promise<TestSite> {
         return html(`<div id="player" style="background:#000;color:#fff;height:200px">vídeo</div>
           <button id="cheia" style="width:200px;height:50px">Tela cheia</button><script>
           document.getElementById('cheia').onclick = () => document.getElementById('player').requestFullscreen();</script>`, 'Player');
+      case '/article': {
+        // Página de notícia: menu, anúncio, artigo longo e um script que tenta redesenhar a página.
+        const p = (i: number) => `<p>Parágrafo ${i}. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia. O cálculo diferencial estuda taxas de variação e inclinações de curvas, e é a base de boa parte da física e da engenharia.</p>`;
+        return html(`<nav id="menu"><a href="/">Início</a> <a href="/x">Esportes</a></nav>
+          <div class="ad" id="anuncio">COMPRE AGORA</div>
+          <article><h1>Limites e derivadas</h1><p class="byline">Por Ana Souza</p>
+          ${Array.from({ length: 12 }, (_, i) => p(i + 1)).join('')}
+          <p><img src="/nao-existe.png" onerror="document.body.dataset.invadiu='1'" alt="figura"></p></article>
+          <footer>Rodapé do site</footer>
+          <script>setInterval(() => { document.body && document.body.insertAdjacentText('beforeend', 'INVADIU'); }, 300);</script>`, 'Notícia');
+      }
+      case '/terminal':
+        // Como um terminal web (xterm.js): usa Ctrl+R (busca no histórico) e não deixa o navegador agir.
+        return html(`<pre id="saida" style="min-height:200px">$ </pre><script>
+          window.log = [];
+          document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'r') { e.preventDefault(); window.log.push('busca-reversa'); }
+          });</script>`, 'Terminal');
       case '/find':
         return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
       case '/ctx':
@@ -298,6 +316,15 @@ export class Cdp {
     await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
   }
 
+  /** Tecla de verdade na página (ex.: Ctrl+R): letra + modificadores (2 = Ctrl, 8 = Shift). */
+  async pressKey(letter: string, modifiers = 2): Promise<void> {
+    const key = letter.length === 1 ? letter.toLowerCase() : letter;
+    const base = { key, code: letter.length === 1 ? `Key${letter.toUpperCase()}` : letter,
+      windowsVirtualKeyCode: letter.length === 1 ? letter.toUpperCase().charCodeAt(0) : 0, modifiers };
+    await this.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+    await this.call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
+  }
+
   close(): void { this.ws.close(); }
 }
 
@@ -402,6 +429,13 @@ export function tempProfile(): { dir: string; cleanup: () => void } {
 const running = new Set<ChildProcess>();
 process.once('exit', () => { for (const p of running) p.kill('SIGKILL'); });
 
+/** Chama o Apollo de novo (como um link clicado em outro programa): a cópia nova entrega o link e sai. */
+export function launchSecond(userData: string, args: string[]): Promise<number | null> {
+  const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
+  const p = spawn(electronBin, [ROOT, ...headless, ...args], { env: { ...process.env, APOLLO_USER_DATA: userData }, stdio: 'ignore' });
+  return new Promise((resolve) => p.once('exit', resolve));
+}
+
 export class Apollo {
   ui!: Cdp;
   private mainCdp: Cdp | null = null;
@@ -424,7 +458,7 @@ export class Apollo {
   }
 
   /** Abre o Apollo (build/) num perfil. Rode `npm run build` antes. */
-  static async launch(userData: string, env: Record<string, string> = {}): Promise<Apollo> {
+  static async launch(userData: string, env: Record<string, string> = {}, args: string[] = []): Promise<Apollo> {
     const port = await freePort();
     // Sem janelas na tela (Linux): o Chromium desenha em memória. APOLLO_E2E_SHOW=1 mostra as janelas.
     // Tela virtual do tamanho de um monitor comum (o padrão do modo headless é pequeno demais).
@@ -432,7 +466,7 @@ export class Apollo {
       ? ['--ozone-platform=headless', '--ozone-override-screen-size=1600,1000'] : [];
     const inspectPort = env.APOLLO_TEST_HOOKS ? await freePort() : null;
     const inspect = inspectPort ? [`--inspect=127.0.0.1:${inspectPort}`] : [];
-    const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless], {
+    const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless, ...args], {
       env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });

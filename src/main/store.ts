@@ -106,6 +106,17 @@ function defined<T extends object>(patch: T): Partial<T> {
   return Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) as Partial<T>;
 }
 
+export interface SavedDownload {
+  id: string;
+  filename: string;
+  url: string;
+  path: string;
+  state: 'progressing' | 'paused' | 'completed' | 'cancelled' | 'interrupted';
+  received: number;
+  total: number;
+  startedAt: number;
+}
+
 export interface HistoryEntry {
   url: string;
   title: string;
@@ -175,6 +186,10 @@ export class Store {
   setKv(key: string, value: string): void {
     this.db.prepare('INSERT INTO kv(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, value);
+  }
+
+  deleteKv(key: string): void {
+    this.db.prepare('DELETE FROM kv WHERE key = ?').run(key);
   }
 
   // ------------------------------------------------------------ workspaces
@@ -385,6 +400,53 @@ export class Store {
 
   deleteCustomization(id: string): void {
     this.db.prepare('DELETE FROM customizations WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ sincronização (gravação direta)
+
+  /** Posição de um workspace/painel (ordem vinda de outro computador). */
+  setRowPosition(table: 'workspaces' | 'panels', id: string, position: number): void {
+    this.db.prepare(`UPDATE ${table === 'workspaces' ? 'workspaces' : 'panels'} SET position = ? WHERE id = ?`).run(position, id);
+  }
+
+  /** Grava o favorito/pasta exatamente como veio (id, pasta, posição). */
+  putBookmark(b: Omit<Bookmark, 'favicon'> & { position: number }): void {
+    this.db.prepare(`INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, title = excluded.title, url = excluded.url,
+        position = excluded.position, parent_id = excluded.parent_id, is_folder = excluded.is_folder`)
+      .run(b.id, b.workspaceId, b.title, b.url, b.position, Date.now(), b.parentId, b.folder ? 1 : 0);
+  }
+
+  /** Apaga só esta linha (sem levar o que está dentro: a sincronização já decidiu). */
+  deleteBookmarkRow(id: string): void {
+    this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(id);
+  }
+
+  // ------------------------------------------------------------ lista de downloads
+
+  saveDownload(d: SavedDownload): void {
+    this.db.prepare(`INSERT INTO downloads(id, filename, url, path, state, received, total, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET filename = excluded.filename, path = excluded.path, state = excluded.state,
+        received = excluded.received, total = excluded.total`)
+      .run(d.id, d.filename, d.url, d.path, d.state, d.received, d.total, d.startedAt);
+  }
+
+  /** Mais recentes primeiro, desde `since` (ms). */
+  listDownloads(since: number): SavedDownload[] {
+    return (this.db.prepare('SELECT * FROM downloads WHERE started_at >= ? ORDER BY started_at DESC').all(since) as Row[]).map((r) => ({
+      id: r.id as string, filename: r.filename as string, url: r.url as string, path: r.path as string,
+      state: r.state as SavedDownload['state'], received: r.received as number, total: r.total as number, startedAt: r.started_at as number,
+    }));
+  }
+
+  deleteDownload(id: string): void {
+    this.db.prepare('DELETE FROM downloads WHERE id = ?').run(id);
+  }
+
+  /** Apaga os mais antigos que `before` (ms); before = Infinity apaga tudo. */
+  pruneDownloads(before: number): void {
+    if (before === Infinity) this.db.prepare('DELETE FROM downloads').run();
+    else this.db.prepare('DELETE FROM downloads WHERE started_at < ?').run(before);
   }
 
   // ------------------------------------------------------------ histórico de visitas
