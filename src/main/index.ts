@@ -15,7 +15,8 @@ import { registerApolloScheme, serveApolloScheme, UI_URL } from './protocol';
 import { isTrustedSender, parseCommand } from './ipc';
 import type { UiCommand } from '../shared/types';
 import { loadSettings, applyDns, saveSettings, type Settings } from './settings';
-import { setupUpdater } from './updater';
+import { canSelfUpdate, setupUpdater } from './updater';
+import { RELEASES_API, UpdateCheck } from './update-check';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
@@ -293,6 +294,16 @@ app.whenReady().then(async () => {
     (status) => browser.setUpdate(status),
     () => db.exec('PRAGMA wal_checkpoint(TRUNCATE)'),
   );
+  // Versão nova / novidades: em qualquer instalação empacotada (ou numa API de teste).
+  const updateCheck = new UpdateCheck({
+    current: app.getVersion(),
+    store,
+    api: process.env.APOLLO_UPDATES_API || (app.isPackaged ? RELEASES_API : null),
+    canInstall: canSelfUpdate(),
+    onChange: () => browser.push(),
+  });
+  browser.updateCheck = updateCheck;
+  updateCheck.start();
 
   ipcMain.on('ui:command', (event, raw) => {
     if (!isTrustedSender(event, win.webContents)) return;
@@ -309,6 +320,10 @@ app.whenReady().then(async () => {
   const runCommand = (cmd: UiCommand): void => {
     if (cmd.type === 'update:download') return updater.download();
     if (cmd.type === 'update:install') return updater.install();
+    if (cmd.type === 'update:check') return void updateCheck.check(true);
+    if (cmd.type === 'update:dismiss') return updateCheck.dismiss();
+    if (cmd.type === 'update:skip') return updateCheck.skip();
+    if (cmd.type === 'update:open-page') { updateCheck.openPage(); return updateCheck.dismiss(); }
     if (cmd.type === 'settings:dns') {
       settings = { ...settings, dns: { mode: cmd.mode, dohUrl: cmd.dohUrl } };
       saveSettings(settings);

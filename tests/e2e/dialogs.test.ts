@@ -33,19 +33,23 @@ describe('diálogos escondem a página', () => {
   // Regressão: ⚙ → "Módulos e personalizações…" deixava a tela escura sem o diálogo:
   // o aviso de "Configurações fechou" chegava depois de o diálogo de módulos abrir e a
   // página voltava por cima dele.
-  it('trocar de um diálogo para outro (Configurações → Módulos) mantém a página escondida', async () => {
+  // Hoje as Configurações são uma página (com Módulos como seção), mas o risco é o mesmo:
+  // abrir e fechar uma janela por cima delas não pode trazer a página do site de volta.
+  it('Configurações → Módulos → abrir e fechar uma janela: a página do site continua escondida', async () => {
     await app.ui.mouseClick('#settings-btn');
-    await waitFor(() => isOpen('settings-dialog'), 'configurações');
+    await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('settings-page').hidden`), 'configurações');
     await waitFor(async () => (await pageVisibility()) === 'hidden', 'página escondida');
-    await app.ui.mouseClick('#open-modules');
-    await waitFor(() => isOpen('modules-dialog'), 'módulos');
+    await app.ui.mouseClick('#settings-nav button[data-section="modules"]');
+    await app.ui.mouseClick('#settings-nav button[data-section="history"]');
+    await app.ui.mouseClick('#settings-open-history');
+    await waitFor(() => isOpen('history-dialog'), 'histórico');
+    await app.ui.eval(`document.getElementById('history-dialog').close(); true`);
     await new Promise((r) => setTimeout(r, 400)); // tempo de o aviso atrasado chegar
-    expect(await isOpen('settings-dialog')).toBe(false);
     expect(await pageVisibility()).toBe('hidden');
   });
 
-  it('fechar o último diálogo mostra a página de novo', async () => {
-    await app.ui.eval(`document.getElementById('modules-dialog').close(); true`);
+  it('fechar as Configurações mostra a página de novo', async () => {
+    await app.ui.mouseClick('#settings-close');
     await waitFor(async () => (await pageVisibility()) === 'visible', 'página visível');
   });
 
@@ -54,10 +58,10 @@ describe('diálogos escondem a página', () => {
     await waitFor(() => isOpen('palette'), 'paleta');
     await app.ui.eval(`(() => { const i = document.getElementById('palette-input'); i.value = 'configuracoes'; i.dispatchEvent(new Event('input'));
       i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' })); return true; })()`);
-    await waitFor(() => isOpen('settings-dialog'), 'configurações pela paleta');
+    await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('settings-page').hidden`), 'configurações pela paleta');
     await new Promise((r) => setTimeout(r, 400));
     expect(await pageVisibility()).toBe('hidden');
-    await app.ui.eval(`document.getElementById('settings-dialog').close(); true`);
+    await app.ui.eval(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); true`); // Esc fecha
     await waitFor(async () => (await pageVisibility()) === 'visible', 'visível');
   });
 });

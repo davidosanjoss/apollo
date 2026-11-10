@@ -74,6 +74,123 @@
     </div>
 
     <div id="content">
+      <!-- Configurações: página com navegação lateral (cobre o conteúdo; a página do site fica escondida). -->
+      <section id="settings-page" hidden aria-label="Configurações">
+        <nav id="settings-nav">
+          <h2>Configurações</h2>
+          <button type="button" data-section="privacy">Privacidade</button>
+          <button type="button" data-section="dns">DNS seguro</button>
+          <button type="button" data-section="history">Histórico</button>
+          <button type="button" data-section="downloads">Downloads</button>
+          <button type="button" data-section="bookmarks">Favoritos</button>
+          <button type="button" data-section="languages">Idiomas</button>
+          <button type="button" data-section="vault">Bitwarden</button>
+          <button type="button" data-section="modules">Módulos e personalizações</button>
+          <button type="button" data-section="about">Sobre o Apollo</button>
+        </nav>
+        <div id="settings-body">
+          <button type="button" id="settings-close" class="icon-btn" title="Fechar (Esc)">✕</button>
+
+          <div class="settings-section" data-section="privacy" hidden>
+            <h2>Privacidade</h2>
+            <p class="hint">Padrão de todos os workspaces. Cada workspace e cada site podem mudar isso (escudo na barra de endereço).</p>
+            <div id="global-privacy"></div>
+          </div>
+
+          <div class="settings-section" data-section="dns" hidden>
+            <h2>DNS seguro</h2>
+      <label>Modo
+        <select id="dns-mode">
+          <option value="secure">Seguro (DNS sobre HTTPS, sempre)</option>
+          <option value="automatic">Automático (HTTPS quando possível)</option>
+          <option value="off">Desligado (DNS do sistema)</option>
+        </select>
+      </label>
+      <label>Endereço DoH (ex.: Cloudflare Zero Trust Gateway)
+        <input id="dns-url" autocomplete="off" spellcheck="false" placeholder="Vazio = Cloudflare público (https://cloudflare-dns.com/dns-query)">
+      </label>
+      <div class="settings-row">
+        <span id="dns-status"></span>
+        <span class="spacer"></span>
+        <button type="button" id="dns-test">Testar</button>
+        <button type="button" id="dns-save" class="primary">Aplicar</button>
+      </div>
+          </div>
+
+          <div class="settings-section" data-section="history" hidden>
+            <h2>Histórico</h2>
+      <label class="remember"><input type="checkbox" id="history-on"> Guardar as páginas visitadas (para achar no Ctrl+K)</label>
+      <p class="hint">Fica só neste computador, separado por workspace; nunca nos temporários. Guarda os últimos 90 dias.</p>
+      <button type="button" id="history-clear">Apagar todo o histórico</button>
+            <p><button type="button" id="settings-open-history">Ver o histórico (Ctrl+H)</button></p>
+          </div>
+
+          <div class="settings-section" data-section="downloads" hidden>
+            <h2>Downloads</h2>
+      <label class="remember"><input type="checkbox" id="download-ask"> Perguntar onde salvar cada arquivo</label>
+      <p class="hint">Desmarcado: vai direto para a pasta Downloads (com "(1)", "(2)"… se o nome já existir). "Salvar como…" no botão direito sempre pergunta.</p>
+          </div>
+
+          <div class="settings-section" data-section="bookmarks" hidden>
+            <h2>Favoritos</h2>
+            <label class="remember"><input type="checkbox" id="settings-bookmark-bar"> Mostrar a barra de favoritos (Ctrl+Shift+B)</label>
+            <p class="hint">Cada workspace tem os próprios favoritos, com pastas e subpastas.</p>
+            <p><button type="button" id="settings-manage-bookmarks">Gerenciar favoritos…</button></p>
+          </div>
+
+          <div class="settings-section" data-section="languages" hidden>
+            <h2>Idiomas</h2>
+            <h3>Corretor ortográfico</h3>
+      <label>Idiomas <select id="spellcheck">
+        <option value="pt-en">Português (Brasil) e inglês</option>
+        <option value="pt">Só português (Brasil)</option>
+        <option value="off">Desligado</option>
+      </select></label>
+      <p class="hint">O dicionário é baixado uma vez dos servidores do Google, sem nenhum dado seu. "Desligado" evita até isso.</p>
+          </div>
+
+          <div class="settings-section" data-section="vault" hidden>
+            <h2>Bitwarden</h2>
+            <p class="hint" id="settings-vault-status"></p>
+            <p><button type="button" id="settings-open-vault">Abrir o Bitwarden…</button></p>
+          </div>
+
+          <div class="settings-section" data-section="modules" hidden>
+            <h2>Módulos e personalizações</h2>
+            <div id="modules-main">
+        <div id="modules-list"></div>
+        <h3>Personalizações por site</h3>
+        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
+        <ul id="custom-list"></ul>
+        <div class="dialog-actions">
+          <button type="button" id="custom-new">Nova personalização</button>
+        </div>
+            </div>
+            <div id="custom-editor" hidden>
+        <h2 id="custom-title">Personalização</h2>
+        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
+        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
+        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
+        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
+        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
+        <div class="dialog-actions">
+          <button type="button" id="custom-delete" class="danger">Apagar</button>
+          <span class="spacer"></span>
+          <button type="button" id="custom-cancel">Voltar</button>
+          <button type="button" id="custom-save" class="primary">Salvar</button>
+        </div>
+      </div>
+          </div>
+
+          <div class="settings-section" data-section="about" hidden>
+            <h2>Sobre o Apollo</h2>
+            <p id="about-version"></p>
+            <p class="hint" id="about-status"></p>
+            <p><button type="button" id="about-check">Verificar atualizações</button></p>
+            <p class="hint">O Apollo consulta só a página pública de versões (no GitHub), sem nenhum dado seu. Nada é baixado sem você aceitar.</p>
+          </div>
+        </div>
+      </section>
       <!-- Área onde o processo principal posiciona a página da aba ativa. -->
       <div id="views">
         <!-- Página inicial desenhada pela interface (sem processo próprio). -->
@@ -150,59 +267,6 @@
     </form>
   </dialog>
 
-  <dialog id="settings-dialog">
-    <form method="dialog" id="settings-form">
-      <h2>Configurações</h2>
-
-      <h3>DNS</h3>
-      <label>Modo
-        <select id="dns-mode">
-          <option value="secure">Seguro (DNS sobre HTTPS, sempre)</option>
-          <option value="automatic">Automático (HTTPS quando possível)</option>
-          <option value="off">Desligado (DNS do sistema)</option>
-        </select>
-      </label>
-      <label>Endereço DoH (ex.: Cloudflare Zero Trust Gateway)
-        <input id="dns-url" autocomplete="off" spellcheck="false" placeholder="Vazio = Cloudflare público (https://cloudflare-dns.com/dns-query)">
-      </label>
-      <div class="settings-row">
-        <span id="dns-status"></span>
-        <span class="spacer"></span>
-        <button type="button" id="dns-test">Testar</button>
-        <button type="button" id="dns-save" class="primary">Aplicar</button>
-      </div>
-
-      <h3>Privacidade (padrão de todos os workspaces)</h3>
-      <div id="global-privacy"></div>
-
-      <h3>Histórico</h3>
-      <label class="remember"><input type="checkbox" id="history-on"> Guardar as páginas visitadas (para achar no Ctrl+K)</label>
-      <p class="hint">Fica só neste computador, separado por workspace; nunca nos temporários. Guarda os últimos 90 dias.</p>
-      <button type="button" id="history-clear">Apagar todo o histórico</button>
-
-      <h3>Downloads</h3>
-      <label class="remember"><input type="checkbox" id="download-ask"> Perguntar onde salvar cada arquivo</label>
-      <p class="hint">Desmarcado: vai direto para a pasta Downloads (com "(1)", "(2)"… se o nome já existir). "Salvar como…" no botão direito sempre pergunta.</p>
-
-      <h3>Corretor ortográfico</h3>
-      <label>Idiomas <select id="spellcheck">
-        <option value="pt-en">Português (Brasil) e inglês</option>
-        <option value="pt">Só português (Brasil)</option>
-        <option value="off">Desligado</option>
-      </select></label>
-      <p class="hint">O dicionário é baixado uma vez dos servidores do Google, sem nenhum dado seu. "Desligado" evita até isso.</p>
-
-      <h3>Módulos</h3>
-      <div class="settings-row"><span class="hint">Ligar/desligar partes do navegador e criar personalizações por site.</span>
-        <span class="spacer"></span><button type="button" id="open-modules">Módulos e personalizações…</button></div>
-
-      <div class="dialog-actions">
-        <span class="spacer"></span>
-        <button type="submit">Fechar</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="panel-dialog">
     <form method="dialog" id="panel-form">
       <h2>Novo painel lateral</h2>
@@ -214,39 +278,6 @@
         <span class="spacer"></span>
         <button type="button" id="panel-cancel">Cancelar</button>
         <button type="submit" class="primary">Adicionar</button>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="modules-dialog">
-    <form method="dialog" id="modules-form">
-      <!-- Lista -->
-      <div id="modules-main">
-        <h2>Módulos</h2>
-        <div id="modules-list"></div>
-        <h3>Personalizações por site</h3>
-        <p class="hint">Seu CSS e JavaScript nos sites escolhidos. O JavaScript roda isolado: mexe na página, mas não enxerga as variáveis dela nem o Apollo.</p>
-        <ul id="custom-list"></ul>
-        <div class="dialog-actions">
-          <button type="button" id="custom-new">Nova personalização</button>
-          <span class="spacer"></span>
-          <button type="submit">Fechar</button>
-        </div>
-      </div>
-      <!-- Editor -->
-      <div id="custom-editor" hidden>
-        <h2 id="custom-title">Personalização</h2>
-        <label>Nome <input id="custom-name" maxlength="80" autocomplete="off"></label>
-        <label>Sites (separados por vírgula; "*" = todos) <input id="custom-sites" placeholder="youtube.com, moodle.ufmg.br" spellcheck="false" autocomplete="off"></label>
-        <label>CSS <textarea id="custom-css" rows="6" spellcheck="false" placeholder="#comments { display: none !important; }"></textarea></label>
-        <label>JavaScript <textarea id="custom-js" rows="6" spellcheck="false" placeholder="document.querySelector('video')?.playbackRate = 1.5;"></textarea></label>
-        <label class="remember"><input type="checkbox" id="custom-enabled" checked> Ligada</label>
-        <div class="dialog-actions">
-          <button type="button" id="custom-delete" class="danger">Apagar</button>
-          <span class="spacer"></span>
-          <button type="button" id="custom-cancel">Voltar</button>
-          <button type="button" id="custom-save" class="primary">Salvar</button>
-        </div>
       </div>
     </form>
   </dialog>
@@ -275,6 +306,20 @@
         <span class="spacer"></span>
         <button type="button" id="bookmark-cancel">Cancelar</button>
         <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="update-dialog">
+    <form method="dialog">
+      <h2 id="update-dialog-title"></h2>
+      <p class="hint" id="update-dialog-sub"></p>
+      <div id="update-notes"></div>
+      <div class="dialog-actions">
+        <button type="button" id="update-skip">Pular esta versão</button>
+        <span class="spacer"></span>
+        <button type="button" id="update-dismiss">Depois</button>
+        <button type="button" id="update-go" class="primary"></button>
       </div>
     </form>
   </dialog>

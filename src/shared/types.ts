@@ -83,6 +83,27 @@ export type UpdateStatus =
   | { stage: 'downloaded'; version: string }
   | { stage: 'error' };
 
+export interface UpdateNotice {
+  /** available = versão nova; whats-new = acabou de atualizar (mostra uma vez). */
+  kind: 'available' | 'whats-new';
+  version: string;
+  notes: import('./release-notes').NoteBlock[];
+  /** Página da release (oficial). */
+  url: string;
+  /** Esta instalação baixa e instala sozinha (senão: abrir a página de download). */
+  canInstall: boolean;
+}
+
+export interface UpdateAbout {
+  version: string;
+  latest: string | null;
+  checking: boolean;
+  checked: number | null;
+  failed: boolean;
+  /** false no desenvolvimento (sem verificação). */
+  enabled: boolean;
+}
+
 export interface MemoryTab {
   id: string;
   workspaceId: string;
@@ -178,6 +199,9 @@ export interface UiState {
   sitePermissions: SitePermissions | null;
   sitePrivacy: SitePrivacy | null;
   update: UpdateStatus | null;
+  /** Janela de versão nova / novidades (null = nada a mostrar). */
+  updateNotice: UpdateNotice | null;
+  updateAbout: UpdateAbout;
   memory: MemoryReport | null;
   settings: SettingsInfo;
   vault: VaultStatusInfo;
@@ -365,6 +389,11 @@ export type UiCommand =
   /** Buscar na página da aba ativa (findNext = ir ao próximo/anterior do mesmo texto). */
   | { type: 'find:query'; text: string; forward: boolean; findNext: boolean }
   | { type: 'find:close' }
+  /** Verificar versão agora (Configurações → Sobre). */
+  | { type: 'update:check' }
+  | { type: 'update:dismiss' }
+  | { type: 'update:skip' }
+  | { type: 'update:open-page' }
   /** Marca a página da aba ativa como favorita (no workspace dela). */
   | { type: 'bookmark:add' }
   /** Edita o favorito; parentId (se vier) move para o fim daquela pasta (null = barra). */

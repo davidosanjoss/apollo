@@ -52,6 +52,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import type { UpdateCheck } from './update-check';
 import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
@@ -2066,6 +2067,9 @@ export class Browser {
     this.push();
   }
 
+  /** Verificação de versões (index liga depois de criar o Browser). */
+  updateCheck: UpdateCheck | null = null;
+
   setUpdate(status: UpdateStatus | null): void {
     this.update = status;
     this.push();
@@ -2128,6 +2132,8 @@ export class Browser {
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
+      updateNotice: this.updateCheck?.current() ?? null,
+      updateAbout: this.updateCheck?.about() ?? { version: app.getVersion(), latest: null, checking: false, checked: null, failed: false, enabled: false },
       memory: this.memoryReport,
       vault: this.vaultInfo,
       vaultSite: this.vaultSite(active?.url),

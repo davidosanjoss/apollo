@@ -5,6 +5,7 @@ import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMod
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
+import { compareVersions } from '../shared/release-notes';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -91,6 +92,7 @@ function render(): void {
   renderSavePrompt(s);
   renderSiteBar(s);
   renderUpdate(s);
+  renderUpdateNotice(s);
   renderMemory(s);
   renderSettings(s);
   renderVault(s);
@@ -840,19 +842,67 @@ function renderSavePrompt(s: UiState): void {
   $('#save-yes').textContent = p.mode === 'update' ? 'Atualizar' : p.mode === 'locked' ? 'Desbloquear…' : 'Salvar';
 }
 
+// ------------------------------------------------------------ versão nova / novidades
+
+const updateDialog = $<HTMLDialogElement>('#update-dialog');
+let shownNotice = '';
+
+function renderUpdateNotice(s: UiState): void {
+  const n = s.updateNotice;
+  if (!n) { shownNotice = ''; if (updateDialog.open) updateDialog.close(); return; }
+  const key = `${n.kind}:${n.version}`;
+  if (key === shownNotice) return;
+  shownNotice = key;
+  const fresh = n.kind === 'available';
+  $('#update-dialog-title').textContent = fresh ? `Apollo ${n.version} disponível` : `Novidades do Apollo ${n.version}`;
+  $('#update-dialog-sub').textContent = fresh
+    ? `Você está na versão ${s.updateAbout.version}. ${n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.'}`
+    : 'O Apollo foi atualizado. O que mudou:';
+  // Notas: só texto (textContent), agrupadas em listas.
+  const nodes: HTMLElement[] = [];
+  let list: HTMLElement | null = null;
+  for (const b of n.notes) {
+    if (b.type === 'item') {
+      if (!list) { list = el('ul'); nodes.push(list); }
+      list.append(el('li', { textContent: b.text }));
+    } else {
+      list = null;
+      nodes.push(el(b.type === 'heading' ? 'h4' : 'p', { textContent: b.text }));
+    }
+  }
+  $('#update-notes').replaceChildren(...(nodes.length ? nodes : [el('p', { textContent: 'Veja as mudanças na página da versão.' })]));
+  $('#update-skip').hidden = !fresh;
+  $('#update-dismiss').textContent = fresh ? 'Depois' : 'Fechar';
+  const go = $<HTMLButtonElement>('#update-go');
+  go.hidden = !fresh;
+  go.textContent = n.canInstall ? 'Baixar e instalar' : 'Abrir a página de download';
+  go.dataset.action = n.canInstall ? 'install' : 'page';
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== updateDialog) d.close();
+  if (!updateDialog.open) updateDialog.showModal();
+  (fresh ? go : $<HTMLButtonElement>('#update-dismiss')).focus(); // não a área das notas
+}
+
+$('#update-go').onclick = () => {
+  if ($('#update-go').dataset.action === 'install') { updateDismissed = false; send({ type: 'update:download' }); send({ type: 'update:dismiss' }); }
+  else send({ type: 'update:open-page' });
+  updateDialog.close();
+};
+$('#update-skip').onclick = () => { send({ type: 'update:skip' }); updateDialog.close(); };
+$('#update-dismiss').onclick = () => updateDialog.close();
+// Fechar de qualquer jeito (Esc também) = "Depois".
+updateDialog.addEventListener('close', () => { if (state?.updateNotice) send({ type: 'update:dismiss' }); });
+
 function renderUpdate(s: UiState): void {
   const bar = $('#update-bar');
   const u = s.update;
   const primary = $<HTMLButtonElement>('#update-primary');
-  if (!u || (updateDismissed && u.stage === 'available')) { bar.hidden = true; return; }
+  // "Disponível" é mostrado na janela de versão nova (com as notas); a barra só acompanha
+  // o download e o "reiniciar".
+  if (!u || u.stage === 'available' || updateDismissed) { bar.hidden = true; return; }
   bar.hidden = false;
   primary.hidden = u.stage === 'downloading' || u.stage === 'error';
   primary.disabled = false;
-  if (u.stage === 'available') {
-    $('#update-text').textContent = `Apollo ${u.version} disponível.`;
-    primary.textContent = 'Baixar e reiniciar';
-    primary.dataset.action = 'download';
-  } else if (u.stage === 'downloading') {
+  if (u.stage === 'downloading') {
     $('#update-text').textContent = `Baixando atualização… ${u.percent}%`;
   } else if (u.stage === 'downloaded') {
     $('#update-text').textContent = `Apollo ${u.version} pronto. Suas abas serão restauradas.`;
@@ -942,10 +992,73 @@ $('#ws-delete').onclick = () => {
 
 // ------------------------------------------------------------ configurações
 
-const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
+const settingsPage = $('#settings-page');
+type SettingsSection = 'privacy' | 'dns' | 'history' | 'downloads' | 'bookmarks' | 'languages' | 'vault' | 'modules' | 'about';
+const SETTINGS_SECTIONS: SettingsSection[] = ['privacy', 'dns', 'history', 'downloads', 'bookmarks', 'languages', 'vault', 'modules', 'about'];
+let settingsSection: SettingsSection = 'privacy';
+/** Aba ativa quando a página abriu: trocar de aba fecha as configurações. */
+let settingsTabId: string | null = null;
+const settingsOpen = () => !settingsPage.hidden;
+
+function showSettingsSection(section: SettingsSection): void {
+  settingsSection = section;
+  try { localStorage.setItem('settings-section', section); } catch { /* sem armazenamento: tudo bem */ }
+  for (const b of document.querySelectorAll<HTMLElement>('#settings-nav button')) b.classList.toggle('active', b.dataset.section === section);
+  for (const d of document.querySelectorAll<HTMLElement>('.settings-section')) d.hidden = d.dataset.section !== section;
+  if (section === 'modules') showModulesView(false);
+  $('#settings-body').scrollTop = 0;
+  if (state) { renderSettings(state); renderModules(state); }
+}
+
+function openSettings(section?: SettingsSection): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
+  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
+  let saved: string | null = null;
+  try { saved = localStorage.getItem('settings-section'); } catch { /* sem armazenamento */ }
+  settingsTabId = state.activeTabId;
+  settingsPage.hidden = false;
+  syncOverlay();
+  showSettingsSection(section ?? (SETTINGS_SECTIONS.includes(saved as SettingsSection) ? saved as SettingsSection : 'privacy'));
+  $<HTMLElement>(`#settings-nav button[data-section="${settingsSection}"]`).focus();
+}
+
+function closeSettings(): void {
+  if (!settingsOpen()) return;
+  settingsPage.hidden = true;
+  syncOverlay();
+  send({ type: 'tab:focus' });
+}
+
+for (const b of document.querySelectorAll<HTMLElement>('#settings-nav button')) {
+  b.onclick = () => showSettingsSection(b.dataset.section as SettingsSection);
+}
+$('#settings-close').onclick = closeSettings;
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsOpen() && !document.querySelector('dialog[open]')) { e.preventDefault(); closeSettings(); }
+});
+$('#settings-open-history').onclick = () => openHistory();
+$('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
+$('#settings-open-vault').onclick = () => openVault();
+$<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
+$('#about-check').onclick = () => send({ type: 'update:check' });
 
 function renderSettings(s: UiState): void {
-  if (!settingsDialog.open) return;
+  if (!settingsOpen()) return;
+  if (s.activeTabId !== settingsTabId) { closeSettings(); return; } // foi para outra aba
+  $<HTMLInputElement>('#settings-bookmark-bar').checked = s.settings.bookmarkBar;
+  $('#settings-vault-status').textContent = s.vault.status === 'unlocked' ? 'Cofre conectado e desbloqueado.'
+    : s.vault.status === 'locked' ? 'Cofre conectado e bloqueado.' : 'Nenhum cofre conectado. Funciona com o Bitwarden oficial ou um servidor próprio (Vaultwarden).';
+  const a = s.updateAbout;
+  $('#about-version').textContent = `Apollo ${a.version}`;
+  $('#about-status').textContent = !a.enabled ? 'Verificação de versões desligada nesta cópia (desenvolvimento).'
+    : a.checking ? 'Verificando…'
+    : a.failed ? 'Não foi possível verificar agora (sem conexão?).'
+    : a.latest && compareVersions(a.latest, a.version) > 0 ? `Versão ${a.latest} disponível.`
+    : a.checked ? `Você está na versão mais recente (verificado às ${new Date(a.checked).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}).`
+    : 'Verificação automática a cada 6 horas.';
+  $<HTMLButtonElement>('#about-check').disabled = !a.enabled || a.checking;
   $<HTMLInputElement>('#download-ask').checked = s.settings.downloadAsk;
   $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
   const sc = $<HTMLSelectElement>('#spellcheck');
@@ -970,15 +1083,7 @@ function renderSettings(s: UiState): void {
   }));
 }
 
-function openSettings(): void {
-  if (!state) return;
-  $<HTMLSelectElement>('#dns-mode').value = state.settings.dns.mode;
-  $<HTMLInputElement>('#dns-url').value = state.settings.dns.dohUrl ?? '';
-  settingsDialog.showModal();
-  renderSettings(state);
-}
-
-$('#settings-btn').onclick = openSettings;
+$('#settings-btn').onclick = () => (settingsOpen() ? closeSettings() : openSettings());
 $<HTMLInputElement>('#history-on').onchange = (e) => send({ type: 'settings:history', on: (e.target as HTMLInputElement).checked });
 $('#history-clear').onclick = () => {
   send({ type: 'history:clear' });
@@ -1208,11 +1313,10 @@ $('#panel-form').addEventListener('submit', (e) => {
 
 // ------------------------------------------------------------ módulos e personalizações
 
-const modulesDialog = $<HTMLDialogElement>('#modules-dialog');
 let editingCustom: string | null = null; // id em edição (null = nova)
 
 function renderModules(s: UiState): void {
-  if (!modulesDialog.open) return;
+  if (!settingsOpen() || settingsSection !== 'modules') return;
   $('#modules-list').replaceChildren(...s.modules.map((m) => {
     const label = el('label', { className: 'module-row' });
     const cb = el('input', { type: 'checkbox', checked: m.enabled });
@@ -1239,11 +1343,7 @@ function showModulesView(editor: boolean): void {
 }
 
 function openModules(): void {
-  if (!state) return;
-  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== modulesDialog) d.close();
-  showModulesView(false);
-  if (!modulesDialog.open) modulesDialog.showModal();
-  renderModules(state);
+  openSettings('modules');
 }
 
 function openCustomEditor(id: string | null): void {
@@ -1260,7 +1360,6 @@ function openCustomEditor(id: string | null): void {
   $('#custom-name').focus();
 }
 
-$('#open-modules').onclick = openModules;
 $('#custom-new').onclick = () => openCustomEditor(null);
 $('#custom-cancel').onclick = () => showModulesView(false);
 $('#custom-save').onclick = () => {
@@ -1512,8 +1611,9 @@ $<HTMLInputElement>('#address').addEventListener('blur', () => render());
 // Regressão: cada diálogo avisava sozinho; ao trocar de um diálogo para outro, o aviso
 // "fechou" chegava depois do "abriu" e a página cobria o diálogo novo (tela escura).
 let overlayShown = false;
+// A página de configurações também cobre a área da página do site.
 const syncOverlay = () => {
-  const open = document.querySelector('dialog[open]') !== null;
+  const open = document.querySelector('dialog[open]') !== null || !$('#settings-page').hidden;
   if (open === overlayShown) return;
   overlayShown = open;
   send({ type: 'layout:overlay', open });

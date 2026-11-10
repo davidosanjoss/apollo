@@ -24,7 +24,8 @@ const readSettings = () => JSON.parse(fs.readFileSync(path.join(profile.dir, 'se
 describe('configurações', () => {
   it('abre pelo botão e mostra o DNS em uso', async () => {
     await app.ui.mouseClick('#settings-btn');
-    await waitFor(() => app.ui.eval<boolean>(`document.getElementById('settings-dialog').open`), 'diálogo');
+    await waitFor(() => app.ui.eval<boolean>(`!document.getElementById('settings-page').hidden`), 'página');
+    await app.ui.mouseClick('#settings-nav button[data-section="dns"]');
     expect(await app.ui.eval(`document.getElementById('dns-mode').value`)).toBe('secure');
     expect(await app.ui.eval(`document.getElementById('dns-status').textContent`)).toContain('cloudflare-public');
   });
@@ -51,7 +52,7 @@ describe('configurações', () => {
     await app.send({ type: 'settings:dns', mode: 'secure', dohUrl: null });
     const s = await app.until((x) => x.settings.dns.dohUrl === null, 'padrão');
     expect(s.settings.dns.provider).toBe('cloudflare-public');
-    await app.ui.eval(`document.getElementById('settings-dialog').close(); true`);
+    await app.ui.mouseClick('#settings-close');
   });
 
   it('padrão global de privacidade vale para todos os workspaces (camada "global")', async () => {

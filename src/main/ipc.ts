@@ -123,6 +123,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'custom:delete': return id(c.id) ? (c as UiCommand) : null;
     case 'find:query':
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
+    case 'update:check':
+    case 'update:dismiss':
+    case 'update:skip':
+    case 'update:open-page':
     case 'view:fullscreen':
     case 'tab:print':
     case 'tab:devtools': return { type: c.type } as UiCommand;
