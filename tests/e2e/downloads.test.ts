@@ -81,7 +81,8 @@ describe('downloads', () => {
     await app.until((x) => x.downloads.length === 0, 'lista vazia');
     expect(fs.readdirSync(dir)).toHaveLength(3);
     await ui(`document.getElementById('downloads-dialog').close(); true`);
-    await waitFor(async () => ui<boolean>(`document.getElementById('downloads-btn').hidden`), 'botão some');
+    // O botão fica sempre no rodapé da barra direita; sem nada baixando, sem contador.
+    await waitFor(async () => ui<boolean>(`document.getElementById('downloads-active').hidden`), 'sem contador');
   });
 
   it('opção "perguntar onde salvar" fica salva', async () => {

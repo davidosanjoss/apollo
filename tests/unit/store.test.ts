@@ -436,7 +436,7 @@ describe('v8: favoritos', () => {
   it('renomear, reordenar, remover; somem com o workspace', () => {
     for (const id of ['x', 'y', 'z']) store.addBookmark({ id, workspaceId: 'a', title: id, url: `https://${id}.com`, favicon: null });
     store.renameBookmark('x', 'Xis');
-    store.moveBookmark('z', 0);
+    store.moveBookmark('z', null, 0);
     expect(store.listBookmarks('a').map((b) => b.title)).toEqual(['z', 'Xis', 'y']);
     store.removeBookmark('x');
     expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['z', 'y']);
@@ -492,5 +492,58 @@ describe('v10: histórico de visitas', () => {
     expect(store.searchHistory('a', 'com', 50).map((x) => x.title).sort()).toEqual(['N0', 'N1', 'N2']);
     store.clearHistory();
     expect(store.searchHistory('a', 'com')).toEqual([]);
+  });
+});
+
+describe('v11: pastas de favoritos', () => {
+  beforeEach(() => { ws('a'); ws('b'); });
+  const add = (id: string, parentId: string | null = null) => store.addBookmark({ id, workspaceId: 'a', title: id, url: `https://${id}.com`, favicon: null, parentId });
+  const kids = (parentId: string | null) => store.childBookmarks('a', parentId).map((b) => b.id);
+
+  it('pastas e subpastas; cada nível com a própria ordem', () => {
+    add('x');
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'Faculdade' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'Cálculo', parentId: 'f' });
+    add('m', 'f');
+    add('n', 'sub');
+    expect(kids(null)).toEqual(['x', 'f']);
+    expect(kids('f')).toEqual(['sub', 'm']);
+    expect(kids('sub')).toEqual(['n']);
+    expect(store.getBookmark('f')).toMatchObject({ folder: true, url: '', parentId: null });
+    expect(store.findBookmark('a', 'https://n.com')?.id).toBe('n');
+  });
+
+  it('pai inválido (outro workspace, não é pasta) vira raiz', () => {
+    store.addFolder({ id: 'fb', workspaceId: 'b', title: 'B' });
+    add('x', 'fb');
+    add('y', 'x');
+    expect(kids(null)).toEqual(['x', 'y']);
+  });
+
+  it('mover entre pastas; pasta nunca entra nela mesma nem numa subpasta dela', () => {
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'F' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'S', parentId: 'f' });
+    add('x');
+    store.moveBookmark('x', 'sub', 0);
+    expect(kids('sub')).toEqual(['x']);
+    store.moveBookmark('x', null, 0);
+    expect(kids(null)).toEqual(['x', 'f']);
+    store.moveBookmark('f', 'sub', 0); // ciclo: ignorado
+    store.moveBookmark('f', 'f', 0);
+    expect(store.getBookmark('f')!.parentId).toBeNull();
+    store.moveBookmark('x', 'x', 0); // não é pasta: ignorado
+    expect(store.getBookmark('x')!.parentId).toBeNull();
+  });
+
+  it('excluir pasta leva tudo dentro (subpastas inclusive); editar URL de pasta é ignorado', () => {
+    store.addFolder({ id: 'f', workspaceId: 'a', title: 'F' });
+    store.addFolder({ id: 'sub', workspaceId: 'a', title: 'S', parentId: 'f' });
+    add('m', 'f');
+    add('n', 'sub');
+    add('fora');
+    store.updateBookmark('f', { title: 'F2', url: 'https://x.com' });
+    expect(store.getBookmark('f')).toMatchObject({ title: 'F', url: '' });
+    store.removeBookmark('f');
+    expect(store.listBookmarks('a').map((b) => b.id)).toEqual(['fora']);
   });
 });

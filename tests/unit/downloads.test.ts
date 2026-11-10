@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { safeFileName, uniqueName } from '../../src/main/download-names';
-import { downloadFraction, downloadStatus, fmtBytes } from '../../src/shared/format';
+import { dayLabel, downloadFraction, downloadStatus, fmtBytes } from '../../src/shared/format';
 import type { DownloadInfo } from '../../src/shared/types';
 
 describe('nome do arquivo baixado', () => {
@@ -37,5 +37,15 @@ describe('formatação', () => {
     expect(downloadStatus(d({ state: 'interrupted' }))).toBe('Falhou');
     expect(downloadFraction(d({}))).toBe(0.25);
     expect(downloadFraction(d({ total: 0 }))).toBeNull();
+  });
+});
+
+describe('dia no histórico', () => {
+  it('Hoje, Ontem, dia da semana; ano só se for outro', () => {
+    const now = new Date(2026, 10, 10, 15).getTime();
+    expect(dayLabel(new Date(2026, 10, 10, 0, 5).getTime(), now)).toBe('Hoje');
+    expect(dayLabel(new Date(2026, 10, 9, 23).getTime(), now)).toBe('Ontem');
+    expect(dayLabel(new Date(2026, 10, 2, 12).getTime(), now)).toBe('segunda-feira, 2 de novembro');
+    expect(dayLabel(new Date(2025, 0, 6, 12).getTime(), now)).toBe('segunda-feira, 6 de janeiro de 2025');
   });
 });

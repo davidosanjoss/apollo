@@ -104,7 +104,7 @@ describe('buildItems', () => {
 });
 
 describe('favoritos na paleta', () => {
-  const bookmarks = [{ id: 'b1', title: 'Moodle UFMG', url: 'https://moodle.ufmg.br/', favicon: null }];
+  const bookmarks = [{ id: 'b1', title: 'Moodle UFMG', url: 'https://moodle.ufmg.br/', favicon: null, parentId: null, folder: false }];
 
   it('favoritos do workspace abrem pelo comando bookmark:open', () => {
     const items = buildItems({ state: state({ bookmarks, activeBookmarkId: null }), query: 'moodle', openUrl: 'https://www.google.com/search?q=moodle' });
@@ -128,7 +128,7 @@ describe('histórico na paleta', () => {
     { url: 'https://a.com/', title: 'Já aberta' },
     { url: 'https://fav.com/', title: 'Já favorito' },
   ];
-  const bookmarks = [{ id: 'b', title: 'Fav', url: 'https://fav.com/', favicon: null }];
+  const bookmarks = [{ id: 'b', title: 'Fav', url: 'https://fav.com/', favicon: null, parentId: null, folder: false }];
 
   it('sem repetir abas abertas e favoritos; abre em nova aba', () => {
     const items = buildItems({ state: state({ paletteHistory, bookmarks, activeBookmarkId: null }), query: 'calc', openUrl: null });
@@ -149,5 +149,16 @@ describe('histórico na paleta', () => {
     const s = state({ tabs: [tab('a', 'Nova aba', { url: 'apollo://home', live: false })], paletteHistory, bookmarks: [], activeBookmarkId: null });
     const h = buildItems({ state: s, query: 'calc', openUrl: null }).find((i) => i.group === 'Histórico')!;
     expect(h.action).toEqual({ kind: 'command', command: { type: 'tab:navigate', url: 'https://moodle.ufmg.br/course/1' } });
+  });
+});
+
+describe('favoritos em pastas na paleta', () => {
+  it('pastas não aparecem; o caminho da pasta vai no detalhe', () => {
+    const bookmarks = [
+      { id: 'f', title: 'Faculdade', url: '', favicon: null, parentId: null, folder: true },
+      { id: 'c', title: 'Cálculo', url: 'https://moodle.ufmg.br/c', favicon: null, parentId: 'f', folder: false },
+    ];
+    const items = buildItems({ state: state({ bookmarks, activeBookmarkId: null }), query: '', openUrl: null }).filter((i) => i.group === 'Favoritos');
+    expect(items.map((i) => [i.title, i.detail])).toEqual([['Cálculo', 'Faculdade › moodle.ufmg.br/c']]);
   });
 });

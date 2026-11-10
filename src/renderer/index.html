@@ -27,16 +27,19 @@
       <button id="forward" class="icon-btn" title="Avançar (Alt+→)">→</button>
       <button id="reload" class="icon-btn" title="Recarregar (Ctrl+R)">⟳</button>
       <span id="ws-badge"></span>
-      <button id="palette-btn" class="icon-btn" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-      <button id="memory-btn" class="icon-btn" title="Monitor de memória (Shift+Esc)">▤</button>
-      <button id="downloads-btn" class="icon-btn" title="Downloads" hidden>↓<span id="downloads-active" class="badge" hidden></span></button>
-      <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+      <button id="site-btn" class="icon-btn" title="Permissões do site" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg></button>
       <button id="key-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M17 6l3 3M14.5 8.5l2 2"/></svg><span id="key-count" class="badge" hidden></span></button>
       <button id="shield-btn" class="icon-btn" hidden><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3z"/></svg><span id="blocked-count" hidden></span></button>
       <input id="address" type="text" spellcheck="false" placeholder="Pesquise ou digite um endereço">
       <button id="zoom-btn" title="Zoom deste site — clique para voltar a 100% (Ctrl+0)" hidden></button>
       <button id="bookmark-btn" class="icon-btn" title="Adicionar aos favoritos (Ctrl+D)" hidden>☆</button>
     </nav>
+
+    <!-- Barra de favoritos do workspace (pastas abrem como menu nativo, por cima da página). -->
+    <div id="bookmark-bar" hidden>
+      <div id="bookmark-items"></div>
+      <button id="bookmark-more" class="bm" title="Mais favoritos" hidden>»</button>
+    </div>
 
     <div id="find-bar" class="bar" hidden>
       <input id="find-input" type="search" spellcheck="false" placeholder="Localizar na página" aria-label="Localizar na página">
@@ -104,6 +107,12 @@
       <nav id="panel-rail">
         <div id="panel-list"></div>
         <button id="panel-add" class="rail-btn add" title="Adicionar painel lateral">+</button>
+        <span class="spacer"></span>
+        <!-- Ferramentas (rodapé da barra direita) -->
+        <button id="palette-btn" class="rail-btn tool" title="Buscar abas e comandos (Ctrl+K)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+        <button id="history-btn" class="rail-btn tool" title="Histórico (Ctrl+H)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"/><path d="M3 4v4h4"/><path d="M12 7.5V12l3 2"/></svg></button>
+        <button id="downloads-btn" class="rail-btn tool" title="Downloads"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg><span id="downloads-active" class="badge" hidden></span></button>
+        <button id="memory-btn" class="rail-btn tool" title="Monitor de memória (Shift+Esc)"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><rect x="4" y="7" width="16" height="10" rx="1.5"/><path d="M8 7V4M12 7V4M16 7V4M8 20v-3M12 20v-3M16 20v-3"/></svg></button>
       </nav>
     </div>
   </main>
@@ -256,15 +265,43 @@
 
   <dialog id="bookmark-dialog">
     <form method="dialog" id="bookmark-form">
-      <h2>Favorito</h2>
+      <h2 id="bookmark-dialog-title">Favorito</h2>
       <label>Nome <input id="bookmark-title" maxlength="300" required></label>
-      <label>Endereço <input id="bookmark-url" maxlength="8192" required spellcheck="false"></label>
-      <p class="hint">Favoritos são de cada workspace. Eles aparecem na página inicial e no Ctrl+K.</p>
+      <label id="bookmark-url-row">Endereço <input id="bookmark-url" maxlength="8192" required spellcheck="false"></label>
+      <label id="bookmark-folder-row">Pasta <select id="bookmark-folder"></select></label>
+      <p class="hint" id="bookmark-hint">Favoritos são de cada workspace: aparecem na barra de favoritos, na página inicial e no Ctrl+K.</p>
       <div class="dialog-actions">
         <button type="button" id="bookmark-remove" class="danger">Remover</button>
         <span class="spacer"></span>
         <button type="button" id="bookmark-cancel">Cancelar</button>
         <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="bookmarks-manager">
+    <form method="dialog">
+      <h2>Favoritos deste workspace</h2>
+      <p class="hint">Arraste para reordenar ou para dentro de uma pasta. Botão direito também funciona na barra de favoritos.</p>
+      <ul id="bm-tree" role="tree"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="bm-new-folder">Nova pasta</button>
+        <label class="remember"><input type="checkbox" id="bm-show-bar"> Mostrar a barra (Ctrl+Shift+B)</label>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="history-dialog">
+    <form method="dialog" id="history-form">
+      <h2>Histórico deste workspace</h2>
+      <input id="history-q" type="search" placeholder="Buscar no histórico" autocomplete="off" spellcheck="false">
+      <ul id="history-list"></ul>
+      <div class="dialog-actions">
+        <button type="button" id="history-clear-all" class="danger">Apagar todo o histórico</button>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
       </div>
     </form>
   </dialog>

@@ -12,7 +12,8 @@ export interface KeyInput {
 export type ShortcutAction =
   | 'new-tab' | 'reopen-tab' | 'close-tab' | 'focus-address' | 'reload' | 'back' | 'forward'
   | 'next-tab' | 'prev-tab' | 'memory-monitor' | 'autofill' | 'palette' | 'bookmark' | 'find' | 'find-next' | 'find-prev'
-  | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'fullscreen' | 'devtools' | `workspace-${number}`;
+  | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'fullscreen' | 'devtools' | 'bookmark-bar' | 'history'
+  | `workspace-${number}`;
 
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (input.type !== 'keyDown') return null;
@@ -24,6 +25,8 @@ export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (mod && !input.shift && k === 'l') return 'focus-address';
   if (mod && !input.shift && k === 'k') return 'palette';
   if (mod && !input.shift && k === 'd') return 'bookmark';
+  if (mod && input.shift && k === 'b') return 'bookmark-bar';
+  if (mod && !input.shift && k === 'h') return 'history';
   if (mod && !input.shift && k === 'f') return 'find';
   if (mod && !input.shift && k === 'p') return 'print';
   if (!mod && !input.alt && input.key === 'F11') return 'fullscreen';

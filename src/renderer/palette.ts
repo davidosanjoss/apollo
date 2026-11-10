@@ -3,7 +3,7 @@ import type { UiCommand, UiState } from '../shared/types';
 
 export type PaletteAction =
   | { kind: 'command'; command: UiCommand }
-  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' | 'bookmark' };
+  | { kind: 'ui'; action: 'settings' | 'vault' | 'new-workspace' | 'modules' | 'bookmark' | 'bookmarks-manager' | 'history' };
 
 export interface PaletteItem {
   id: string;
@@ -17,6 +17,7 @@ export interface PaletteItem {
 }
 
 import { fold } from '../shared/text';
+import { folderPath } from './bookmark-tree';
 export { fold };
 
 /**
@@ -86,8 +87,10 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
       action: cmd({ type: 'tab:reveal', tabId: t.id }),
     })));
 
-  items.push(...(s.bookmarks ?? []).map((b): PaletteItem => ({
-    id: `bm:${b.id}`, title: b.title, detail: readableUrl(b.url), group: 'Favoritos',
+  const bms = s.bookmarks ?? [];
+  items.push(...bms.filter((b) => !b.folder).map((b): PaletteItem => ({
+    id: `bm:${b.id}`, title: b.title, group: 'Favoritos',
+    detail: [...folderPath(bms, b.id), readableUrl(b.url)].join(' › '),
     action: cmd({ type: 'bookmark:open', bookmarkId: b.id }),
   })));
 
@@ -132,6 +135,10 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
     a('zoom-out', 'Diminuir o zoom', cmd({ type: 'zoom:set', dir: 'out' }), 'Ctrl+-');
     if (s.zoom !== 100) a('zoom-reset', `Voltar o zoom a 100% (está em ${s.zoom}%)`, cmd({ type: 'zoom:set', dir: 'reset' }), 'Ctrl+0');
   }
+  a('bookmarks-manager', 'Gerenciar favoritos (pastas)', { kind: 'ui', action: 'bookmarks-manager' });
+  a('bookmark-bar', s.settings?.bookmarkBar === false ? 'Mostrar a barra de favoritos' : 'Esconder a barra de favoritos',
+    cmd({ type: 'settings:bookmark-bar', show: s.settings?.bookmarkBar === false }), 'Ctrl+Shift+B');
+  a('history', 'Histórico', { kind: 'ui', action: 'history' }, 'Ctrl+H');
   a('memory', s.memory ? 'Fechar o monitor de memória' : 'Monitor de memória', cmd({ type: 'memory:toggle', open: !s.memory }), 'Shift+Esc');
   if (s.sitePrivacy) {
     a('pause', s.sitePrivacy.tabPaused ? 'Retomar a proteção nesta aba' : 'Pausar a proteção nesta aba',

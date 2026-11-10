@@ -1,10 +1,11 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
-import { downloadFraction, downloadStatus } from '../shared/format';
+import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
+import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
@@ -85,6 +86,7 @@ function render(): void {
   renderDownloads(s);
   renderFind(s);
   renderBookmarks(s);
+  renderHistory(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
@@ -304,7 +306,6 @@ let knownDownloads = new Set<string>();
 function renderDownloads(s: UiState): void {
   const btn = $('#downloads-btn');
   const running = s.downloads.filter((d) => d.state === 'progressing' || d.state === 'paused');
-  btn.hidden = s.downloads.length === 0;
   // Anel de progresso: soma de tudo o que está baixando (tamanho conhecido).
   const known = running.filter((d) => d.total > 0);
   const p = known.length ? known.reduce((a, d) => a + d.received, 0) / known.reduce((a, d) => a + d.total, 0) : 0;
@@ -415,21 +416,57 @@ $('#find-next').onclick = () => findStep(true);
 $('#find-prev').onclick = () => findStep(false);
 $('#find-close').onclick = () => closeFind();
 
-// ------------------------------------------------------------ favoritos
+// ------------------------------------------------------------ favoritos (barra, pastas, gerenciador)
 
 const bookmarkDialog = $<HTMLDialogElement>('#bookmark-dialog');
-let editingBookmark: string | null = null;
+/** O que o diálogo está fazendo: editar favorito, renomear pasta ou criar pasta. */
+let bookmarkMode: { kind: 'edit'; id: string } | { kind: 'folder'; id: string } | { kind: 'new-folder'; parentId: string | null } | null = null;
 /** Esperando o favorito recém-criado aparecer no estado para abrir o diálogo. */
 let bookmarkPending = false;
+
+function fillFolderSelect(selected: string | null, exclude: string | null): void {
+  const sel = $<HTMLSelectElement>('#bookmark-folder');
+  sel.replaceChildren(...folderOptions(state?.bookmarks ?? [], exclude).map((o) => {
+    const opt = el('option', { value: o.id ?? '', textContent: o.label });
+    opt.selected = o.id === selected;
+    return opt;
+  }));
+}
+
+function showBookmarkDialog(title: string, name: string, opts: { url?: string; folder?: string | null; exclude?: string | null; removable: boolean; saveLabel?: string }): void {
+  $('#bookmark-dialog-title').textContent = title;
+  $<HTMLInputElement>('#bookmark-title').value = name;
+  const url = $<HTMLInputElement>('#bookmark-url');
+  $('#bookmark-url-row').hidden = opts.url === undefined;
+  url.required = opts.url !== undefined;
+  url.value = opts.url ?? '';
+  $('#bookmark-folder-row').hidden = opts.folder === undefined;
+  if (opts.folder !== undefined) fillFolderSelect(opts.folder, opts.exclude ?? null);
+  $('#bookmark-hint').hidden = opts.url === undefined;
+  $('#bookmark-remove').hidden = !opts.removable;
+  $<HTMLButtonElement>('#bookmark-form button[type="submit"]').textContent = opts.saveLabel ?? 'Salvar';
+  if (!bookmarkDialog.open) {
+    for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d.id !== 'bookmarks-manager') d.close();
+    bookmarkDialog.showModal();
+  }
+  $<HTMLInputElement>('#bookmark-title').select();
+}
 
 function openBookmarkDialog(id: string): void {
   const b = state?.bookmarks.find((x) => x.id === id);
   if (!b) return;
-  editingBookmark = id;
-  $<HTMLInputElement>('#bookmark-title').value = b.title;
-  $<HTMLInputElement>('#bookmark-url').value = b.url;
-  if (!bookmarkDialog.open) bookmarkDialog.showModal();
-  $<HTMLInputElement>('#bookmark-title').select();
+  if (b.folder) {
+    bookmarkMode = { kind: 'folder', id };
+    showBookmarkDialog('Renomear pasta', b.title, { removable: true });
+  } else {
+    bookmarkMode = { kind: 'edit', id };
+    showBookmarkDialog('Favorito', b.title, { url: b.url, folder: b.parentId, removable: true });
+  }
+}
+
+function openNewFolderDialog(parentId: string | null): void {
+  bookmarkMode = { kind: 'new-folder', parentId };
+  showBookmarkDialog('Nova pasta', '', { folder: parentId, removable: false, saveLabel: 'Criar' });
 }
 
 /** Estrela / Ctrl+K: marca a página (se ainda não for) e abre o diálogo para editar. */
@@ -443,21 +480,199 @@ $('#bookmark-btn').onclick = bookmarkCurrent;
 $('#zoom-btn').onclick = () => send({ type: 'zoom:set', dir: 'reset' });
 $('#bookmark-cancel').onclick = () => bookmarkDialog.close();
 $('#bookmark-remove').onclick = () => {
-  if (editingBookmark) send({ type: 'bookmark:remove', bookmarkId: editingBookmark });
+  if (bookmarkMode && bookmarkMode.kind !== 'new-folder') send({ type: 'bookmark:remove', bookmarkId: bookmarkMode.id });
   bookmarkDialog.close();
 };
 $('#bookmark-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const url = normalizeUrl($<HTMLInputElement>('#bookmark-url').value);
-  if (!editingBookmark || !url) return;
-  send({ type: 'bookmark:update', bookmarkId: editingBookmark, title: $<HTMLInputElement>('#bookmark-title').value, url });
+  const title = $<HTMLInputElement>('#bookmark-title').value.trim();
+  const folder = $<HTMLSelectElement>('#bookmark-folder').value || null;
+  const m = bookmarkMode;
+  if (!m || !title) return;
+  if (m.kind === 'edit') {
+    const url = normalizeUrl($<HTMLInputElement>('#bookmark-url').value);
+    if (!url) return;
+    send({ type: 'bookmark:update', bookmarkId: m.id, title, url, parentId: folder });
+  } else if (m.kind === 'folder') {
+    send({ type: 'bookmark:rename', bookmarkId: m.id, title });
+  } else {
+    send({ type: 'bookmark:add-folder', title, parentId: folder });
+  }
   bookmarkDialog.close();
 });
-bookmarkDialog.addEventListener('close', () => { editingBookmark = null; });
+bookmarkDialog.addEventListener('close', () => { bookmarkMode = null; });
 
-let homeBookmarksKey = '';
+const initial = (b: { title: string; url: string }) => (b.title.trim()[0] ?? readableUrl(b.url)[0] ?? '?').toUpperCase();
+const clearDrop = () => {
+  for (const n of document.querySelectorAll('.drop-before, .drop-after, .drop-into')) n.classList.remove('drop-before', 'drop-after', 'drop-into');
+};
 let draggingBookmark: string | null = null;
 
+/**
+ * Arrastar e soltar entre favoritos (barra, gerenciador, página inicial): antes/depois
+ * do alvo ou dentro (pasta, pelo meio). `horizontal` = barra/página inicial.
+ */
+function makeDraggable(node: HTMLElement, b: BookmarkInfo, dropEl: HTMLElement, horizontal: boolean): void {
+  node.draggable = true;
+  node.addEventListener('dragstart', (e) => {
+    e.stopPropagation();
+    draggingBookmark = b.id;
+    node.classList.add('dragging');
+    e.dataTransfer?.setData('text/plain', b.id);
+  });
+  node.addEventListener('dragend', () => { draggingBookmark = null; node.classList.remove('dragging'); clearDrop(); });
+  const place = (e: DragEvent) => {
+    const r = dropEl.getBoundingClientRect();
+    return dropPlace(b.folder, horizontal ? (e.clientX - r.left) / r.width : (e.clientY - r.top) / r.height);
+  };
+  dropEl.addEventListener('dragover', (e) => {
+    if (!draggingBookmark || !state) return;
+    e.stopPropagation();
+    if (!dropTarget(state.bookmarks, draggingBookmark, b.id, place(e))) return;
+    e.preventDefault();
+    clearDrop();
+    dropEl.classList.add(`drop-${place(e)}`);
+  });
+  dropEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const t = draggingBookmark && state ? dropTarget(state.bookmarks, draggingBookmark, b.id, place(e)) : null;
+    if (t && draggingBookmark) send({ type: 'bookmark:move', bookmarkId: draggingBookmark, parentId: t.parentId, index: t.index });
+    clearDrop();
+  });
+}
+
+function bookmarkIcon(b: BookmarkInfo, cls: string): HTMLElement {
+  const icon = el('span', { className: cls });
+  if (b.folder) icon.textContent = '📁';
+  else if (b.favicon) {
+    const img = el('img', { src: b.favicon, alt: '' });
+    img.onerror = () => { img.remove(); icon.textContent = initial(b); };
+    icon.append(img);
+  } else icon.textContent = initial(b);
+  return icon;
+}
+
+const openBm = (b: BookmarkInfo, e: MouseEvent) => send({ type: 'bookmark:open', bookmarkId: b.id, newTab: e.ctrlKey || e.metaKey || e.button === 1 });
+
+// --- barra de favoritos
+
+let barKey = '';
+function renderBookmarkBar(s: UiState): void {
+  const bar = $('#bookmark-bar');
+  bar.hidden = !s.settings.bookmarkBar;
+  if (bar.hidden) return;
+  const key = JSON.stringify(s.bookmarks);
+  if (key === barKey) return;
+  barKey = key;
+  const roots = childrenOf(s.bookmarks, null);
+  const items = $('#bookmark-items');
+  if (!roots.length) {
+    items.replaceChildren(el('span', { className: 'empty', textContent: 'Seus favoritos aparecem aqui — clique na ☆ da barra de endereço, ou com o botão direito crie pastas.' }));
+  } else {
+    items.replaceChildren(...roots.map((b) => {
+      const btn = el('button', { type: 'button', className: 'bm', title: b.folder ? b.title : `${b.title}\n${b.url}` });
+      btn.dataset.bookmarkId = b.id;
+      btn.append(bookmarkIcon(b, 'i'), el('span', { className: 't', textContent: b.title || readableUrl(b.url) }));
+      if (b.folder) {
+        btn.onclick = () => {
+          const r = btn.getBoundingClientRect();
+          send({ type: 'bookmark:menu', folderId: b.id, x: r.left, y: r.bottom });
+        };
+      } else {
+        btn.onclick = (e) => openBm(b, e);
+        btn.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); openBm(b, e); } };
+      }
+      btn.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); send({ type: 'bookmark:context', bookmarkId: b.id, x: e.clientX, y: e.clientY }); };
+      makeDraggable(btn, b, btn, true);
+      return btn;
+    }));
+  }
+  requestAnimationFrame(fitBookmarkBar);
+}
+
+/** O que não cabe na barra vai para o menu "»". */
+function fitBookmarkBar(): void {
+  const items = $('#bookmark-items');
+  const more = $<HTMLButtonElement>('#bookmark-more');
+  const buttons = [...items.querySelectorAll<HTMLElement>('.bm')];
+  for (const b of buttons) b.hidden = false;
+  more.hidden = true;
+  const limit = items.getBoundingClientRect().right;
+  const first = buttons.findIndex((b) => b.getBoundingClientRect().right > limit + 1);
+  if (first < 0) return;
+  more.hidden = false;
+  const limit2 = items.getBoundingClientRect().right; // com o "»" visível, sobra menos espaço
+  let cut = buttons.findIndex((b) => b.getBoundingClientRect().right > limit2 + 1);
+  if (cut < 0) cut = first;
+  buttons.slice(cut).forEach((b) => { b.hidden = true; });
+  more.dataset.from = String(cut);
+}
+new ResizeObserver(() => fitBookmarkBar()).observe($('#bookmark-items'));
+$('#bookmark-more').onclick = () => {
+  const r = $('#bookmark-more').getBoundingClientRect();
+  send({ type: 'bookmark:menu', folderId: null, x: r.left, y: r.bottom, from: Number($('#bookmark-more').dataset.from ?? 0) });
+};
+$('#bookmark-bar').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  send({ type: 'bookmark:context', bookmarkId: null, x: e.clientX, y: e.clientY });
+});
+// Soltar na barra vazia (fora de um item): vai para o fim da barra.
+$('#bookmark-bar').addEventListener('dragover', (e) => { if (draggingBookmark) e.preventDefault(); });
+$('#bookmark-bar').addEventListener('drop', (e) => {
+  e.preventDefault();
+  if (draggingBookmark && state) {
+    send({ type: 'bookmark:move', bookmarkId: draggingBookmark, parentId: null, index: childrenOf(state.bookmarks, null).length });
+  }
+  clearDrop();
+});
+
+// --- gerenciador (árvore)
+
+const managerDialog = $<HTMLDialogElement>('#bookmarks-manager');
+const collapsedFolders = new Set<string>();
+
+function openBookmarkManager(): void {
+  if (!state) return;
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  renderBookmarkManager(state);
+  managerDialog.showModal();
+}
+
+function renderBookmarkManager(s: UiState): void {
+  $<HTMLInputElement>('#bm-show-bar').checked = s.settings.bookmarkBar;
+  const build = (parentId: string | null): HTMLElement[] => childrenOf(s.bookmarks, parentId).map((b) => {
+    const li = el('li', { className: collapsedFolders.has(b.id) ? 'collapsed' : '' });
+    li.setAttribute('role', 'treeitem');
+    li.dataset.bookmarkId = b.id;
+    const row = el('div', { className: 'row' });
+    const toggle = el('button', { type: 'button', className: 'toggle', textContent: b.folder ? (collapsedFolders.has(b.id) ? '▸' : '▾') : '' });
+    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(s); };
+    const title = el('span', { className: 't', textContent: b.title || readableUrl(b.url) });
+    if (!b.folder) title.ondblclick = () => openBm(b, new MouseEvent('click'));
+    const act = (label: string, t: string, fn: () => void) => { const x = el('button', { type: 'button', className: 'icon-btn', textContent: label, title: t }); x.onclick = fn; return x; };
+    row.append(toggle, bookmarkIcon(b, 'i'), title, el('span', { className: 'u', textContent: b.folder ? '' : readableUrl(b.url) }),
+      ...(b.folder ? [act('＋', 'Nova subpasta', () => openNewFolderDialog(b.id))] : []),
+      act('✎', b.folder ? 'Renomear' : 'Editar', () => openBookmarkDialog(b.id)),
+      act('🗑', b.folder ? 'Excluir a pasta e o que tem dentro' : 'Excluir', () => send({ type: 'bookmark:remove', bookmarkId: b.id })));
+    makeDraggable(li, b, row, false);
+    li.append(row);
+    if (b.folder) {
+      const ul = el('ul', { role: 'group' } as Partial<HTMLUListElement>);
+      ul.append(...build(b.id));
+      li.append(ul);
+    }
+    return li;
+  });
+  const nodes = build(null);
+  $('#bm-tree').replaceChildren(...(nodes.length ? nodes : [el('li', { className: 'empty', textContent: 'Nenhum favorito neste workspace ainda.' })]));
+}
+$('#bm-new-folder').onclick = () => openNewFolderDialog(null);
+$<HTMLInputElement>('#bm-show-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
+
+// --- estrela e blocos da página inicial (só os favoritos soltos na barra)
+
+let homeBookmarksKey = '';
 function renderBookmarks(s: UiState): void {
   const tab = s.tabs.find((t) => t.id === s.activeTabId);
   const btn = $<HTMLButtonElement>('#bookmark-btn');
@@ -466,56 +681,87 @@ function renderBookmarks(s: UiState): void {
   btn.classList.toggle('on', Boolean(s.activeBookmarkId));
   btn.title = s.activeBookmarkId ? 'Editar o favorito (Ctrl+D)' : 'Adicionar aos favoritos (Ctrl+D)';
   if (bookmarkPending && s.activeBookmarkId) { bookmarkPending = false; openBookmarkDialog(s.activeBookmarkId); }
+  renderBookmarkBar(s);
+  if (managerDialog.open) renderBookmarkManager(s);
 
-  // Blocos da página inicial: só redesenha quando os favoritos mudam.
   const key = JSON.stringify(s.bookmarks);
   if (key === homeBookmarksKey) return;
   homeBookmarksKey = key;
-  $('#home-bookmarks').replaceChildren(...s.bookmarks.map((b, i) => {
+  $('#home-bookmarks').replaceChildren(...childrenOf(s.bookmarks, null).filter((b) => !b.folder).map((b) => {
     const li = el('li');
     li.dataset.bookmarkId = b.id;
-    li.draggable = true;
     const a = el('a', { href: b.url, title: `${b.title}\n${b.url}` });
     a.draggable = false;
-    const icon = el('span', { className: 'icon' });
-    if (b.favicon) {
-      const img = el('img', { src: b.favicon, alt: '' });
-      img.onerror = () => { img.remove(); icon.textContent = initial(b); };
-      icon.append(img);
-    } else {
-      icon.textContent = initial(b);
-    }
-    a.append(icon, el('span', { className: 'name', textContent: b.title }));
-    a.onclick = (e) => { e.preventDefault(); send({ type: 'bookmark:open', bookmarkId: b.id, newTab: e.ctrlKey || e.metaKey }); };
-    a.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); send({ type: 'bookmark:open', bookmarkId: b.id, newTab: true }); } };
+    a.append(bookmarkIcon(b, 'icon'), el('span', { className: 'name', textContent: b.title }));
+    a.onclick = (e) => { e.preventDefault(); openBm(b, e); };
+    a.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); openBm(b, e); } };
     a.oncontextmenu = (e) => { e.preventDefault(); openBookmarkDialog(b.id); };
-    // Arrastar para reordenar.
-    li.ondragstart = (e) => { draggingBookmark = b.id; li.classList.add('dragging'); e.dataTransfer?.setData('text/plain', b.id); };
-    li.ondragend = () => { draggingBookmark = null; li.classList.remove('dragging'); clearDrop(); };
-    const after = (e: DragEvent) => { const r = li.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };
-    li.ondragover = (e) => {
-      if (!draggingBookmark) return;
-      e.preventDefault();
-      clearDrop();
-      li.classList.add(after(e) ? 'drop-after' : 'drop-before');
-    };
-    li.ondrop = (e) => {
-      e.preventDefault();
-      const from = s.bookmarks.findIndex((x) => x.id === draggingBookmark);
-      const target = after(e) ? i + 1 : i; // posição na lista atual
-      if (draggingBookmark && from >= 0) {
-        const index = from < target ? target - 1 : target; // posição final, sem o arrastado
-        if (index !== from) send({ type: 'bookmark:move', bookmarkId: draggingBookmark, index });
-      }
-      clearDrop();
-    };
+    makeDraggable(li, b, li, true);
     li.append(a);
     return li;
   }));
 }
 
-const initial = (b: { title: string; url: string }) => (b.title.trim()[0] ?? readableUrl(b.url)[0] ?? '?').toUpperCase();
-const clearDrop = () => { for (const n of document.querySelectorAll('.drop-before, .drop-after')) n.classList.remove('drop-before', 'drop-after'); };
+// ------------------------------------------------------------ histórico (janela)
+
+const historyDialog = $<HTMLDialogElement>('#history-dialog');
+const historyQ = $<HTMLInputElement>('#history-q');
+
+function openHistory(): void {
+  for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
+  historyQ.value = '';
+  send({ type: 'history:view', open: true, query: '' });
+  $('#history-list').replaceChildren();
+  historyDialog.showModal();
+  historyQ.focus();
+}
+
+function renderHistory(s: UiState): void {
+  $('#history-btn').classList.toggle('on', historyDialog.open);
+  if (!historyDialog.open || !s.historyView) return;
+  const now = Date.now();
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const onHome = Boolean(tab && isHomeUrl(tab.url) && !tab.live);
+  const nodes: HTMLElement[] = [];
+  let day = '';
+  for (const h of s.historyView.entries) {
+    const d = dayLabel(h.lastVisit, now);
+    if (d !== day) { day = d; nodes.push(el('li', { className: 'day', textContent: d })); }
+    const li = el('li', { className: 'entry', title: h.url });
+    li.dataset.url = h.url;
+    const del = el('button', { type: 'button', className: 'icon-btn', textContent: '✕', title: 'Apagar do histórico' });
+    del.onclick = (e) => { e.stopPropagation(); send({ type: 'history:delete', url: h.url }); };
+    li.append(el('span', { className: 'time', textContent: new Date(h.lastVisit).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }),
+      el('span', { className: 't', textContent: h.title || readableUrl(h.url) }),
+      el('span', { className: 'h', textContent: hostOf(h.url) }), del);
+    li.onclick = (e) => {
+      send(onHome && !(e.ctrlKey || e.metaKey) ? { type: 'tab:navigate', url: h.url } : { type: 'tab:new', url: h.url });
+      historyDialog.close();
+    };
+    nodes.push(li);
+  }
+  $('#history-list').replaceChildren(...(nodes.length ? nodes
+    : [el('li', { className: 'empty', textContent: s.historyView.query ? 'Nada encontrado.' : s.settings.historyOn ? 'Nenhuma página visitada ainda.' : 'O histórico está desligado (Configurações → Histórico).' })]));
+}
+
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
+historyQ.addEventListener('input', () => send({ type: 'history:view', open: true, query: historyQ.value.slice(0, 500) }));
+historyDialog.addEventListener('close', () => { send({ type: 'history:view', open: false, query: '' }); $('#history-btn').classList.remove('on'); });
+$('#history-btn').onclick = () => (historyDialog.open ? historyDialog.close() : openHistory());
+let clearArmed: ReturnType<typeof setTimeout> | null = null;
+$('#history-clear-all').onclick = () => {
+  const b = $('#history-clear-all');
+  if (!clearArmed) { // dois cliques: não apaga tudo sem querer
+    b.textContent = 'Clique de novo para confirmar';
+    clearArmed = setTimeout(() => { clearArmed = null; b.textContent = 'Apagar todo o histórico'; }, 3000);
+    return;
+  }
+  clearTimeout(clearArmed);
+  clearArmed = null;
+  b.textContent = 'Apagar todo o histórico';
+  send({ type: 'history:clear' });
+  send({ type: 'history:view', open: true, query: historyQ.value });
+};
 
 function renderPermissionPrompt(s: UiState): void {
   const bar = $('#permission-bar');
@@ -1151,6 +1397,8 @@ function runPalette(index: number): void {
   else if (a.action === 'vault') openVault();
   else if (a.action === 'modules') openModules();
   else if (a.action === 'bookmark') bookmarkCurrent();
+  else if (a.action === 'bookmarks-manager') openBookmarkManager();
+  else if (a.action === 'history') openHistory();
   else openWorkspaceDialog();
 }
 
@@ -1289,6 +1537,12 @@ window.apollo.onEvent((event) => {
     openFind();
   } else if (event.type === 'edit-bookmark') {
     openBookmarkDialog(event.bookmarkId);
+  } else if (event.type === 'new-bookmark-folder') {
+    openNewFolderDialog(event.parentId);
+  } else if (event.type === 'manage-bookmarks') {
+    openBookmarkManager();
+  } else if (event.type === 'open-history') {
+    if (!historyDialog.open) openHistory();
   } else if (event.type === 'edit-group') {
     openGroupDialog(event.groupId);
   } else if (event.type === 'focus-address') {

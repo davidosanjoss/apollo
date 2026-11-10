@@ -134,9 +134,20 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'find:close':
     case 'bookmark:add': return { type: c.type } as UiCommand;
     case 'bookmark:update':
-      return id(c.bookmarkId) && str(c.title, 300) && url(c.url) ? (c as UiCommand) : null;
+      return id(c.bookmarkId) && str(c.title, 300) && url(c.url) && (c.parentId === undefined || c.parentId === null || id(c.parentId)) ? (c as UiCommand) : null;
+    case 'bookmark:rename': return id(c.bookmarkId) && str(c.title, 300) && (c.title as string).trim() ? (c as UiCommand) : null;
+    case 'bookmark:add-folder':
+      return str(c.title, 300) && (c.title as string).trim() && (c.parentId === null || id(c.parentId)) ? (c as UiCommand) : null;
     case 'bookmark:remove': return id(c.bookmarkId) ? (c as UiCommand) : null;
-    case 'bookmark:move': return id(c.bookmarkId) && num(c.index) && Number.isInteger(c.index) ? (c as UiCommand) : null;
+    case 'bookmark:move':
+      return id(c.bookmarkId) && (c.parentId === null || id(c.parentId)) && num(c.index) && Number.isInteger(c.index) ? (c as UiCommand) : null;
+    case 'bookmark:menu':
+      return (c.folderId === null || id(c.folderId)) && num(c.x) && num(c.y)
+        && (c.from === undefined || (num(c.from) && Number.isInteger(c.from))) ? (c as UiCommand) : null;
+    case 'bookmark:context': return (c.bookmarkId === null || id(c.bookmarkId)) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
+    case 'settings:bookmark-bar': return typeof c.show === 'boolean' ? (c as UiCommand) : null;
+    case 'history:view': return typeof c.open === 'boolean' && str(c.query, 500) ? (c as UiCommand) : null;
+    case 'history:delete': return url(c.url) ? (c as UiCommand) : null;
     case 'bookmark:open':
       return id(c.bookmarkId) && (c.newTab === undefined || typeof c.newTab === 'boolean') ? (c as UiCommand) : null;
     case 'screen:pick':

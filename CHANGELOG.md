@@ -7,6 +7,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
 - Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Barra de favoritos por workspace (Ctrl+Shift+B mostra/esconde), com pastas e subpastas: pastas abrem como menu (subpastas em submenus, "Abrir todos em abas"), o que não cabe vai para o "»", arrastar reordena ou põe dentro de uma pasta, botão direito para editar, renomear, nova pasta/subpasta, excluir. "Gerenciar favoritos" mostra a árvore inteira (arrastar, renomear, excluir). O diálogo do favorito ganhou a escolha da pasta.
+- Busca, histórico, downloads e monitor de memória agora ficam no rodapé da barra lateral direita. Novo: janela de histórico (Ctrl+H), por dia, com busca, apagar um item ou tudo.
+- Novo ícone para as permissões do site (controles deslizantes, sem confundir com as Configurações).
 - Notificações: sem decisão, o site agora vê "perguntar" (antes via "negado" e WhatsApp/Gmail nem pediam) e o pedido aparece na barra do Apollo. "Permitir" sem "Lembrar" vale até fechar o Apollo (antes a notificação falhava logo depois de permitir). Clicar numa notificação leva à aba (mesmo em outro workspace) ou abre o painel. Menu do painel → Notificações: permitir, bloquear ou perguntar.
 - Imprimir (Ctrl+P, também no botão direito), tela cheia (F11: só a página, sem abas/barras; aviso de como sair) e ferramentas do desenvolvedor (F12 ou Ctrl+Shift+I, em janela própria). Também no Ctrl+K.
 - Vídeo em tela cheia (YouTube etc.) agora cobre a janela inteira — antes ficava preso no espaço da aba, com a interface visível.

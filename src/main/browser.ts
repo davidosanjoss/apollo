@@ -117,7 +117,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -712,22 +712,109 @@ export class Browser {
     return b;
   }
 
-  private updateBookmark(id: string, title: string, url: string): void {
+  private updateBookmark(id: string, title: string, url: string, parentId?: string | null): void {
     const b = this.store.getBookmark(id);
-    if (!b) return;
+    if (!b || b.folder) return;
     const clean = normalizeUrl(url);
     if (!clean) return;
     this.store.updateBookmark(id, { title: title.trim() || clean, url: clean });
+    if (parentId !== undefined && parentId !== b.parentId) this.store.moveBookmark(id, parentId, Number.MAX_SAFE_INTEGER);
   }
 
+  private addBookmarkFolder(title: string, parentId: string | null): void {
+    this.store.addFolder({ id: newId(), workspaceId: this.activeWorkspaceId, title: title.trim().slice(0, 300), parentId });
+  }
+
+  /** Favorito: abre (na aba atual se estiver na página inicial). Pasta: abre tudo em abas. */
   private openBookmark(id: string, newTab: boolean): void {
     const b = this.store.getBookmark(id);
     if (!b) return;
     if (b.workspaceId !== this.activeWorkspaceId) this.switchWorkspace(b.workspaceId);
+    if (b.folder) {
+      for (const x of this.store.childBookmarks(b.workspaceId, b.id).filter((x) => !x.folder)) {
+        this.createTab(b.workspaceId, x.url, { activate: false });
+      }
+      return;
+    }
     const tab = this.activeTab();
     if (!newTab && tab && isHomeUrl(tab.url)) this.navigate(b.url);
     else this.createTab(b.workspaceId, b.url, { activate: true });
   }
+
+  /** Itens de uma pasta como menu nativo (subpastas viram submenus). */
+  private bookmarkMenuItems(folderId: string | null, from = 0): MenuItemConstructorOptions[] {
+    const all = this.store.listBookmarks(this.activeWorkspaceId);
+    const build = (parent: string | null, skip = 0, depth = 0): MenuItemConstructorOptions[] => {
+      const kids = all.filter((b) => b.parentId === parent).slice(skip);
+      const items: MenuItemConstructorOptions[] = kids.map((b) => b.folder
+        ? { label: `📁 ${b.title}`, submenu: depth < 12 ? build(b.id, 0, depth + 1) : [] }
+        : { label: b.title || b.url, click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) });
+      const links = kids.filter((b) => !b.folder).length;
+      if (parent && links > 1) {
+        items.push({ type: 'separator' }, { label: `Abrir todos (${links}) em abas`, click: this.run({ type: 'bookmark:open', bookmarkId: parent }) });
+      }
+      if (!items.length) items.push({ label: '(vazia)', enabled: false });
+      return items;
+    };
+    return build(folderId, from);
+  }
+
+  private showBookmarkMenu(folderId: string | null, x: number, y: number, from?: number): void {
+    if (folderId && this.store.getBookmark(folderId)?.workspaceId !== this.activeWorkspaceId) return;
+    this.popup(this.bookmarkMenuItems(folderId, from ?? 0), x, y);
+  }
+
+  /** Botão direito num favorito/pasta da barra (ou na barra vazia). */
+  private showBookmarkContext(id: string | null, x: number, y: number): void {
+    const b = id ? this.store.getBookmark(id) : null;
+    if (id && (!b || b.workspaceId !== this.activeWorkspaceId)) return;
+    const parentForNew = b ? (b.folder ? b.id : b.parentId) : null;
+    const items: MenuItemConstructorOptions[] = [];
+    if (b && !b.folder) {
+      items.push(
+        { label: 'Abrir', click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) },
+        { label: 'Abrir em nova aba', click: this.run({ type: 'bookmark:open', bookmarkId: b.id, newTab: true }) },
+        { type: 'separator' },
+        { label: 'Editar…', click: () => { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); } },
+      );
+    } else if (b) {
+      const links = this.store.childBookmarks(b.workspaceId, b.id).filter((x) => !x.folder).length;
+      items.push(
+        { label: `Abrir todos (${links}) em abas`, enabled: links > 0, click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) },
+        { type: 'separator' },
+        { label: 'Renomear…', click: () => { this.focusUi(); this.emit({ type: 'edit-bookmark', bookmarkId: b.id }); } },
+      );
+    }
+    const tab = this.activeTab();
+    const canAdd = tab && !isHomeUrl(tab.url) && /^(https?|file):/i.test(tab.url);
+    items.push(
+      ...(b ? [{ type: 'separator' as const }] : []),
+      { label: b?.folder ? 'Adicionar esta página aqui' : 'Adicionar esta página', enabled: Boolean(canAdd), click: () => this.addBookmarkTo(parentForNew) },
+      { label: b?.folder ? 'Nova subpasta…' : 'Nova pasta…', click: () => { this.focusUi(); this.emit({ type: 'new-bookmark-folder', parentId: parentForNew }); } },
+      { type: 'separator' },
+      ...(b ? [{ label: b.folder ? 'Excluir a pasta (e o que tem dentro)' : 'Excluir', click: this.run({ type: 'bookmark:remove', bookmarkId: b.id }) },
+        { type: 'separator' as const }] : []),
+      { label: 'Gerenciar favoritos…', click: () => { this.focusUi(); this.emit({ type: 'manage-bookmarks' }); } },
+      { label: 'Mostrar a barra de favoritos', type: 'checkbox', checked: this.bookmarkBarOn(), accelerator: 'CmdOrCtrl+Shift+B',
+        click: this.run({ type: 'settings:bookmark-bar', show: !this.bookmarkBarOn() }) },
+    );
+    this.popup(items, x, y);
+  }
+
+  /** "Adicionar esta página" numa pasta (ou na barra), sem duplicar. */
+  private addBookmarkTo(parentId: string | null): void {
+    const b = this.addBookmark();
+    if (b && b.parentId !== parentId) this.store.moveBookmark(b.id, parentId, Number.MAX_SAFE_INTEGER);
+    this.push();
+  }
+
+  private bookmarkBarOn(): boolean {
+    return this.store.getKv('bookmark-bar') !== '0';
+  }
+
+  // ------------------------------------------------------------ histórico (janela)
+
+  private historyQuery: string | null = null; // null = janela fechada
 
   // ------------------------------------------------------------ compartilhar tela (Teams, Meet…)
 
@@ -1470,7 +1557,12 @@ export class Browser {
 
   // ------------------------------------------------------------ menus de contexto (nativos: ficam acima da página)
 
+  /** Último menu nativo montado (os testes acionam os itens por aqui). */
+  lastMenu: MenuItemConstructorOptions[] | null = null;
+
   private popup(items: MenuItemConstructorOptions[], x: number, y: number): void {
+    this.lastMenu = items;
+    if (process.env.APOLLO_TEST_HOOKS) return; // testes: o menu nativo bloquearia a automação
     Menu.buildFromTemplate(items).popup({ window: this.win, x: Math.round(x), y: Math.round(y) });
   }
 
@@ -1645,6 +1737,8 @@ export class Browser {
       case 'autofill': this.autofill(); break;
       case 'palette': this.focusUi(); this.emit({ type: 'open-palette' }); break;
       case 'find': this.focusUi(); this.emit({ type: 'open-find' }); break;
+      case 'bookmark-bar': this.store.setKv('bookmark-bar', this.bookmarkBarOn() ? '0' : '1'); this.push(); break;
+      case 'history': this.focusUi(); this.emit({ type: 'open-history' }); break;
       case 'zoom-in': this.zoomActive('in'); break;
       case 'print': this.withActiveWc((wc) => this.print(wc)); break;
       case 'fullscreen': this.toggleFullscreen(); break;
@@ -1720,9 +1814,16 @@ export class Browser {
       case 'find:query': this.find(cmd.text, cmd.forward, cmd.findNext); break;
       case 'find:close': this.stopFind(); break;
       case 'bookmark:add': this.addBookmark(); break;
-      case 'bookmark:update': this.updateBookmark(cmd.bookmarkId, cmd.title, cmd.url); break;
+      case 'bookmark:update': this.updateBookmark(cmd.bookmarkId, cmd.title, cmd.url, cmd.parentId); break;
+      case 'bookmark:rename': this.store.renameBookmark(cmd.bookmarkId, cmd.title.trim()); break;
+      case 'bookmark:add-folder': this.addBookmarkFolder(cmd.title, cmd.parentId); break;
       case 'bookmark:remove': this.store.removeBookmark(cmd.bookmarkId); break;
-      case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.index); break;
+      case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.parentId, cmd.index); break;
+      case 'bookmark:menu': this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
+      case 'bookmark:context': this.showBookmarkContext(cmd.bookmarkId, cmd.x, cmd.y); break;
+      case 'settings:bookmark-bar': this.store.setKv('bookmark-bar', cmd.show ? '1' : '0'); break;
+      case 'history:view': this.historyQuery = cmd.open ? cmd.query : null; break;
+      case 'history:delete': this.store.deleteVisit(this.activeWorkspaceId, cmd.url); break;
       case 'bookmark:open': this.openBookmark(cmd.bookmarkId, cmd.newTab ?? false); break;
       case 'custom:save':
         this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
@@ -1960,7 +2061,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -2040,13 +2141,17 @@ export class Browser {
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
         spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1',
-        historyOn: this.store.getKv('history-off') !== '1' },
+        historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
-      bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon }) => ({ id, title, url, favicon })),
+      bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
+      historyView: this.historyQuery === null ? null : {
+        query: this.historyQuery,
+        entries: this.store.recentHistory(ws.id, this.historyQuery).map(({ url, title, lastVisit }) => ({ url, title, lastVisit })),
+      },
       fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
         : this.windowFullscreen ? 'window' : null,
       zoom: (() => {

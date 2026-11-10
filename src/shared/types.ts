@@ -163,6 +163,8 @@ export interface SettingsInfo {
   downloadAsk: boolean;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
+  /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
+  bookmarkBar: boolean;
 }
 
 export interface UiState {
@@ -195,8 +197,10 @@ export interface UiState {
   customizations: CustomizationInfo[];
   /** Pedido de compartilhar tela aguardando a escolha do usuário. */
   screenPicker: ScreenPickerInfo | null;
-  /** Favoritos do workspace ativo, em ordem. */
+  /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
+  /** Janela de histórico aberta (null = fechada). */
+  historyView: HistoryViewInfo | null;
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
   activeBookmarkId: string | null;
   /** Tela cheia: 'window' = F11 (interface escondida); 'page' = a página pediu (vídeo). */
@@ -224,8 +228,17 @@ export type DownloadAction = 'pause' | 'resume' | 'cancel' | 'open' | 'show' | '
 export interface BookmarkInfo {
   id: string;
   title: string;
+  /** '' nas pastas. */
   url: string;
   favicon: string | null;
+  /** Pasta onde está (null = na barra de favoritos). */
+  parentId: string | null;
+  folder: boolean;
+}
+
+export interface HistoryViewInfo {
+  query: string;
+  entries: { url: string; title: string; lastVisit: number }[];
 }
 
 export interface ScreenSource {
@@ -354,9 +367,21 @@ export type UiCommand =
   | { type: 'find:close' }
   /** Marca a página da aba ativa como favorita (no workspace dela). */
   | { type: 'bookmark:add' }
-  | { type: 'bookmark:update'; bookmarkId: string; title: string; url: string }
+  /** Edita o favorito; parentId (se vier) move para o fim daquela pasta (null = barra). */
+  | { type: 'bookmark:update'; bookmarkId: string; title: string; url: string; parentId?: string | null }
+  | { type: 'bookmark:rename'; bookmarkId: string; title: string }
+  | { type: 'bookmark:add-folder'; title: string; parentId: string | null }
   | { type: 'bookmark:remove'; bookmarkId: string }
-  | { type: 'bookmark:move'; bookmarkId: string; index: number }
+  /** Move para a pasta (null = barra), na posição final `index` entre os filhos dela. */
+  | { type: 'bookmark:move'; bookmarkId: string; parentId: string | null; index: number }
+  /** Conteúdo de uma pasta como menu nativo (por cima da página); folderId null + from = sobra da barra. */
+  | { type: 'bookmark:menu'; folderId: string | null; x: number; y: number; from?: number }
+  /** Botão direito num favorito/pasta da barra (null = na barra vazia). */
+  | { type: 'bookmark:context'; bookmarkId: string | null; x: number; y: number }
+  | { type: 'settings:bookmark-bar'; show: boolean }
+  /** Janela de histórico (abrir/fechar e o filtro digitado). */
+  | { type: 'history:view'; open: boolean; query: string }
+  | { type: 'history:delete'; url: string }
   /** Abrir o favorito: na aba ativa se ela estiver na página inicial, senão numa nova aba. */
   | { type: 'bookmark:open'; bookmarkId: string; newTab?: boolean }
   /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
@@ -409,7 +434,11 @@ export type UiEvent =
   /** Abrir a barra de busca na página (Ctrl+F). */
   | { type: 'open-find' }
   /** Abrir o diálogo do favorito (Ctrl+D: acabou de marcar ou já estava marcado). */
-  | { type: 'edit-bookmark'; bookmarkId: string };
+  | { type: 'edit-bookmark'; bookmarkId: string }
+  /** Pedir o nome de uma pasta nova (no menu do botão direito da barra). */
+  | { type: 'new-bookmark-folder'; parentId: string | null }
+  | { type: 'manage-bookmarks' }
+  | { type: 'open-history' };
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

@@ -74,6 +74,52 @@ dialog h3 { margin: 14px 0 6px; font-size: 13px; color: var(--muted); font-weigh
 .rail-btn { width: 32px; height: 32px; border-radius: 8px; border: 2px solid transparent; background: var(--panel-2);
   color: var(--text); cursor: pointer; display: grid; place-items: center; padding: 0; font-weight: 700; position: relative; }
 .rail-btn img { width: 18px; height: 18px; }
+#panel-rail .spacer { flex: 1; }
+.rail-btn.tool { background: transparent; color: var(--muted); }
+.rail-btn.tool:hover { background: var(--panel-2); color: var(--text); }
+.rail-btn.tool.on { color: var(--accent); }
+.rail-btn.tool svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.rail-btn .badge { position: absolute; right: -4px; top: -4px; }
+
+/* ---------- barra de favoritos ---------- */
+#bookmark-bar { display: flex; align-items: center; gap: 2px; padding: 2px 8px; min-height: 28px; background: var(--panel);
+  border-bottom: 1px solid var(--panel-2); overflow: hidden; }
+#bookmark-items { display: flex; gap: 2px; flex: 1; min-width: 0; overflow: hidden; }
+.bm { display: inline-flex; align-items: center; gap: 6px; max-width: 180px; flex-shrink: 0; padding: 3px 8px; border: 0;
+  border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.bm:hover { background: var(--panel-2); }
+.bm img { width: 14px; height: 14px; }
+.bm .t { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bm.drop-before { box-shadow: -2px 0 0 var(--accent); }
+.bm.drop-after { box-shadow: 2px 0 0 var(--accent); }
+.bm.drop-into, #bm-tree .row.drop-into { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.bm.dragging, #bm-tree li.dragging { opacity: .4; }
+#bookmark-bar .empty { color: var(--muted); font-size: 12px; padding: 3px 6px; }
+
+#bookmarks-manager { width: 620px; max-width: calc(100vw - 32px); }
+#bm-tree, #bm-tree ul { list-style: none; margin: 0; padding: 0; }
+#bm-tree { max-height: 60vh; overflow-y: auto; margin-bottom: 12px; }
+#bm-tree ul { padding-left: 20px; }
+#bm-tree .row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; }
+#bm-tree .row:hover { background: var(--panel-2); }
+#bm-tree .row .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#bm-tree .row .u { color: var(--muted); font-size: 11px; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#bm-tree .row.drop-before { box-shadow: 0 -2px 0 var(--accent); }
+#bm-tree .row.drop-after { box-shadow: 0 2px 0 var(--accent); }
+#bm-tree .toggle { width: 16px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; }
+#bm-tree li.collapsed > ul { display: none; }
+#bm-tree .empty { color: var(--muted); padding: 6px; }
+
+#history-dialog { width: 640px; max-width: calc(100vw - 32px); }
+#history-q { width: 100%; margin-bottom: 10px; }
+#history-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 60vh; overflow-y: auto; }
+#history-list .day { color: var(--muted); font-size: 12px; font-weight: 600; padding: 10px 4px 4px; }
+#history-list .entry { display: flex; align-items: center; gap: 10px; padding: 4px; border-radius: 6px; cursor: pointer; }
+#history-list .entry:hover { background: var(--panel-2); }
+#history-list .time { color: var(--muted); font-size: 12px; width: 40px; flex-shrink: 0; }
+#history-list .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#history-list .h { color: var(--muted); font-size: 12px; max-width: 35%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#history-list .empty { color: var(--muted); padding: 8px 4px; }
 .rail-btn.active { border-color: var(--accent); }
 .rail-btn.sleeping { opacity: .5; } /* hibernado: recarrega ao abrir */
 .rail-btn.add { background: transparent; color: var(--muted); border: 2px dashed var(--panel-2); }
@@ -326,7 +372,8 @@ dialog .error[hidden] { display: none; }
 #downloads-list .empty { color: var(--muted); border: 0; }
 
 /* F11: só a página. */
-body.fullscreen #sidebar, body.fullscreen #toolbar, body.fullscreen #navbar, body.fullscreen #panel-rail { display: none !important; }
+body.fullscreen #sidebar, body.fullscreen #toolbar, body.fullscreen #navbar, body.fullscreen #panel-rail,
+body.fullscreen #bookmark-bar { display: none !important; }
 #fullscreen-hint { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 10; padding: 8px 16px;
   border-radius: 8px; background: rgba(0, 0, 0, .8); color: #fff; font-size: 13px; pointer-events: none; }
 #fullscreen-hint kbd { border: 1px solid #777; border-radius: 4px; padding: 0 5px; }

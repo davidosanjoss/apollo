@@ -24,6 +24,8 @@ describe('shortcutFor', () => {
     [key('L', { control: true, shift: true }), 'autofill'],
     [key('k', { control: true }), 'palette'],
     [key('d', { control: true }), 'bookmark'],
+    [key('B', { control: true, shift: true }), 'bookmark-bar'],
+    [key('h', { control: true }), 'history'],
     [key('f', { control: true }), 'find'],
     [key('p', { control: true }), 'print'],
     [key('F11'), 'fullscreen'],

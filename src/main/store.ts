@@ -124,13 +124,17 @@ export interface Bookmark {
   id: string;
   workspaceId: string;
   title: string;
+  /** '' nas pastas. */
   url: string;
   favicon: string | null;
+  /** Pasta onde está (null = na barra de favoritos). */
+  parentId: string | null;
+  folder: boolean;
 }
 
 const toBookmark = (r: Row): Bookmark => ({
   id: r.id as string, workspaceId: r.workspace_id as string, title: r.title as string, url: r.url as string,
-  favicon: (r.favicon as string | null) ?? null,
+  favicon: (r.favicon as string | null) ?? null, parentId: (r.parent_id as string | null) ?? null, folder: r.is_folder === 1,
 });
 
 /** Mesma página para fins de favorito: sem #fragmento e sem a barra final do caminho. */
@@ -412,6 +416,20 @@ export class Store {
       .map((r) => ({ url: r.url as string, title: r.title as string, visits: r.visits as number, lastVisit: r.last_visit as number }));
   }
 
+  /** Janela de histórico: mais recentes primeiro (filtrado pelas palavras, se houver). */
+  recentHistory(workspaceId: string, query: string, limit = 300): HistoryEntry[] {
+    const words = fold(query).split(/\s+/).filter(Boolean).slice(0, 8);
+    const like = (w: string) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const where = words.map(() => " AND search LIKE ? ESCAPE '\\'").join('');
+    return (this.db.prepare(`SELECT url, title, visits, last_visit FROM history WHERE workspace_id = ?${where}
+      ORDER BY last_visit DESC LIMIT ?`).all(workspaceId, ...words.map(like), limit) as Row[])
+      .map((r) => ({ url: r.url as string, title: r.title as string, visits: r.visits as number, lastVisit: r.last_visit as number }));
+  }
+
+  deleteVisit(workspaceId: string, url: string): void {
+    this.db.prepare('DELETE FROM history WHERE workspace_id = ? AND url = ?').run(workspaceId, url);
+  }
+
   clearHistory(): void {
     this.db.prepare('DELETE FROM history').run();
   }
@@ -440,10 +458,16 @@ export class Store {
     }
   }
 
-  // ------------------------------------------------------------ favoritos (por workspace)
+  // ------------------------------------------------------------ favoritos (por workspace, com pastas)
 
+  /** Todos os favoritos e pastas do workspace, em ordem (pai, posição). */
   listBookmarks(workspaceId: string): Bookmark[] {
     return (this.db.prepare('SELECT * FROM bookmarks WHERE workspace_id = ? ORDER BY position').all(workspaceId) as Row[]).map(toBookmark);
+  }
+
+  /** Filhos diretos de uma pasta (null = raiz / barra de favoritos), em ordem. */
+  childBookmarks(workspaceId: string, parentId: string | null): Bookmark[] {
+    return this.listBookmarks(workspaceId).filter((b) => b.parentId === parentId);
   }
 
   getBookmark(id: string): Bookmark | null {
@@ -451,18 +475,37 @@ export class Store {
     return row ? toBookmark(row) : null;
   }
 
-  /** Favorito da URL neste workspace (ignora só a barra final e o #fragmento). */
+  /** Favorito (não pasta) da URL neste workspace (ignora só a barra final e o #fragmento). */
   findBookmark(workspaceId: string, url: string): Bookmark | null {
     const norm = normalizeBookmarkUrl(url);
-    return this.listBookmarks(workspaceId).find((b) => normalizeBookmarkUrl(b.url) === norm) ?? null;
+    return this.listBookmarks(workspaceId).find((b) => !b.folder && normalizeBookmarkUrl(b.url) === norm) ?? null;
   }
 
-  addBookmark(b: Pick<Bookmark, 'id' | 'workspaceId' | 'title' | 'url' | 'favicon'>): Bookmark {
-    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM bookmarks WHERE workspace_id = ?')
-      .get(b.workspaceId) as { next: number };
-    this.db.prepare('INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(b.id, b.workspaceId, b.title, b.url, b.favicon, next, Date.now());
+  private nextPosition(workspaceId: string, parentId: string | null): number {
+    const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM bookmarks WHERE workspace_id = ? AND parent_id IS ?')
+      .get(workspaceId, parentId) as { next: number };
+    return next;
+  }
+
+  addBookmark(b: Pick<Bookmark, 'id' | 'workspaceId' | 'title' | 'url' | 'favicon'> & { parentId?: string | null }): Bookmark {
+    const parentId = this.validParent(b.workspaceId, b.parentId ?? null);
+    this.db.prepare('INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)')
+      .run(b.id, b.workspaceId, b.title, b.url, b.favicon, this.nextPosition(b.workspaceId, parentId), Date.now(), parentId);
     return this.getBookmark(b.id)!;
+  }
+
+  addFolder(f: { id: string; workspaceId: string; title: string; parentId?: string | null }): Bookmark {
+    const parentId = this.validParent(f.workspaceId, f.parentId ?? null);
+    this.db.prepare("INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, '', NULL, ?, ?, ?, 1)")
+      .run(f.id, f.workspaceId, f.title, this.nextPosition(f.workspaceId, parentId), Date.now(), parentId);
+    return this.getBookmark(f.id)!;
+  }
+
+  /** Pai só se for uma pasta do mesmo workspace; senão, raiz. */
+  private validParent(workspaceId: string, parentId: string | null): string | null {
+    if (!parentId) return null;
+    const p = this.getBookmark(parentId);
+    return p && p.folder && p.workspaceId === workspaceId ? p.id : null;
   }
 
   renameBookmark(id: string, title: string): void {
@@ -470,20 +513,44 @@ export class Store {
   }
 
   updateBookmark(id: string, patch: { title: string; url: string }): void {
-    this.db.prepare('UPDATE bookmarks SET title = ?, url = ? WHERE id = ?').run(patch.title, patch.url, id);
+    this.db.prepare('UPDATE bookmarks SET title = ?, url = ? WHERE id = ? AND is_folder = 0').run(patch.title, patch.url, id);
   }
 
+  /** Remove o favorito; pasta leva junto tudo o que tem dentro (subpastas inclusive). */
   removeBookmark(id: string): void {
-    this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(id);
-  }
-
-  /** Reordena (arrastar): `index` = posição final entre os favoritos do workspace. */
-  moveBookmark(id: string, index: number): void {
     const b = this.getBookmark(id);
     if (!b) return;
-    const ids = this.listBookmarks(b.workspaceId).map((x) => x.id).filter((x) => x !== id);
+    const all = this.listBookmarks(b.workspaceId);
+    const doomed = new Set([id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const x of all) if (x.parentId && doomed.has(x.parentId) && !doomed.has(x.id)) { doomed.add(x.id); grew = true; }
+    }
+    this.tx(() => { for (const x of doomed) this.db.prepare('DELETE FROM bookmarks WHERE id = ?').run(x); });
+  }
+
+  /** Pasta `folderId` é `id` ou está dentro dele? (impede mover uma pasta para dentro dela mesma) */
+  private isInside(folderId: string | null, id: string): boolean {
+    for (let cur = folderId; cur; cur = this.getBookmark(cur)?.parentId ?? null) if (cur === id) return true;
+    return false;
+  }
+
+  /**
+   * Move para a pasta `parentId` (null = barra), na posição final `index` entre os filhos dela.
+   * Mover uma pasta para dentro dela mesma (ou de uma subpasta) é ignorado.
+   */
+  moveBookmark(id: string, parentId: string | null, index: number): void {
+    const b = this.getBookmark(id);
+    if (!b) return;
+    const target = parentId === null ? null : this.validParent(b.workspaceId, parentId);
+    if (parentId !== null && target === null) return;
+    if (this.isInside(target, id)) return;
+    const ids = this.childBookmarks(b.workspaceId, target).map((x) => x.id).filter((x) => x !== id);
     ids.splice(Math.min(Math.max(0, index), ids.length), 0, id);
-    this.tx(() => ids.forEach((x, i) => this.db.prepare('UPDATE bookmarks SET position = ? WHERE id = ?').run(i, x)));
+    this.tx(() => {
+      this.db.prepare('UPDATE bookmarks SET parent_id = ? WHERE id = ?').run(target, id);
+      ids.forEach((x, i) => this.db.prepare('UPDATE bookmarks SET position = ? WHERE id = ?').run(i, x));
+    });
   }
 
   // ------------------------------------------------------------ painéis laterais

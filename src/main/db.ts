@@ -146,6 +146,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX history_recent ON history(workspace_id, last_visit);
   `,
+
+  /* v11: pastas de favoritos (subpastas por parent_id) */ `
+  ALTER TABLE bookmarks ADD COLUMN parent_id TEXT;
+  ALTER TABLE bookmarks ADD COLUMN is_folder INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX bookmarks_by_parent ON bookmarks(workspace_id, parent_id, position);
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {
