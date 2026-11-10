@@ -126,6 +126,13 @@ export async function startSite(): Promise<TestSite> {
           <footer>Rodapé do site</footer>
           <script>setInterval(() => { document.body && document.body.insertAdjacentText('beforeend', 'INVADIU'); }, 300);</script>`, 'Notícia');
       }
+      case '/terminal':
+        // Como um terminal web (xterm.js): usa Ctrl+R (busca no histórico) e não deixa o navegador agir.
+        return html(`<pre id="saida" style="min-height:200px">$ </pre><script>
+          window.log = [];
+          document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'r') { e.preventDefault(); window.log.push('busca-reversa'); }
+          });</script>`, 'Terminal');
       case '/find':
         return html(`<p>Cálculo I, cálculo II e CÁLCULO III.</p><p>Álgebra linear.</p>`, 'Disciplinas');
       case '/ctx':
@@ -307,6 +314,15 @@ export class Cdp {
     await this.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await this.call('Input.dispatchKeyEvent', { type: 'char', key: 'Enter', text: '\r' });
     await this.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  }
+
+  /** Tecla de verdade na página (ex.: Ctrl+R): letra + modificadores (2 = Ctrl, 8 = Shift). */
+  async pressKey(letter: string, modifiers = 2): Promise<void> {
+    const key = letter.length === 1 ? letter.toLowerCase() : letter;
+    const base = { key, code: letter.length === 1 ? `Key${letter.toUpperCase()}` : letter,
+      windowsVirtualKeyCode: letter.length === 1 ? letter.toUpperCase().charCodeAt(0) : 0, modifiers };
+    await this.call('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...base });
+    await this.call('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
   }
 
   close(): void { this.ws.close(); }

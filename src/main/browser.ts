@@ -67,7 +67,7 @@ import { nextZoom, zoomKey, zoomPercent } from './zoom';
 import { buildContextMenu, type ContextAction, type ContextInfo, type ContextItem } from './context-menu';
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
-import { shortcutFor, type ShortcutAction } from './shortcuts';
+import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
 import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
@@ -443,7 +443,7 @@ export class Browser {
 
     wc.on('before-input-event', (event, input) => {
       const action = shortcutFor(input);
-      if (!action) return;
+      if (!action || PAGE_FIRST.has(action)) return; // esses a página recebe primeiro (preload avisa se ela não usou)
       event.preventDefault();
       this.runShortcut(action);
     });
@@ -1181,7 +1181,7 @@ export class Browser {
     wc.on('dom-ready', () => this.applyCustomizations(wc));
     wc.on('before-input-event', (event, input) => {
       const action = shortcutFor(input);
-      if (!action) return;
+      if (!action || PAGE_FIRST.has(action)) return; // esses a página recebe primeiro (preload avisa se ela não usou)
       event.preventDefault();
       this.runShortcut(action);
     });
@@ -1366,6 +1366,11 @@ export class Browser {
   }
 
   /** Mostra a aba, trocando de workspace se preciso. */
+  /** É a página de uma aba ou painel (não a interface nem um popup)? */
+  isPageWebContents(wc: WebContents): boolean {
+    return this.tabIdOf(wc) !== null || this.panelIdOf(wc) !== null;
+  }
+
   private panelIdOf(wc: WebContents): string | null {
     for (const [id, view] of this.panelViews) if (view.webContents === wc) return id;
     return null;

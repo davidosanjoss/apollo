@@ -5,6 +5,22 @@ import { DOMMonitor } from '@ghostery/adblocker-content';
 import { fillLogin, fillNewPassword } from './fill';
 import { watchLogins } from './capture';
 import { NOTIFICATION_CLICK_EVENT, notificationShim } from './notifications';
+import { PAGE_FIRST, shortcutFor } from '../main/shortcuts';
+
+// Atalhos que a página recebe primeiro (Ctrl+R, Ctrl+F, Ctrl+K…): se ela não usou a tecla,
+// o Apollo age. Ouvimos depois dela (bolha no window) e só teclas de verdade (isTrusted):
+// um site não consegue mandar o Apollo recarregar ou imprimir sozinho.
+if (window === window.top) {
+  window.addEventListener('keydown', (e) => {
+    if (!e.isTrusted || e.defaultPrevented) return;
+    const input = { type: 'keyDown', key: e.key, control: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey };
+    const action = shortcutFor(input);
+    if (action && PAGE_FIRST.has(action)) {
+      e.preventDefault();
+      ipcRenderer.send('apollo:page-shortcut', input);
+    }
+  });
+}
 
 // Preenchimento do Bitwarden: só o processo principal envia (mainFrame.send), e só
 // depois de conferir que a URL desta página casa com o login.

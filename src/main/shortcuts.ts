@@ -15,6 +15,17 @@ export type ShortcutAction =
   | 'zoom-in' | 'zoom-out' | 'zoom-reset' | 'print' | 'fullscreen' | 'devtools' | 'bookmark-bar' | 'history' | 'reader'
   | `workspace-${number}`;
 
+/**
+ * Atalhos que a página pode usar primeiro (como no Chrome): ela recebe a tecla; se não
+ * tratar (preventDefault), o Apollo age. Ex.: Ctrl+R num terminal web pesquisa o histórico
+ * de comandos em vez de recarregar. Os outros (Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+1…9…) são
+ * do navegador e nunca chegam à página.
+ */
+export const PAGE_FIRST = new Set<ShortcutAction>([
+  'reload', 'find', 'find-next', 'find-prev', 'print', 'zoom-in', 'zoom-out', 'zoom-reset',
+  'bookmark', 'bookmark-bar', 'history', 'palette', 'reader', 'focus-address',
+]);
+
 export function shortcutFor(input: KeyInput): ShortcutAction | null {
   if (input.type !== 'keyDown') return null;
   const mod = input.control || input.meta;

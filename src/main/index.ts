@@ -5,7 +5,7 @@ import path from 'node:path';
 import { openDatabase } from './db';
 import { Store } from './store';
 import { Browser } from './browser';
-import { shortcutFor } from './shortcuts';
+import { PAGE_FIRST, shortcutFor } from './shortcuts';
 import { NetworkPipeline, gpcModule, type RequestContext } from './network';
 import { Blocker, blockerModule } from './privacy/blocker';
 import { parseFeatures } from './privacy/cosmetics';
@@ -200,6 +200,15 @@ function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow
     } catch {
       event.returnValue = null;
     }
+  });
+  // Atalho que a página recebeu e não usou (ver PAGE_FIRST): o Apollo age. Só de abas e
+  // painéis, só do frame principal, e só atalhos dessa lista.
+  ipcMain.on('apollo:page-shortcut', (event, raw: unknown) => {
+    if (event.senderFrame !== event.sender.mainFrame || !b.isPageWebContents(event.sender)) return;
+    const r = raw as Record<string, unknown> | null;
+    if (!r || typeof r.key !== 'string' || r.key.length > 32) return;
+    const action = shortcutFor({ type: 'keyDown', key: r.key, control: r.control === true, meta: r.meta === true, shift: r.shift === true, alt: r.alt === true });
+    if (action && PAGE_FIRST.has(action)) b.runShortcut(action);
   });
   ipcMain.on('apollo:notification-click', (event) => {
     if (event.senderFrame === event.sender.mainFrame) b.showFromNotification(event.sender);
