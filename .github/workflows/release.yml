@@ -115,7 +115,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
-          mkdir assets
-          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D assets
+          # Pasta temporária do runner (o repositório já tem uma pasta "assets").
+          dir="$RUNNER_TEMP/mirror"
+          mkdir -p "$dir"
+          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D "$dir"
           gh release create "$GITHUB_REF_NAME" -R "$MIRROR_REPO" --title "Apollo $GITHUB_REF_NAME" \
-            --notes-file notes.md --latest assets/*
+            --notes-file notes.md --latest "$dir"/*
