@@ -292,6 +292,15 @@ dialog .error[hidden] { display: none; }
 /* A página real é desenhada pelo processo principal por cima desta área. */
 #content { flex: 1; display: flex; min-height: 0; }
 #views { flex: 1; position: relative; background: var(--panel); min-width: 0; }
+#home-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; background: var(--bg); padding-bottom: 12vh; }
+#home-greeting, #home-date { margin: 0; color: var(--muted); font-size: 16px; }
+#home-date::first-letter { text-transform: uppercase; }
+#home-clock { margin: 0; font-size: 72px; font-weight: 300; letter-spacing: -2px; }
+#home-search { width: min(560px, 90%); margin-top: 22px; }
+#home-q { width: 100%; padding: 12px 18px; border-radius: 24px; border: 1px solid var(--panel-2); background: var(--panel);
+  color: var(--text); font: inherit; font-size: 15px; outline: none; }
+#home-q:focus { border-color: var(--accent); }
 
 /* ---------- monitor de memória ---------- */
 #memory-panel { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;

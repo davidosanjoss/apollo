@@ -21,6 +21,7 @@ import type { SecretBox } from './secret-box';
 import { resolveWindowState } from './window-state';
 import { BitwardenApi, serverUrls } from './vault/api';
 import { VaultService } from './vault/service';
+import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 
 // ------------------------------------------------------------ perfil
 // App instalado: ~/.config/apollo. Desenvolvimento (npm start): ~/.config/apollo-dev,
@@ -209,6 +210,13 @@ app.whenReady().then(async () => {
     console.log('[apollo] estado da v0.1 migrado para o banco (backup: state.json.migrated)');
   }
 
+  // Corretor da sessão padrão (interface) conforme a escolha salva, antes de a janela
+  // carregar: senão o Chromium baixa o dicionário em inglês mesmo com o corretor desligado.
+  {
+    const langs = spellcheckLanguages(parseSpellcheck(store.getKv('spellcheck')));
+    session.defaultSession.setSpellCheckerLanguages(langs);
+    session.defaultSession.setSpellCheckerEnabled(langs.length > 0);
+  }
   const box = await systemSecretBox();
   const { win, browser } = createWindow(store, box);
 

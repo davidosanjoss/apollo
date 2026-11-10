@@ -4,7 +4,7 @@ import { buildStrip, computeDrop } from '../../src/renderer/tab-strip';
 
 const tab = (id: string, over: Partial<TabInfo> = {}): TabInfo => ({
   id, title: id, url: `https://${id}.com/`, favicon: null, loading: false, canGoBack: false, canGoForward: false,
-  dormant: false, pinned: false, keepAwake: false, groupId: null, ...over,
+  dormant: false, live: true, pinned: false, keepAwake: false, groupId: null, ...over,
 });
 const group = (id: string, collapsed = false): GroupInfo => ({ id, name: id.toUpperCase(), color: '#4c8bf5', collapsed });
 const keys = (items: ReturnType<typeof buildStrip>) => items.map((i) => (i.kind === 'tab' && i.hidden ? `(${i.key})` : i.key));

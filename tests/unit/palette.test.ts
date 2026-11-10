@@ -45,7 +45,7 @@ describe('rank', () => {
 // ------------------------------------------------------------ itens
 
 const tab = (id: string, title: string, over: object = {}) => ({ id, title, url: `https://${id}.com/`, favicon: null, loading: false,
-  canGoBack: false, canGoForward: false, dormant: false, pinned: false, keepAwake: false, groupId: null, ...over });
+  canGoBack: false, canGoForward: false, dormant: false, live: true, pinned: false, keepAwake: false, groupId: null, ...over });
 const ws = (id: string, name: string) => ({ id, name, color: '#000000', home: '', hibernateAfterMin: 30, privacy: {} as never, temporary: false });
 
 function state(over: Partial<UiState> = {}): UiState {

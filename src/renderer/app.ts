@@ -1,7 +1,7 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { DnsMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { DnsMode, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
@@ -76,6 +76,7 @@ function render(): void {
   }
   addressTabId = tab?.id ?? null;
 
+  renderHome(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
@@ -126,7 +127,7 @@ function renderMemory(s: UiState): void {
     li.querySelector<HTMLElement>('.ws-dot')!.style.background = wsColor.get(t.workspaceId) ?? 'transparent';
     li.querySelector('.name')!.textContent = t.title;
     li.querySelector('.tag')!.textContent = t.visible ? 'na tela' : t.playing ? '♪' : t.keepAwake ? 'sempre ativa' : '';
-    li.querySelector('.mb')!.textContent = t.mb === null ? 'hibernada' : fmtMb(t.mb);
+    li.querySelector('.mb')!.textContent = t.home ? 'página inicial' : t.mb === null ? 'hibernada' : fmtMb(t.mb);
     li.querySelector('button')!.disabled = t.mb === null || t.visible;
   });
 }
@@ -236,6 +237,38 @@ tabsBar.addEventListener('drop', (e) => {
   const drop = computeDrop(state.tabs, dragging, dropTargetAt(e).target);
   if (drop) send({ type: 'tab:move', tabId: dragging, index: drop.index, ...(drop.groupId !== undefined ? { groupId: drop.groupId } : {}) });
   dragging = null;
+});
+
+// ------------------------------------------------------------ página inicial (sem processo)
+
+let homeTimer: ReturnType<typeof setTimeout> | null = null;
+function homeTick(): void {
+  const now = new Date();
+  const h = now.getHours();
+  $('#home-greeting').textContent = h < 5 ? 'Boa noite' : h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+  $('#home-clock').textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  $('#home-date').textContent = now.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+  // Próxima virada de minuto (sem timer a cada segundo; parado quando a página inicial some).
+  homeTimer = setTimeout(homeTick, (60 - now.getSeconds()) * 1000);
+}
+
+function renderHome(s: UiState): void {
+  const tab = s.tabs.find((t) => t.id === s.activeTabId);
+  const show = Boolean(tab && isHomeUrl(tab.url) && !tab.live);
+  const view = $('#home-view');
+  if (show === !view.hidden) return;
+  view.hidden = !show;
+  if (show) homeTick();
+  else if (homeTimer) { clearTimeout(homeTimer); homeTimer = null; }
+}
+
+$('#home-search').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = $<HTMLInputElement>('#home-q');
+  const url = normalizeUrl(q.value);
+  if (!url) return;
+  q.value = '';
+  send({ type: 'tab:navigate', url });
 });
 
 function renderPermissionPrompt(s: UiState): void {
@@ -421,6 +454,8 @@ const settingsDialog = $<HTMLDialogElement>('#settings-dialog');
 
 function renderSettings(s: UiState): void {
   if (!settingsDialog.open) return;
+  const sc = $<HTMLSelectElement>('#spellcheck');
+  if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
   const t = s.settings.dnsTest;
   const status = $('#dns-status');
   status.className = t.status === 'ok' ? 'ok' : t.status === 'fail' ? 'fail' : '';
@@ -450,6 +485,8 @@ function openSettings(): void {
 }
 
 $('#settings-btn').onclick = openSettings;
+$<HTMLSelectElement>('#spellcheck').onchange = (e) =>
+  send({ type: 'settings:spellcheck', mode: (e.target as HTMLSelectElement).value as SpellcheckMode });
 $('#dns-save').onclick = () => {
   const url = $<HTMLInputElement>('#dns-url').value.trim();
   if (url && !/^https:\/\/[^\s]+$/.test(url)) {

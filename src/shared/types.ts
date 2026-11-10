@@ -32,8 +32,10 @@ export interface TabInfo {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
-  /** Ainda sem página carregada (será carregada ao ativar). */
+  /** Ainda sem página carregada (será carregada ao ativar). Página inicial nunca conta como "dormindo". */
   dormant: boolean;
+  /** Tem página (processo) carregada. Página inicial sem página = desenhada pela própria interface. */
+  live: boolean;
   pinned: boolean;
   /** Nunca hiberna. */
   keepAwake: boolean;
@@ -86,8 +88,9 @@ export interface MemoryTab {
   workspaceId: string;
   title: string;
   favicon: string | null;
-  /** null = sem página carregada (hibernada). */
+  /** null = sem página carregada (hibernada, ou página inicial desenhada pela interface). */
   mb: number | null;
+  home: boolean;
   visible: boolean;
   keepAwake: boolean;
   playing: boolean;
@@ -148,11 +151,14 @@ export interface VaultStatusInfo {
 
 export type DnsMode = 'secure' | 'automatic' | 'off';
 
+export type SpellcheckMode = 'pt-en' | 'pt' | 'off';
+
 export interface SettingsInfo {
   dns: { mode: DnsMode; dohUrl: string | null; provider: string | null };
   dnsTest: { status: 'idle' | 'testing' | 'ok' | 'fail'; ms?: number; error?: string };
   /** Camada global de privacidade (null = padrão do Apollo). */
   privacy: Record<PrivacyFeature, boolean | null>;
+  spellcheck: SpellcheckMode;
 }
 
 export interface UiState {
@@ -279,6 +285,7 @@ export type UiCommand =
   | { type: 'vault:generate'; fill: boolean }
   | { type: 'vault:generator'; length: number; symbols: boolean }
   | { type: 'settings:test-dns' }
+  | { type: 'settings:spellcheck'; mode: SpellcheckMode }
   | { type: 'settings:memory-limit'; mb: number }
   | { type: 'tab:hibernate-others'; tabId: string }
   | { type: 'tab:close-others'; tabId: string }

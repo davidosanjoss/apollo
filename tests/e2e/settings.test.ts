@@ -65,6 +65,19 @@ describe('configurações', () => {
   });
 });
 
+describe('corretor ortográfico', () => {
+  it('padrão português+inglês; escolha salva e sobrevive ao reinício', async () => {
+    expect((await app.state()).settings.spellcheck).toBe('pt-en');
+    await app.send({ type: 'settings:spellcheck', mode: 'off' });
+    await app.until((s) => s.settings.spellcheck === 'off', 'desligado');
+    await app.quit();
+    app = await Apollo.launch(profile.dir);
+    expect((await app.state()).settings.spellcheck).toBe('off');
+    await app.send({ type: 'settings:spellcheck', mode: 'pt-en' });
+    await app.until((s) => s.settings.spellcheck === 'pt-en', 'de volta');
+  });
+});
+
 describe('elementos escondidos ficam escondidos', () => {
   // Regressão: "dialog label { display: flex }" vencia o atributo hidden — o campo de
   // servidor próprio do Bitwarden e a opção "Temporário" ao editar apareciam.

@@ -58,7 +58,17 @@
 
     <div id="content">
       <!-- Área onde o processo principal posiciona a página da aba ativa. -->
-      <div id="views"></div>
+      <div id="views">
+        <!-- Página inicial desenhada pela interface (sem processo próprio). -->
+        <section id="home-view" hidden>
+          <p id="home-greeting"></p>
+          <h1 id="home-clock"></h1>
+          <p id="home-date"></p>
+          <form id="home-search" role="search">
+            <input id="home-q" type="search" placeholder="Pesquisar no Google ou digitar um endereço" autocomplete="off" aria-label="Pesquisar">
+          </form>
+        </section>
+      </div>
 
       <aside id="memory-panel" hidden>
         <header>
@@ -140,6 +150,14 @@
 
       <h3>Privacidade (padrão de todos os workspaces)</h3>
       <div id="global-privacy"></div>
+
+      <h3>Corretor ortográfico</h3>
+      <label>Idiomas <select id="spellcheck">
+        <option value="pt-en">Português (Brasil) e inglês</option>
+        <option value="pt">Só português (Brasil)</option>
+        <option value="off">Desligado</option>
+      </select></label>
+      <p class="hint">O dicionário é baixado uma vez dos servidores do Google, sem nenhum dado seu. "Desligado" evita até isso.</p>
 
       <h3>Módulos</h3>
       <div class="settings-row"><span class="hint">Ligar/desligar partes do navegador e criar personalizações por site.</span>

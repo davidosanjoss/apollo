@@ -7,6 +7,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ### Adicionado
 - Hibernação "Ao sair da aba": a aba libera a memória assim que você troca de aba (exceções continuam: áudio, formulário não enviado, sempre ativa).
 - Workspace fora da tela: as abas de um workspace em que você não está hibernam após 10 min (ajustável: ao sair do workspace, 5–60 min ou a mesma regra).
+- Nova aba sem processo: a página inicial é desenhada pela própria interface; o processo do site só nasce quando você abre um endereço (Ctrl+T instantâneo e menos memória com abas vazias). "Voltar" continua levando à página inicial.
+- Corretor ortográfico em português (Brasil) e inglês por padrão (antes baixava só inglês); Configurações → Corretor ortográfico: só português ou desligado (desligado não baixa nenhum dicionário).
 - Painéis laterais: "Hibernar agora" e "Hibernar quando fechado" (nunca — padrão, para mensageiros —, ao fechar, ou após 30 min/2 h/8 h). Painel tocando áudio nunca hiberna; hibernado aparece esmaecido no trilho.
 
 ### Corrigido

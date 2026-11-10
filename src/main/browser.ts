@@ -12,6 +12,7 @@ import type { MenuModelItem } from './menu-model';
 import { vaultMenu } from './vault/menu';
 import { MODULES, parseModules } from './modules';
 import { customizationsFor } from './customizations';
+import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 
 /** Mundo isolado das personalizações do usuário: vê o DOM, não vê a página nem o Apollo. */
 const USER_SCRIPT_WORLD = 1001;
@@ -48,7 +49,7 @@ import { newId } from './store';
 import type { NetworkPipeline } from './network';
 import { PermissionManager } from './permissions';
 import { shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import type { MemoryReport, ModuleId, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
@@ -108,7 +109,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -177,6 +178,7 @@ export class Browser {
     if (!this.sessionsReady.has(workspaceId)) {
       this.permissions.attach(ses, workspaceId);
       this.pipeline.attach(ses, workspaceId);
+      this.applySpellcheck(ses);
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
     return ses;
@@ -560,6 +562,25 @@ export class Browser {
     };
   }
 
+  // ------------------------------------------------------------ corretor ortográfico
+
+  /** Público: o index aplica à sessão padrão (a da interface) antes de a janela carregar. */
+  applySpellcheck(ses: Session): void {
+    const langs = spellcheckLanguages(parseSpellcheck(this.store.getKv('spellcheck')));
+    // Lista vazia também no "desligado": o Chromium guarda os idiomas nas preferências da
+    // sessão e baixaria os dicionários deles mesmo com o corretor desligado.
+    ses.setSpellCheckerLanguages(langs);
+    ses.setSpellCheckerEnabled(langs.length > 0);
+  }
+
+  setSpellcheck(mode: SpellcheckMode): void {
+    this.store.setKv('spellcheck', mode);
+    this.applySpellcheck(session.defaultSession); // a interface também tem campos de texto
+    for (const wsId of this.sessionsReady.keys()) {
+      if (this.store.getWorkspace(wsId)) this.applySpellcheck(session.fromPartition(this.partitionOf(wsId)));
+    }
+  }
+
   // ------------------------------------------------------------ módulos e personalizações
 
   isModuleOn(id: ModuleId): boolean {
@@ -776,6 +797,7 @@ export class Browser {
       title: t.title || t.url,
       favicon: t.favicon,
       mb: perTab.has(t.id) ? Math.round(perTab.get(t.id)!) : null,
+      home: isHomeUrl(t.url) && !this.views.has(t.id),
       visible: t.id === this.attachedTabId,
       keepAwake: t.keepAwake,
       playing: this.playing.has(t.id) || Boolean(this.views.get(t.id)?.webContents.isCurrentlyAudible()),
@@ -848,6 +870,13 @@ export class Browser {
       this.lastSeen.set(this.attachedTabId, Date.now());
       this.attachedTabId = null;
       this.scheduleHibernation();
+    }
+    // Nova aba na página inicial: a interface desenha a página; nenhum processo é criado
+    // até você abrir um endereço (economiza ~40 MB e deixa o Ctrl+T instantâneo).
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) {
+      this.focusAddress();
+      this.push();
+      return;
     }
     if (tab) {
       const view = this.ensureView(tab);
@@ -965,8 +994,11 @@ export class Browser {
       this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
     } else if (view) view.webContents.loadURL(url).catch(() => {});
     else {
-      // Aba dormindo: a navegação entra no histórico salvo, e a view nasce com ele.
-      this.store.setTabHistory(tab.id, withNavigation(tab.history, url));
+      // Aba sem página (dormindo, ou página inicial desenhada pela interface): a navegação
+      // entra no histórico salvo e a view nasce com ele. Saindo da página inicial, ela fica
+      // antes no histórico (o "voltar" leva de volta a ela, como antes).
+      const base = !tab.history && isHomeUrl(tab.url) ? { index: 0, entries: [{ url: APOLLO_HOME, title: 'Nova aba' }] } : tab.history;
+      this.store.setTabHistory(tab.id, withNavigation(base, url));
       this.showActive();
     }
     this.withActiveView((wc) => wc.focus());
@@ -1246,6 +1278,7 @@ export class Browser {
       case 'panel:bounds': this.panelBounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layoutPanel(); break;
       case 'panel:menu': this.showPanelMenu(cmd.panelId, cmd.x, cmd.y); break;
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
+      case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'custom:save':
         this.store.saveCustomization({ id: cmd.id ?? newId(), name: cmd.name.trim(), sites: cmd.sites.trim(), css: cmd.css, js: cmd.js, enabled: cmd.enabled });
         break;
@@ -1473,7 +1506,7 @@ export class Browser {
     this.push();
   }
 
-  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy'>>): void {
+  setSettings(patch: Partial<Omit<SettingsInfo, 'privacy' | 'spellcheck'>>): void {
     this.settings = { ...this.settings, ...patch };
     this.push();
   }
@@ -1518,7 +1551,8 @@ export class Browser {
         loading: this.loading.has(t.id),
         canGoBack: alive ? wc.navigationHistory.canGoBack() : false,
         canGoForward: alive ? wc.navigationHistory.canGoForward() : false,
-        dormant: !alive,
+        dormant: !alive && !isHomeUrl(t.url),
+        live: Boolean(alive),
         pinned: t.pinned,
         keepAwake: t.keepAwake,
         groupId: t.groupId,
@@ -1547,7 +1581,8 @@ export class Browser {
       paletteTabs: this.paletteOpen
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
-      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global) },
+      settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
+        spellcheck: parseSpellcheck(this.store.getKv('spellcheck')) },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),

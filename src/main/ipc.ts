@@ -6,6 +6,7 @@ import { validDohUrl } from './settings';
 import { LOCK_OPTIONS_MIN } from './vault/service';
 import { validVaultServer } from './vault/api';
 import { MODULES } from './modules';
+import { SPELLCHECK_MODES } from './spellcheck';
 import { MAX_CODE } from './customizations';
 
 /**
@@ -86,6 +87,7 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return ['secure', 'automatic', 'off'].includes(c.mode as string) && (c.dohUrl === null || validDohUrl(c.dohUrl))
         ? (c as UiCommand) : null;
     case 'settings:test-dns': return { type: c.type } as UiCommand;
+    case 'settings:spellcheck': return (SPELLCHECK_MODES as unknown[]).includes(c.mode) ? (c as UiCommand) : null;
     case 'vault:connect':
       return validVaultServer(c.server) && typeof c.clientId === 'string' && /^(user|organization)\.[\w-]{1,100}$/.test(c.clientId.trim())
         && str(c.clientSecret, 256) && (c.clientSecret as string).trim() && password(c.password) ? (c as UiCommand) : null;
