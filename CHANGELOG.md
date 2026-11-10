@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.6.0] - 2026-11-10
+
 ### Adicionado
 - Painéis laterais (como os mensageiros do Opera): sites fixos numa coluna à direita (WhatsApp, Telegram, Teams, agendas, Spotify…), cada um com os logins de um workspace escolhido. Abrem ao lado da página (que encolhe), continuam vivos quando fechados e só carregam quando abertos pela primeira vez. Largura ajustada arrastando a borda esquerda do painel e salva para cada painel (duplo clique na borda volta ao padrão). Opções no botão direito: recarregar, versão para celular, largura padrão, remover. Links abertos no painel viram abas do workspace dele.
 - Módulos (Configurações → Módulos e personalizações, ou pela paleta): ligar/desligar GPC, filtros cosméticos e scriptlets, oferecer salvar senhas, hibernação automática e personalizações.
