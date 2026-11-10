@@ -60,6 +60,14 @@ export function validVaultServer(v: unknown): v is ServerChoice {
   try { serverUrls(v); return true; } catch { return false; }
 }
 
+/**
+ * O bitwarden.com recusa requisições sem a versão do cliente ("No client version header
+ * found, required to prevent encryption errors"): ela decide que formatos de cifra o
+ * servidor pode mandar. Usamos a mesma versão do CLI oficial contra o qual o teste de
+ * compatibilidade (tests/interop) prova que o Apollo funciona — os dois andam juntos.
+ */
+export const BITWARDEN_CLIENT_VERSION = '2026.10.1';
+
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 const b64url = (s: string) => Buffer.from(s, 'utf8').toString('base64url');
@@ -69,8 +77,14 @@ export class BitwardenApi {
 
   private async request(url: string, init: RequestInit): Promise<unknown> {
     let res: Response;
+    const headers = {
+      ...(init.headers as Record<string, string> | undefined),
+      'bitwarden-client-name': 'desktop',
+      'bitwarden-client-version': BITWARDEN_CLIENT_VERSION,
+      'device-type': String(this.device.type),
+    };
     try {
-      res = await this.fetchFn(url, { ...init, signal: AbortSignal.timeout(30_000) });
+      res = await this.fetchFn(url, { ...init, headers, signal: AbortSignal.timeout(30_000) });
     } catch (err) {
       throw new BitwardenError('network', `sem conexão com o servidor (${(err as Error).message})`);
     }

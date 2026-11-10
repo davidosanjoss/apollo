@@ -6,10 +6,8 @@ import { BitwardenError, type BitwardenApi, type ServerChoice } from './api';
 import { makeMasterKey, VaultCryptoError, wipe, type Kdf } from './crypto';
 import { UnlockedVault } from './vault';
 
-export interface SecretBox {
-  encrypt(plain: string): Buffer;
-  decrypt(data: Buffer): string;
-}
+export type { SecretBox } from '../secret-box';
+import type { SecretBox } from '../secret-box';
 
 export interface VaultStorage {
   getAccount(): string | null;
@@ -107,7 +105,7 @@ export class VaultService {
 
       this.replaceVault(vault, masterKey);
       this.account = { server, clientId: clientId.trim(), email, kdf: token.kdf, deviceId, lockAfterMin: this.account?.lockAfterMin ?? DEFAULT_LOCK_MIN, lastSync: Date.now() };
-      this.persist(clientSecret.trim(), sync);
+      await this.persist(clientSecret.trim(), sync);
       return true;
     });
   }
@@ -118,14 +116,14 @@ export class VaultService {
       const a = this.account;
       if (!a) throw new BitwardenError('unexpected', 'nenhuma conta conectada');
       const masterKey = await makeMasterKey(password, a.email, a.kdf);
-      const cached = this.readCachedSync();
+      const cached = await this.readCachedSync();
       if (cached) {
         this.replaceVault(UnlockedVault.open(cached, masterKey), masterKey);
         void this.sync();
       } else {
         const sync = await this.fetchSync();
         this.replaceVault(UnlockedVault.open(sync, masterKey), masterKey);
-        this.saveSync(sync);
+        await this.saveSync(sync);
       }
       return true;
     });
@@ -137,7 +135,7 @@ export class VaultService {
       if (!this.vault || !this.masterKey) return false;
       const sync = await this.fetchSync();
       this.replaceVault(UnlockedVault.open(sync, this.masterKey), this.masterKey);
-      this.saveSync(sync);
+      await this.saveSync(sync);
       return true;
     });
   }
@@ -188,29 +186,32 @@ export class VaultService {
     const secret = this.box && this.storage.getSecret('clientSecret');
     if (!secret || !this.box) throw new BitwardenError('unexpected', 'chave de API não salva neste computador: conecte de novo');
     const api = this.apiFor(a.server, a.deviceId);
-    const token = await api.loginApiKey(a.clientId, this.box.decrypt(secret));
+    const clientSecret = await this.box.decrypt(secret);
+    const token = await api.loginApiKey(a.clientId, clientSecret);
     const sync = await api.sync(token.accessToken);
     this.account = { ...a, lastSync: Date.now(), ...(token.kdf ? { kdf: token.kdf } : {}) };
     this.storage.setAccount(JSON.stringify(this.account));
+    // Regrava com a chave atual do chaveiro (se ela foi trocada, o segredo não fica preso na antiga).
+    this.storage.setSecret('clientSecret', await this.box.encrypt(clientSecret));
     return sync;
   }
 
-  private persist(clientSecret: string, sync: unknown): void {
+  private async persist(clientSecret: string, sync: unknown): Promise<void> {
     this.storage.setAccount(JSON.stringify(this.account));
     if (!this.box) return; // sem chaveiro: nada sensível no disco
-    this.storage.setSecret('clientSecret', this.box.encrypt(clientSecret));
-    this.saveSync(sync);
+    this.storage.setSecret('clientSecret', await this.box.encrypt(clientSecret));
+    await this.saveSync(sync);
   }
 
-  private saveSync(sync: unknown): void {
-    if (this.box) this.storage.setSecret('sync', this.box.encrypt(JSON.stringify(sync)));
+  private async saveSync(sync: unknown): Promise<void> {
+    if (this.box) this.storage.setSecret('sync', await this.box.encrypt(JSON.stringify(sync)));
   }
 
-  private readCachedSync(): unknown | null {
+  private async readCachedSync(): Promise<unknown | null> {
     const data = this.box && this.storage.getSecret('sync');
     if (!data || !this.box) return null;
     try {
-      return JSON.parse(this.box.decrypt(data));
+      return JSON.parse(await this.box.decrypt(data));
     } catch {
       return null;
     }

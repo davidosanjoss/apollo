@@ -10,7 +10,9 @@ import { field } from '../../src/main/vault/api';
 import { encrypt, hashMasterPassword, makeAccountKeys, makeMasterKey, rsaEncrypt, symKeyFrom, type Kdf } from '../../src/main/vault/crypto';
 
 export const VAULTWARDEN_IMAGE = 'vaultwarden/server:1.37.5';
-export const BW_CLI_VERSION = '2026.10.1';
+import { BITWARDEN_CLIENT_VERSION } from '../../src/main/vault/api';
+// Mesma versão que o Apollo anuncia ao servidor: o teste prova exatamente essa combinação.
+export const BW_CLI_VERSION = BITWARDEN_CLIENT_VERSION;
 const ROOT = path.resolve(import.meta.dirname, '../..');
 const BW_DIR = path.join(ROOT, '.cache/bw-cli');
 

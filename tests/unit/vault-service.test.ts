@@ -20,7 +20,7 @@ function memoryStorage(): VaultStorage & { raw: Map<string, unknown> } {
 }
 
 // "Chaveiro" de teste: inverte os bytes (o importante é não ficar em claro).
-const box: SecretBox = { encrypt: (s) => Buffer.from(s).reverse(), decrypt: (b) => Buffer.from(b).reverse().toString() };
+const box: SecretBox = { encrypt: async (s) => Buffer.from(s).reverse(), decrypt: async (b) => Buffer.from(b).reverse().toString() };
 
 function setup(opts: { box?: SecretBox | null; online?: boolean } = {}) {
   const storage = memoryStorage();
@@ -102,6 +102,31 @@ describe('VaultService', () => {
     await svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
     svc.setLockAfter(7);
     expect(svc.info().lockAfterMin).toBe(15);
+  });
+
+  it('sync regrava o segredo com a chave atual do chaveiro (troca de chave não prende o segredo)', async () => {
+    const s = setup();
+    await s.svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
+    const before = s.storage.raw.get('clientSecret');
+    await s.svc.sync();
+    const after = s.storage.raw.get('clientSecret');
+    expect(after).not.toBe(before); // gravado de novo (novo Buffer)
+    expect(await box.decrypt(after as Buffer)).toBe('segredo');
+  });
+
+  it('chaveiro que não decifra mais (chave trocada): desbloqueio cai para o servidor', async () => {
+    const s = setup();
+    await s.svc.connect('us', 'user.1', 'segredo', FIXTURE_PASSWORD);
+    s.svc.lock();
+    let failSync = true;
+    const flaky: SecretBox = { encrypt: box.encrypt, decrypt: async (b) => {
+      const v = await box.decrypt(b);
+      if (failSync && v.startsWith('{')) { failSync = false; throw new Error('chave trocada'); }
+      return v;
+    } };
+    const svc2 = new VaultService(s.storage, flaky, () => s.api, () => {}, () => 'device-1');
+    expect(await svc2.unlock(FIXTURE_PASSWORD)).toBe(true);
+    expect(s.api.sync).toHaveBeenCalledTimes(2); // conexão + este desbloqueio (cópia local ilegível)
   });
 
   it('desconectar esquece tudo', async () => {

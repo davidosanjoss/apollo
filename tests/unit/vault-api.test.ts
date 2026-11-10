@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BitwardenApi, BitwardenError, field, kdfFrom, serverUrls, tokenError } from '../../src/main/vault/api';
+import { BITWARDEN_CLIENT_VERSION, BitwardenApi, BitwardenError, field, kdfFrom, serverUrls, tokenError } from '../../src/main/vault/api';
 
 describe('serverUrls', () => {
   it('nuvens oficiais e servidor próprio', () => {
@@ -56,6 +56,30 @@ describe('BitwardenApi', () => {
     expect(url).toBe('https://identity.bitwarden.com/connect/token');
     const form = new URLSearchParams(String(init.body));
     expect(Object.fromEntries(form)).toMatchObject({ grant_type: 'client_credentials', client_id: 'user.abc', client_secret: 'segredo', deviceIdentifier: 'dev-1', deviceType: '14' });
+  });
+
+  // Regressão: o bitwarden.com recusava tudo com "No client version header found"
+  // (HTTP 400) — o Vaultwarden dos testes de compatibilidade não exige o cabeçalho.
+  it('toda requisição leva nome e versão do cliente', async () => {
+    const fetchFn = vi.fn(async () => new Response(JSON.stringify({ access_token: 't', Kdf: 0, KdfIterations: 600000 })));
+    const api = new BitwardenApi(serverUrls('us'), fetchFn, device);
+    await api.loginApiKey('user.1', 's');
+    await api.prelogin('a@b.c');
+    await api.sync('t');
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    for (const [, init] of fetchFn.mock.calls as unknown as [string, RequestInit][]) {
+      const h = init.headers as Record<string, string>;
+      expect(h['bitwarden-client-version']).toBe(BITWARDEN_CLIENT_VERSION);
+      expect(h['bitwarden-client-name']).toBe('desktop');
+      expect(h['device-type']).toBe('14');
+    }
+    // Cabeçalhos próprios da requisição continuam lá.
+    const sync = (fetchFn.mock.calls[2] as unknown as [string, RequestInit])[1].headers as Record<string, string>;
+    expect(sync.authorization).toBe('Bearer t');
+  });
+
+  it('a versão anunciada é a mesma do CLI oficial usado no teste de compatibilidade', () => {
+    expect(BITWARDEN_CLIENT_VERSION).toMatch(/^\d{4}\.\d{1,2}\.\d+$/);
   });
 
   it('sem rede: erro de rede legível', async () => {
