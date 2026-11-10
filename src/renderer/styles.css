@@ -204,6 +204,10 @@ body { display: flex; }
 }
 .tab:hover { background: var(--panel-2); }
 .tab.active { background: var(--panel-2); color: var(--text); }
+.tab.in-split .title::before { content: '◧ '; color: var(--accent); }
+#split-divider { position: absolute; top: 0; bottom: 0; width: 6px; cursor: col-resize; background: var(--panel-2); z-index: 1; }
+#split-divider:hover, #split-divider.dragging { background: var(--accent); }
+#split-bar { position: absolute; top: 0; height: 3px; background: var(--ws-color, var(--accent)); z-index: 1; }
 .tab img { width: 16px; height: 16px; flex-shrink: 0; }
 .tab .title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tab .close { border: 0; background: none; color: inherit; cursor: pointer; border-radius: 4px; padding: 0 4px; }

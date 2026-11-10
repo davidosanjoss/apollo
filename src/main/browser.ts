@@ -53,6 +53,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
 import { PIP_HAS_VIDEO, PIP_TOGGLE, PIP_WAIT_CLOSE, PIP_WORLD } from './pip';
 import { DEFAULT_DOWNLOAD_KEEP_DAYS, DOWNLOAD_KEEP_DAYS } from '../shared/types';
@@ -355,6 +356,10 @@ export class Browser {
       this.push();
     };
 
+    // Clique na outra metade da tela dividida: ela vira a ativa (o 'focus' nem sempre chega).
+    wc.on('before-mouse-event', (_e, mouse) => {
+      if (mouse.type === 'mouseDown' && this.secondaryTabId === tabId) setImmediate(() => this.activateTab(tabId));
+    });
     wc.on('page-title-updated', (_e, title) => {
       update({ title });
       if (this.historyOn(workspaceId)) this.store.setVisitTitle(workspaceId, wc.getURL(), title);
@@ -476,6 +481,10 @@ export class Browser {
       if (this.attachedTabId === tabId) {
         this.win.contentView.removeChildView(view);
         this.attachedTabId = null;
+      }
+      if (this.secondaryTabId === tabId) {
+        this.win.contentView.removeChildView(view);
+        this.secondaryTabId = null;
       }
       this.tabByWebContents.delete(wcId);
       this.views.delete(tabId);
@@ -1383,7 +1392,7 @@ export class Browser {
         id: tabId,
         workspaceId: tab.workspaceId,
         alive: true,
-        visible: tabId === this.attachedTabId,
+        visible: tabId === this.attachedTabId || tabId === this.secondaryTabId,
         keepAwake: tab.keepAwake,
         playingMedia: this.playing.has(tabId) || wc.isCurrentlyAudible() || wc.isBeingCaptured() || this.pipTabs.has(tabId),
         unloadBlocked: this.unloadBlocked.has(tabId),
@@ -1415,8 +1424,86 @@ export class Browser {
   }
 
   /** Mostra a aba ativa do workspace ativo (criando a view se preciso). */
+  // ------------------------------------------------------------ tela dividida
+
+  private splitsCache: Record<string, Split> | null = null;
+  /** A outra metade (anexada ao lado da aba ativa). */
+  private secondaryTabId: string | null = null;
+
+  private splits(): Record<string, Split> {
+    this.splitsCache ??= parseSplits(this.store.getKv('splits'));
+    return this.splitsCache;
+  }
+
+  private saveSplits(): void {
+    this.store.setKv('splits', JSON.stringify(this.splits()));
+  }
+
+  private splitOf(workspaceId: string): Split | undefined {
+    const s = this.splits()[workspaceId];
+    // Aba que sumiu (fechada, movida): desfaz.
+    if (s && (this.store.getTab(s.a)?.workspaceId !== workspaceId || this.store.getTab(s.b)?.workspaceId !== workspaceId)) {
+      delete this.splits()[workspaceId];
+      this.saveSplits();
+      return undefined;
+    }
+    return s;
+  }
+
+  /** Aba ativa e `tabId` lado a lado (a ativa fica à esquerda). */
+  private openSplit(tabId: string): void {
+    const active = this.activeTab();
+    const other = this.store.getTab(tabId);
+    if (!active || !other || other.id === active.id || other.workspaceId !== active.workspaceId) return;
+    this.splits()[active.workspaceId] = { a: active.id, b: other.id, ratio: 0.5 };
+    this.saveSplits();
+    this.showActive();
+  }
+
+  private closeSplit(): void {
+    delete this.splits()[this.activeWorkspaceId];
+    this.saveSplits();
+    this.showActive();
+  }
+
+  private swapSplit(): void {
+    const s = this.splitOf(this.activeWorkspaceId);
+    if (!s) return;
+    this.splits()[this.activeWorkspaceId] = { a: s.b, b: s.a, ratio: 1 - s.ratio };
+    this.saveSplits();
+    this.layout();
+    this.push();
+  }
+
+  private setSplitRatio(ratio: number): void {
+    const s = this.splitOf(this.activeWorkspaceId);
+    if (!s) return;
+    s.ratio = clampRatio(ratio);
+    this.saveSplits();
+    this.layout();
+    this.push();
+  }
+
+  private detachSecondary(): void {
+    if (!this.secondaryTabId) return;
+    const v = this.views.get(this.secondaryTabId);
+    if (v && this.secondaryTabId !== this.attachedTabId) this.win.contentView.removeChildView(v);
+    this.lastSeen.set(this.secondaryTabId, Date.now());
+    this.secondaryTabId = null;
+  }
+
   private showActive(): void {
     const tab = this.activeTab();
+    const partner = tab ? partnerOf(this.splitOf(tab.workspaceId), tab.id) : null;
+    // Trocou para a outra metade da tela dividida: a antiga ativa vira a metade de lado.
+    if (this.attachedTabId && this.attachedTabId !== tab?.id && this.attachedTabId === partner) {
+      this.secondaryTabId = this.attachedTabId;
+      this.attachedTabId = null;
+    }
+    if (this.secondaryTabId && this.secondaryTabId !== partner) {
+      if (this.secondaryTabId === tab?.id) this.secondaryTabId = null; // vira a ativa
+      else this.detachSecondary();
+    }
     if (this.attachedTabId && this.attachedTabId !== tab?.id) {
       const old = this.views.get(this.attachedTabId);
       if (old && this.sharedTabs.has(this.attachedTabId)) {
@@ -1439,10 +1526,19 @@ export class Browser {
     }
     // Nova aba na página inicial: a interface desenha a página; nenhum processo é criado
     // até você abrir um endereço (economiza ~40 MB e deixa o Ctrl+T instantâneo).
-    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id)) {
+    if (tab && isHomeUrl(tab.url) && !this.views.has(tab.id) && !partner) {
       this.focusAddress();
       this.push();
       return;
+    }
+    // A outra metade da tela dividida.
+    if (tab && partner && this.secondaryTabId !== partner) {
+      const p = this.store.getTab(partner);
+      if (p) {
+        this.win.contentView.addChildView(this.ensureView(p));
+        this.secondaryTabId = partner;
+        this.lastSeen.set(partner, Date.now());
+      }
     }
     if (tab) {
       const view = this.ensureView(tab);
@@ -1468,13 +1564,23 @@ export class Browser {
     if (this.pageFullscreenTabId === this.attachedTabId) {
       const [width, height] = this.win.getContentSize();
       this.win.contentView.addChildView(view); // para o topo (acima de painéis)
+      if (this.secondaryTabId) this.views.get(this.secondaryTabId)?.setVisible(false);
       view.setVisible(true);
       view.setBounds({ x: 0, y: 0, width, height });
       return;
     }
     // A view é nativa e fica POR CIMA do HTML da UI: com um diálogo aberto, escondemos a página.
     view.setVisible(!this.overlayOpen && this.bounds.width > 0);
-    view.setBounds(this.bounds);
+    const second = this.secondaryTabId ? this.views.get(this.secondaryTabId) : undefined;
+    const split = this.splitOf(this.activeWorkspaceId);
+    if (second && split) {
+      const b = splitBounds(this.bounds, split, this.attachedTabId);
+      view.setBounds(this.attachedTabId === split.a ? b.a : b.b);
+      second.setVisible(!this.overlayOpen && this.bounds.width > 0);
+      second.setBounds(this.secondaryTabId === split.a ? b.a : b.b);
+    } else {
+      view.setBounds(this.bounds);
+    }
   }
 
   /** Foco na interface do navegador (para a paleta/diálogos receberem o teclado). */
@@ -1781,6 +1887,17 @@ export class Browser {
         click: this.run({ type: 'tab:hibernate', tabId }) },
       { label: 'Hibernar outras abas', click: this.run({ type: 'tab:hibernate-others', tabId }) },
       { type: 'separator' },
+      ...(() => {
+        const split = this.splitOf(tab.workspaceId);
+        if (split && (split.a === tabId || split.b === tabId)) {
+          return [{ label: 'Trocar os lados', click: this.run({ type: 'split:swap' }) },
+            { label: 'Sair da tela dividida', click: this.run({ type: 'split:close' }) }];
+        }
+        const active = this.activeTab();
+        return [{ label: 'Dividir a tela com a aba atual', enabled: Boolean(active && active.id !== tabId),
+          click: this.run({ type: 'split:open', tabId }) }];
+      })(),
+      { type: 'separator' },
       { label: 'Adicionar a um novo grupo', click: this.run({ type: 'group:create', tabId }) },
       ...(groups.length ? [{ label: 'Mover para o grupo', submenu: groups.map((g) => ({
         label: g.name || 'Grupo sem nome', click: this.run({ type: 'group:add', tabId, groupId: g.id }),
@@ -1947,6 +2064,10 @@ export class Browser {
       case 'view:fullscreen': this.toggleFullscreen(); break;
       case 'tab:pip': { const t = this.activeTab(); this.withActiveWc((wc) => void this.togglePip(wc, t?.id ?? null)); break; }
       case 'reader:toggle': void this.toggleReader(); break;
+      case 'split:open': this.openSplit(cmd.tabId); break;
+      case 'split:close': this.closeSplit(); break;
+      case 'split:swap': this.swapSplit(); break;
+      case 'split:ratio': this.setSplitRatio(cmd.ratio); break;
       case 'reader:style': this.setReaderStyle(cmd.style); break;
       case 'settings:auto-pip': this.store.setKv('auto-pip', cmd.on ? '1' : '0'); break;
       case 'tab:print': this.withActiveWc((wc) => this.print(wc)); break;
@@ -2303,6 +2424,7 @@ export class Browser {
       },
       fullscreen: this.pageFullscreenTabId && this.pageFullscreenTabId === ws.activeTabId ? 'page'
         : this.windowFullscreen ? 'window' : null,
+      split: this.splitOf(ws.id) ?? null,
       reader: { available: Boolean(active && (this.readerAvailable.has(active.id) || this.readerActive.has(active.id))),
         active: Boolean(active && this.readerActive.has(active.id)), style: this.readerStyle() },
       pip: { available: Boolean(active && (this.videoTabs.has(active.id) || this.pipTabs.has(active.id))), active: Boolean(active && this.pipTabs.has(active.id)) },

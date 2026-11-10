@@ -128,6 +128,15 @@ export function buildItems({ state: s, query, openUrl }: PaletteContext): Palett
       { kind: 'ui', action: 'bookmark' }, 'Ctrl+D');
   }
   a('fullscreen', s.fullscreen === 'window' ? 'Sair da tela cheia' : 'Tela cheia', cmd({ type: 'view:fullscreen' }), 'F11');
+  if (active && s.split && (s.split.a === active.id || s.split.b === active.id)) {
+    a('split-swap', 'Tela dividida: trocar os lados', cmd({ type: 'split:swap' }));
+    a('split-close', 'Sair da tela dividida', cmd({ type: 'split:close' }));
+  } else if (active && s.tabs.length > 1) {
+    // Com a aba vizinha (a anterior; se for a primeira, a seguinte).
+    const i = s.tabs.findIndex((t) => t.id === active.id);
+    const other = s.tabs[i > 0 ? i - 1 : 1];
+    a('split-open', `Dividir a tela com "${other.title || readableUrl(other.url)}"`, cmd({ type: 'split:open', tabId: other.id }));
+  }
   if (s.reader?.available) a('reader', s.reader.active ? 'Sair do modo leitura' : 'Modo leitura', cmd({ type: 'reader:toggle' }), 'F9');
   if (s.pip?.available) a('pip', s.pip.active ? 'Fechar o vídeo flutuante' : 'Vídeo flutuante (picture-in-picture)', cmd({ type: 'tab:pip' }));
   if (active?.live) {

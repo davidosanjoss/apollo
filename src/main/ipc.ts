@@ -126,6 +126,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return str(c.text, 1000) && typeof c.forward === 'boolean' && typeof c.findNext === 'boolean' ? (c as UiCommand) : null;
     case 'settings:auto-pip': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
     case 'reader:toggle': return { type: c.type } as UiCommand;
+    case 'split:open': return id(c.tabId) ? (c as UiCommand) : null;
+    case 'split:close':
+    case 'split:swap': return { type: c.type } as UiCommand;
+    case 'split:ratio': return typeof c.ratio === 'number' && c.ratio >= 0.15 && c.ratio <= 0.85 ? (c as UiCommand) : null;
     case 'reader:style': {
       const st = c.style as Record<string, unknown> | undefined;
       return st && READER_SIZES.includes(st.size as number) && (st.font === 'serif' || st.font === 'sans')

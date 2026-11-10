@@ -7,6 +7,7 @@ import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
 import { compareVersions } from '../shared/release-notes';
 import { nextReaderSize, type ReaderStyle } from '../reader/template';
+import { clampRatio, SPLIT_GAP } from '../main/split';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
@@ -81,6 +82,7 @@ function render(): void {
   addressTabId = tab?.id ?? null;
 
   renderHome(s);
+  renderSplit(s);
   renderFullscreen(s);
   const readerBtn = $('#reader-btn');
   readerBtn.hidden = !s.reader.available;
@@ -298,6 +300,50 @@ $('#home-search').addEventListener('submit', (e) => {
   q.value = '';
   send({ type: 'tab:navigate', url });
 });
+
+// ------------------------------------------------------------ tela dividida
+
+/** Divisória e faixa da metade ativa, na mesma conta do processo principal. */
+function renderSplit(s: UiState): void {
+  const sp = s.split;
+  const divider = $('#split-divider');
+  const bar = $('#split-bar');
+  for (const t of document.querySelectorAll<HTMLElement>('#tabs .tab')) {
+    t.classList.toggle('in-split', Boolean(sp && (t.dataset.tabId === sp.a || t.dataset.tabId === sp.b)));
+  }
+  const shown = Boolean(sp && (s.activeTabId === sp.a || s.activeTabId === sp.b));
+  divider.hidden = !shown;
+  bar.hidden = !shown;
+  if (!sp || !shown) return;
+  const width = $('#views').clientWidth;
+  const usable = Math.max(0, width - SPLIT_GAP);
+  const wa = Math.round(usable * clampRatio(sp.ratio));
+  divider.style.left = `${wa}px`;
+  const activeLeft = s.activeTabId === sp.a;
+  bar.style.left = activeLeft ? '0px' : `${wa + SPLIT_GAP}px`;
+  bar.style.width = `${activeLeft ? wa : usable - wa}px`;
+}
+
+{
+  const divider = $('#split-divider');
+  let raf = 0;
+  divider.addEventListener('pointerdown', (e) => {
+    divider.setPointerCapture(e.pointerId);
+    divider.classList.add('dragging');
+  });
+  divider.addEventListener('pointermove', (e) => {
+    if (!divider.hasPointerCapture(e.pointerId)) return;
+    const r = $('#views').getBoundingClientRect();
+    const ratio = clampRatio((e.clientX - r.left - SPLIT_GAP / 2) / Math.max(1, r.width - SPLIT_GAP));
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => send({ type: 'split:ratio', ratio }));
+  });
+  const end = (e: PointerEvent) => { divider.classList.remove('dragging'); if (divider.hasPointerCapture(e.pointerId)) divider.releasePointerCapture(e.pointerId); };
+  divider.addEventListener('pointerup', end);
+  divider.addEventListener('pointercancel', end);
+  divider.addEventListener('dblclick', () => send({ type: 'split:ratio', ratio: 0.5 }));
+  new ResizeObserver(() => { if (state) renderSplit(state); }).observe($('#views'));
+}
 
 // ------------------------------------------------------------ tela cheia (F11)
 
