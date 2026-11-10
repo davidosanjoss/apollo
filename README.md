@@ -2,7 +2,7 @@
 
 Navegador pessoal, leve e focado em privacidade, construído sobre Chromium (Electron/castLabs ECS).
 
-> **Status:** protótipo (fase 0). Ainda não é recomendado para uso diário.
+> **Status:** em desenvolvimento ativo (0.x). Já dá para usar no dia a dia, mas pode mudar bastante entre versões.
 
 ## Por que existe
 
@@ -10,10 +10,13 @@ Navegador pessoal, leve e focado em privacidade, construído sobre Chromium (Ele
 - **Leve onde importa.** Só carrega o que você está usando. Abas paradas hibernam (RAM ≈ 0) e recarregam ao clicar. Vídeo e aba ativa usam o que precisarem.
 - **Privacidade como padrão.** Zero telemetria, bloqueio de anúncios e rastreadores (configurável por workspace, site e aba), DNS criptografado.
 - **Compatível.** Google e Microsoft funcionam como no Chrome. Streaming com DRM via Widevine.
+- **O resto que se espera de um navegador.** Favoritos com pastas, histórico, downloads, Bitwarden integrado, painéis laterais (WhatsApp, Teams…), tela dividida, modo leitura, vídeo flutuante, sincronização cifrada entre computadores (Google Drive ou OneDrive).
 
 ## Download
 
-Versões estáveis: [davidosanjoss/apollo-releases](https://github.com/davidosanjoss/apollo-releases/releases). O app avisa quando há atualização (AppImage no Linux, instalador `.exe` no Windows).
+Versões estáveis: [Releases](https://github.com/davidosanjoss/apollo/releases) (AppImage e tar.gz para Linux; instalador `.exe` e zip para Windows). O app avisa quando há versão nova e mostra o que mudou; AppImage e instalador do Windows se atualizam sozinhos.
+
+Para usar como navegador padrão: Configurações → Sobre o Apollo → *Tornar o Apollo o navegador padrão*.
 
 ## Rodando a partir do código
 
@@ -60,4 +63,14 @@ O DNS se configura pela tela de configurações (⚙ na barra lateral). Ela grav
 - [Arquitetura e decisões](docs/ARCHITECTURE.md)
 - [Fase 0: validação técnica](docs/phase-0.md)
 - [Versões e branches](docs/RELEASING.md)
+- [Testes](docs/TESTING.md)
+- [Sincronização](docs/SYNC.md)
 - [Changelog](CHANGELOG.md)
+
+## Contribuindo
+
+Pull requests são bem-vindos: veja [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Licença
+
+[GPL-3.0-or-later](LICENSE). Você pode usar, estudar, modificar e redistribuir o Apollo; versões modificadas distribuídas também precisam ter o código aberto sob a GPL.

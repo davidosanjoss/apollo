@@ -4,10 +4,14 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.8.0] - 2026-11-10
+
 ### Corrigido
+- Ctrl+R num terminal web (busca no histórico de comandos) recarregava a página. Como no Chrome, atalhos que não são do navegador (recarregar, buscar, imprimir, zoom, Ctrl+K…) vão primeiro para a página; se ela não usar, o Apollo age.
 - Login do Google recusado ("This browser or app may not be secure"): ao tirar o "Electron" do user agent, as client hints (navigator.userAgentData e os cabeçalhos sec-ch-ua) sumiam; agora o Apollo se apresenta como um Chromium comum, com marca e versão (sem fingir ser o Google Chrome). Painéis "versão para celular" se apresentam como celular.
 
 ### Adicionado
+- Código aberto sob a GPL-3.0-or-later, com guia de contribuição (CONTRIBUTING.md). As versões agora são publicadas no próprio repositório (davidosanjoss/apollo); o atualizador e o aviso de versão olham para lá (as instalações antigas continuam recebendo pelo apollo-releases durante a transição).
 - Navegador padrão: Configurações → Sobre → "Tornar o Apollo o navegador padrão" (Linux: entrada no menu de aplicativos com ícone e registro pelo xdg-settings, vale para KDE/GNOME; Windows: abre a escolha de aplicativos padrão). Links de outros programas abrem numa aba (na vazia, se houver), com o Apollo aberto ou não.
 - Login do Google: nas páginas de login (accounts.google.com, accounts.youtube.com) o Apollo usa a identificação original do Electron, que o Google aceita — "igual ao Chrome" ou "como Firefox" ele recusa. Nos outros sites continua a identificação limpa. Opção em Configurações → Privacidade (ligada).
 - Senhas por subdomínio: por padrão, cada senha só é oferecida no subdomínio onde foi salva (ex.: moodle.ufmg.br, não sistemas.ufmg.br). Configurações → Bitwarden: voltar ao domínio inteiro. A regra de cada login no Bitwarden tem prioridade; logins novos salvos pelo Apollo já levam a regra.

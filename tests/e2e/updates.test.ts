@@ -53,7 +53,7 @@ describe('versão nova', () => {
     // Esta cópia não se instala sozinha: botão abre a página (e nunca um link de fora do repositório).
     expect(await ui<string>(`document.getElementById('update-go').textContent`)).toBe('Abrir a página de download');
     const s = await app.state();
-    expect(s.updateNotice!.url).toBe(`https://github.com/davidosanjoss/apollo-releases/releases/tag/v99.0.0`);
+    expect(s.updateNotice!.url).toBe(`https://github.com/davidosanjoss/apollo/releases/tag/v99.0.0`);
     expect(s.updateAbout.latest).toBe('99.0.0');
   });
 

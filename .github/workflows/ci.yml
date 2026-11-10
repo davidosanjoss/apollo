@@ -1,12 +1,13 @@
 name: CI
 
-# Repo privado tem cota de minutos (Windows conta em dobro):
-# push na dev → só Linux; PR para main → Linux + Windows.
+# Repositório público (minutos gratuitos): Linux e Windows em todo push na dev e em PRs
+# para a dev (contribuições) e para a main (versões). Os nomes "build (ubuntu-latest)" e
+# "build (windows-latest)" são checagens obrigatórias na proteção da main.
 on:
   push:
     branches: [dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -16,7 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest","windows-latest"]') || fromJSON('["ubuntu-latest"]') }}
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

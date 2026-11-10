@@ -1,6 +1,6 @@
 {
   "name": "apollo",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Navegador pessoal com workspaces de sessão isolada",
   "main": "build/main.js",
   "private": true,
@@ -32,8 +32,8 @@
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
-  "license": "UNLICENSED",
-  "homepage": "https://github.com/davidosanjoss/apollo-releases",
+  "license": "GPL-3.0-or-later",
+  "homepage": "https://github.com/davidosanjoss/apollo",
   "repository": {
     "type": "git",
     "url": "https://github.com/davidosanjoss/apollo.git"
@@ -76,7 +76,7 @@
       {
         "provider": "github",
         "owner": "davidosanjoss",
-        "repo": "apollo-releases",
+        "repo": "apollo",
         "releaseType": "draft"
       }
     ]

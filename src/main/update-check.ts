@@ -7,8 +7,8 @@ import type { UpdateAbout, UpdateNotice } from '../shared/types';
 import { compareVersions, parseNotes } from '../shared/release-notes';
 import type { Store } from './store';
 
-export const RELEASES_API = 'https://api.github.com/repos/davidosanjoss/apollo-releases';
-const RELEASES_PAGE = 'https://github.com/davidosanjoss/apollo-releases/releases/';
+export const RELEASES_API = 'https://api.github.com/repos/davidosanjoss/apollo';
+const RELEASES_PAGE = 'https://github.com/davidosanjoss/apollo/releases/';
 const FIRST_CHECK_DELAY = 15_000;
 const CHECK_INTERVAL = 6 * 60 * 60 * 1000;
 
