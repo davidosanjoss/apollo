@@ -876,7 +876,8 @@ function renderPermissionPrompt(s: UiState): void {
   if (!p) return;
   bar.dataset.promptId = p.id;
   const host = new URL(p.origin).host;
-  $('#permission-text').textContent = `${host} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
+  const where = p.panelId ? ' (painel)' : '';
+  $('#permission-text').textContent = `${host}${where} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
 }
 
 /** Select de 3 estados: herdar (mostrando o valor herdado) / bloquear / permitir. */

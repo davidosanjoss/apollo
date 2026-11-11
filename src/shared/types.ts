@@ -69,7 +69,9 @@ export type PermissionDecision = 'allow' | 'deny';
 
 export interface PermissionPrompt {
   id: string;
-  tabId: string;
+  /** Pedido de uma aba ou de um painel lateral (um dos dois). */
+  tabId: string | null;
+  panelId: string | null;
   origin: string;
   kinds: PermissionKind[];
 }

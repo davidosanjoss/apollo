@@ -87,6 +87,8 @@ export class PermissionManager {
     private readonly store: Store,
     private readonly resolveTab: (wc: WebContents | null) => string | null,
     private readonly onChange: () => void,
+    /** Painéis laterais também pedem (WhatsApp/Teams no painel: câmera, microfone…). */
+    private readonly resolvePanel: (wc: WebContents | null) => string | null = () => null,
   ) {}
 
   attach(ses: Session, workspaceId: string): void {
@@ -101,10 +103,11 @@ export class PermissionManager {
       if (decisions.includes('deny')) return callback(false);
       if (kinds.every((k) => this.allowed(workspaceId, origin, k))) return callback(true);
 
-      // Sem decisão salva: pergunta. Só dá para perguntar se vier de uma aba (não de popup).
+      // Sem decisão salva: pergunta. Só dá para perguntar se vier de uma aba ou painel (não de popup).
       const tabId = this.resolveTab(wc);
-      if (!tabId) return callback(false);
-      this.queue.push({ id: newId(), tabId, origin, kinds, workspaceId, resolve: callback });
+      const panelId = tabId ? null : this.resolvePanel(wc);
+      if (!tabId && !panelId) return callback(false);
+      this.queue.push({ id: newId(), tabId, panelId, origin, kinds, workspaceId, resolve: callback });
       this.onChange();
     });
 
@@ -119,10 +122,20 @@ export class PermissionManager {
     });
   }
 
-  /** Pedido pendente a mostrar para a aba ativa (um de cada vez). */
-  promptFor(tabId: string | null): PermissionPrompt | null {
-    const p = this.queue.find((q) => q.tabId === tabId);
-    return p ? { id: p.id, tabId: p.tabId, origin: p.origin, kinds: p.kinds } : null;
+  /** Pedido pendente a mostrar: o da aba ativa, senão o do painel aberto (um de cada vez). */
+  promptFor(tabId: string | null, panelId: string | null = null): PermissionPrompt | null {
+    const p = (tabId ? this.queue.find((q) => q.tabId === tabId) : undefined)
+      ?? (panelId ? this.queue.find((q) => q.panelId === panelId) : undefined);
+    return p ? { id: p.id, tabId: p.tabId, panelId: p.panelId, origin: p.origin, kinds: p.kinds } : null;
+  }
+
+  /** Painel fechado ou removido: pedidos pendentes dele são negados. */
+  cancelForPanel(panelId: string): void {
+    const dropped = this.queue.filter((q) => q.panelId === panelId);
+    if (dropped.length === 0) return;
+    this.queue = this.queue.filter((q) => q.panelId !== panelId);
+    for (const p of dropped) p.resolve(false);
+    this.onChange();
   }
 
   answer(promptId: string, decision: PermissionDecision, remember: boolean): void {

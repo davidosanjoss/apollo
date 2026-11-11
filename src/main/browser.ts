@@ -69,8 +69,8 @@ import { buildContextMenu, type ContextAction, type ContextInfo, type ContextIte
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
+import type { MemoryReport, ModuleId, PermissionDecision, PermissionKind, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -153,7 +153,7 @@ export class Browser {
     /** null = sem chaveiro do sistema: cookies de sessão não são salvos. */
     private readonly cipher: Cipher | null = null,
   ) {
-    this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push(), (wc) => (wc ? this.panelIdOf(wc) : null));
     this.downloads = new DownloadManager({
       dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
       ask: () => this.store.getKv('download-ask') === '1',
@@ -1304,6 +1304,7 @@ export class Browser {
   }
 
   private destroyPanelView(id: string): void {
+    this.permissions.cancelForPanel(id);
     const v = this.panelViews.get(id);
     if (!v) return;
     if (this.activePanelId === id) { this.win.contentView.removeChildView(v); this.activePanelId = null; }
@@ -1359,20 +1360,23 @@ export class Browser {
         click: this.run({ type: 'panel:set', panelId: id, hibernateMin: m }),
       })) },
       { type: 'separator' },
-      // Painel não tem a barra de permissão das abas: notificações decididas aqui.
+      // Permissões do site do painel (também perguntadas na barra quando o painel está aberto).
       ...(() => {
         const origin = originOf(p.url);
         if (!origin) return [];
-        const cur = this.store.getPermission(p.workspaceId, origin, 'notifications');
-        const set = (decision: PermissionDecision | null) => () => {
-          this.permissions.set(p.workspaceId, origin, 'notifications', decision);
-          this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
-        };
-        return [{ label: 'Notificações', submenu: [
-          { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
-          { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
-          { label: 'Perguntar (o site pede)', type: 'radio' as const, checked: cur === null, click: set(null) },
-        ] }, { type: 'separator' as const }];
+        const kinds: PermissionKind[] = ['media-video', 'media-audio', 'notifications'];
+        return [{ label: 'Permissões', submenu: kinds.map((kind) => {
+          const cur = this.store.getPermission(p.workspaceId, origin, kind);
+          const set = (decision: PermissionDecision | null) => () => {
+            this.permissions.set(p.workspaceId, origin, kind, decision);
+            if (kind === 'notifications') this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
+          };
+          return { label: PERMISSION_LABELS[kind], submenu: [
+            { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
+            { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
+            { label: 'Perguntar', type: 'radio' as const, checked: cur === null, click: set(null) },
+          ] };
+        }) }, { type: 'separator' as const }];
       })(),
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);
@@ -2519,7 +2523,7 @@ export class Browser {
       tabs,
       groups: this.store.listGroups(ws.id).map(({ id, name, color, collapsed }) => ({ id, name, color, collapsed })),
       activeTabId: ws.activeTabId,
-      permissionPrompt: this.permissions.promptFor(ws.activeTabId),
+      permissionPrompt: this.permissions.promptFor(ws.activeTabId, this.activePanelId),
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
