@@ -12,7 +12,8 @@ Obrigado pelo interesse! Correções, melhorias e ideias são bem-vindas.
 
 1. Faça um fork e crie uma branch a partir da `dev` (`feat/…`, `fix/…`).
 2. Abra o pull request **para a `dev`** (a `main` só recebe versões estáveis).
-3. O CI roda tipos e testes. Para quem contribui pela primeira vez, o CI espera a aprovação de um mantenedor.
+3. O CI roda tipos e testes (Linux e Windows). Para quem contribui pela primeira vez, o CI espera a aprovação do mantenedor.
+4. Todo PR precisa da aprovação do mantenedor antes do merge.
 
 ## Ambiente
 

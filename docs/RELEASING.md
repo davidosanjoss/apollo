@@ -29,7 +29,7 @@ O CI roda em todo push na `dev` e em PRs para a `dev` (Linux) e em PRs para a `m
    npm version 0.2.0 --no-git-tag-version
    git commit -am "chore: release v0.2.0"
    ```
-2. Abrir PR `dev → main` e fazer o merge depois que o CI passar.
+2. Abrir PR `dev → main` e fazer o merge depois que o CI passar: `gh pr merge <n> --merge --admin` (o `--admin` dispensa só a aprovação do mantenedor, que é você; o CI continua obrigatório).
 3. Criar a tag **na main**:
    ```bash
    git checkout main && git pull
@@ -63,4 +63,4 @@ Sem isso, o build sai normalmente, só sem a assinatura.
 
 | Repositório | Proteção |
 |---|---|
-| `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |
+| `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). **Todo PR para `dev` ou `main` precisa da aprovação do mantenedor** (`.github/CODEOWNERS`); só o administrador dispensa isso (push direto na `dev`, merge do lançamento). Só o mantenedor tem acesso de escrita: contribuições vêm de forks. PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |
