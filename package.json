@@ -81,7 +81,10 @@
         "repo": "apollo",
         "releaseType": "draft"
       }
-    ]
+    ],
+    "appImage": {
+      "artifactName": "${productName}.${ext}"
+    }
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
