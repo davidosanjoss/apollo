@@ -19,3 +19,9 @@ Partitions/
 .DS_Store
 Thumbs.db
 .cache/
+
+# Artefatos do makepkg (pacote do AUR)
+packaging/aur/src/
+packaging/aur/pkg/
+packaging/aur/*.tar.gz
+packaging/aur/*.pkg.tar.*

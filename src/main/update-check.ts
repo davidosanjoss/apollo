@@ -30,6 +30,8 @@ export class UpdateCheck {
     api: string | null;
     /** Esta instalação se atualiza sozinha (AppImage, Windows). */
     canInstall: boolean;
+    /** Instalado pelo AUR: quem atualiza é o gerenciador de pacotes. */
+    managedBy?: 'aur' | null;
     onChange: () => void;
   }) {}
 
@@ -85,7 +87,7 @@ export class UpdateCheck {
       const skipped = this.opts.store.getKv('update-skip') === version;
       if (!manual && (skipped || this.dismissed.has(version))) return;
       this.notice = { kind: 'available', version, notes: parseNotes(r.body ?? ''), url: this.safeUrl(r.html_url, version),
-        canInstall: this.opts.canInstall };
+        canInstall: this.opts.canInstall, managedBy: this.opts.managedBy ?? null };
     } catch (err) {
       this.failed = true;
       console.warn('[apollo] verificação de versão falhou:', (err as Error).message);

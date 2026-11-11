@@ -21,6 +21,7 @@ import { RELEASES_API, UpdateCheck } from './update-check';
 import { SyncService } from './sync/service';
 import { cleanUserAgent, setNativeUserAgent } from './user-agent';
 import { isDefaultBrowser, launchCommand, makeDefaultLinux, urlFromArgv } from './default-browser';
+import { AUR_DESKTOP_FILE, packageType } from './package-type';
 import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
 import type { SecretBox } from './secret-box';
@@ -321,6 +322,7 @@ app.whenReady().then(async () => {
     store,
     api: process.env.APOLLO_UPDATES_API || (app.isPackaged ? RELEASES_API : null),
     canInstall: canSelfUpdate(),
+    managedBy: packageType(),
     onChange: () => browser.push(),
   });
   browser.updateCheck = updateCheck;
@@ -398,7 +400,10 @@ app.whenReady().then(async () => {
   refreshDefault();
   const makeDefault = async () => {
     try {
-      if (process.platform === 'linux') {
+      if (process.platform === 'linux' && packageType() === 'aur') {
+        // O pacote já instalou a entrada no sistema: só escolhê-la.
+        await makeDefaultLinux({ exec: '', iconSvg: null, desktopFile: AUR_DESKTOP_FILE });
+      } else if (process.platform === 'linux') {
         const icon = path.join(app.getAppPath(), 'assets', 'icon.svg');
         await makeDefaultLinux({
           exec: launchCommand({ appImage: process.env.APPIMAGE, execPath: process.execPath, packaged: app.isPackaged, appPath: app.getAppPath() }),

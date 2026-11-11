@@ -101,3 +101,33 @@ jobs:
           [ -s notes.md ] || echo "Veja o histórico de mudanças." > notes.md
           gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
             --title "Apollo $GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest
+
+  # Pacote do AUR (apollo-browser-bin). Só roda com o secret AUR_SSH_PRIVATE_KEY (ver
+  # docs/RELEASING.md); sem ele, os passos são pulados.
+  aur:
+    needs: publish
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      HAS_AUR: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    steps:
+      - name: Ferramentas
+        if: env.HAS_AUR == 'true'
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
+      - uses: actions/checkout@v4
+        if: env.HAS_AUR == 'true'
+      - name: Publicar no AUR
+        if: env.HAS_AUR == 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          useradd -m builder
+          install -d -m 700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org > /home/builder/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n' > /home/builder/.ssh/config
+          chown -R builder:builder /home/builder/.ssh && chmod 600 /home/builder/.ssh/*
+          cp -r packaging/aur /home/builder/packaging && chown -R builder:builder /home/builder/packaging
+          runuser -u builder -- git clone ssh://aur@aur.archlinux.org/apollo-browser-bin.git /home/builder/aur
+          runuser -u builder -- bash -c "cd /home/builder && packaging/publish.sh '$version' /home/builder/aur"

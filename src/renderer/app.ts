@@ -927,8 +927,10 @@ function renderUpdateNotice(s: UiState): void {
   shownNotice = key;
   const fresh = n.kind === 'available';
   $('#update-dialog-title').textContent = fresh ? `Apollo ${n.version} disponível` : `Novidades do Apollo ${n.version}`;
+  const how = n.managedBy === 'aur' ? 'Atualize pelo seu gerenciador de pacotes (ex.: paru -Syu).'
+    : n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.';
   $('#update-dialog-sub').textContent = fresh
-    ? `Você está na versão ${s.updateAbout.version}. ${n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.'}`
+    ? `Você está na versão ${s.updateAbout.version}. ${how}`
     : 'O Apollo foi atualizado. O que mudou:';
   // Notas: só texto (textContent), agrupadas em listas.
   const nodes: HTMLElement[] = [];
@@ -946,7 +948,7 @@ function renderUpdateNotice(s: UiState): void {
   $('#update-skip').hidden = !fresh;
   $('#update-dismiss').textContent = fresh ? 'Depois' : 'Fechar';
   const go = $<HTMLButtonElement>('#update-go');
-  go.hidden = !fresh;
+  go.hidden = !fresh || n.managedBy === 'aur'; // AUR: o gerenciador de pacotes atualiza
   go.textContent = n.canInstall ? 'Baixar e instalar' : 'Abrir a página de download';
   go.dataset.action = n.canInstall ? 'install' : 'page';
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== updateDialog) d.close();

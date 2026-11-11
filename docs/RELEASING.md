@@ -50,6 +50,19 @@ O app consulta as Releases deste repositório (API pública do GitHub, sem dados
 
 Não precisa de nenhum: o workflow publica com o `GITHUB_TOKEN` dele (permissão `contents: write` só nos jobs de build e publicação). Até a 0.7.0 as versões ficavam num repositório separado (`apollo-releases`, descontinuado); todas foram trazidas para cá.
 
+## AUR (Arch, CachyOS, Manjaro…)
+
+Pacote `apollo-browser-bin` (arquivos em `packaging/aur/`): instala o `tar.gz` da release em `/opt/apollo-browser`, com o comando `apollo-browser`, a entrada no menu e o ícone. O Apollo instalado assim sabe que quem atualiza é o gerenciador de pacotes (aviso de versão sem botão de download).
+
+O job `aur` do workflow `Release` atualiza o pacote a cada versão (versão, hashes, `.SRCINFO`) se existir o secret `AUR_SSH_PRIVATE_KEY`. Configuração, uma vez:
+
+1. Criar conta em <https://aur.archlinux.org/register>.
+2. Gerar uma chave só para isso: `ssh-keygen -t ed25519 -f ~/.ssh/aur -C aur` (sem senha, para o workflow usar).
+3. No AUR, *My Account → SSH Public Key*: colar o conteúdo de `~/.ssh/aur.pub`.
+4. Salvar a chave privada como secret: `gh secret set AUR_SSH_PRIVATE_KEY -R davidosanjoss/apollo < ~/.ssh/aur`.
+
+O primeiro envio cria o pacote no AUR (o workflow faz isso na próxima versão). Para publicar a versão atual na hora, à mão: clonar `ssh://aur@aur.archlinux.org/apollo-browser-bin.git` e rodar `packaging/aur/publish.sh <versão> <pasta do clone>` (com a chave em `~/.ssh/config` para `aur.archlinux.org`).
+
 ## DRM no Windows (opcional)
 
 Para Netflix/Prime funcionarem no Windows, o build precisa de assinatura VMP do castLabs:

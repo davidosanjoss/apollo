@@ -103,6 +103,8 @@ export interface UpdateNotice {
   url: string;
   /** Esta instalação baixa e instala sozinha (senão: abrir a página de download). */
   canInstall: boolean;
+  /** Instalado por um gerenciador de pacotes (AUR): atualizar por ele. */
+  managedBy?: 'aur' | null;
 }
 
 export interface UpdateAbout {

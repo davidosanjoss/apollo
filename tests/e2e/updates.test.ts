@@ -95,3 +95,19 @@ describe('novidades depois de atualizar', () => {
     expect(await dialogOpen()).toBe(false); // só uma vez
   });
 });
+
+describe('instalado pelo AUR', () => {
+  it('a janela de versão nova manda atualizar pelo gerenciador de pacotes (sem botão de download)', async () => {
+    await app.quit();
+    const profile2 = tempProfile();
+    app = await Apollo.launch(profile2.dir, { APOLLO_UPDATES_API: apiUrl, APOLLO_TEST_UPDATE_DELAY_MS: '300', APOLLO_TEST_PACKAGE_TYPE: 'aur' });
+    try {
+      await waitFor(dialogOpen, 'janela de versão nova');
+      expect(await ui<string>(`document.getElementById('update-dialog-sub').textContent`)).toContain('gerenciador de pacotes');
+      expect(await ui<boolean>(`document.getElementById('update-go').hidden`)).toBe(true);
+    } finally {
+      await app.quit();
+      profile2.cleanup();
+    }
+  });
+});

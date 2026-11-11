@@ -5,6 +5,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
+- Pacote no AUR (`apollo-browser-bin`), atualizado automaticamente a cada versão; instalado assim, o aviso de versão nova manda atualizar pelo gerenciador de pacotes.
+- Todo PR para `dev` ou `main` precisa da aprovação do mantenedor (CODEOWNERS + regra do repositório).
 - Ícone do Apollo: um sol de raios ondulados (instaladores, AppImage, janela e menu de aplicativos). Gerado por `scripts/make-icon.mjs`.
 - Ícones nos workspaces: escolha um emoji (grade de sugestões ou cole qualquer um) para aparecer na barra lateral no lugar da primeira letra. Sincroniza entre computadores.
 

@@ -48,11 +48,21 @@ const run = (cmd: string, args: string[]) => new Promise<string>((resolve, rejec
 
 export async function isDefaultBrowser(platform = process.platform): Promise<boolean | null> {
   if (platform !== 'linux') return null; // Windows: não dá para consultar de forma confiável
-  try { return (await run('xdg-settings', ['get', 'default-web-browser'])) === DESKTOP_FILE; } catch { return null; }
+  try {
+    return ['apollo.desktop', 'apollo-browser.desktop'].includes(await run('xdg-settings', ['get', 'default-web-browser']));
+  } catch { return null; }
 }
 
-/** Linux: instala a entrada (e o ícone) do usuário e torna o Apollo o padrão. */
-export async function makeDefaultLinux(o: { exec: string; iconSvg: string | null; home?: string }): Promise<void> {
+/**
+ * Linux: instala a entrada (e o ícone) do usuário e torna o Apollo o padrão. Com
+ * `desktopFile` (instalado por um pacote), só escolhe essa entrada.
+ */
+export async function makeDefaultLinux(o: { exec: string; iconSvg: string | null; home?: string; desktopFile?: string }): Promise<void> {
+  if (o.desktopFile) {
+    await run('xdg-settings', ['set', 'default-web-browser', o.desktopFile]);
+    await run('xdg-mime', ['default', o.desktopFile, 'x-scheme-handler/http', 'x-scheme-handler/https', 'text/html', 'application/xhtml+xml']).catch(() => {});
+    return;
+  }
   const home = o.home ?? os.homedir();
   const apps = path.join(home, '.local/share/applications');
   fs.mkdirSync(apps, { recursive: true });
