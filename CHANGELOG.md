@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.9.0] - 2026-11-11
+
 ### Adicionado
 - Câmera e microfone nos painéis laterais (chamadas no WhatsApp/Teams do painel): o pedido aparece na barra de permissão, marcado "(painel)"; o menu do painel ganhou Permissões (câmera, microfone, notificações: permitir, bloquear ou perguntar).
 - Importar favoritos do Opera, Chrome, Edge, Brave, Chromium e Firefox instalados no computador (Configurações → Favoritos → Importar de outro navegador): cada perfil aparece com a quantidade; os favoritos entram numa pasta nova da barra do workspace escolhido, com as pastas de lá (inclusive a Discagem rápida do Opera).
