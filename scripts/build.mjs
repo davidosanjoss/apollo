@@ -19,6 +19,16 @@ await Promise.all([
     target: 'node24',
     external: ['electron', 'electron-updater'],
   }),
+  // Preload dos service workers dos sites (clique em notificação → mostrar a aba).
+  build({
+    ...common,
+    entryPoints: ['src/preload/service-worker.ts'],
+    outfile: 'build/sw-preload.js',
+    platform: 'node',
+    format: 'cjs',
+    target: 'node24',
+    external: ['electron'],
+  }),
   // Modo leitura: injetado num mundo isolado da página (texto lido pelo processo principal).
   build({
     ...common,

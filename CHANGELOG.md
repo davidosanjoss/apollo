@@ -14,6 +14,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 - Ícones nos workspaces: escolha um emoji (grade de sugestões ou cole qualquer um) para aparecer na barra lateral no lugar da primeira letra. Sincroniza entre computadores.
 
 ### Corrigido
+- Clicar numa notificação criada pelo service worker do site (WhatsApp, Teams e outros usam esse tipo) não levava a lugar nenhum. Agora leva à aba do site (a mais recente, mesmo em outro workspace), ou ao painel dele, ou abre o site numa aba.
 - Monitor de memória mostrava quase o dobro do real (ex.: 5,5 GB com o sistema marcando 2,8 GB): somava a memória residente de cada processo, contando várias vezes o que os processos do Chromium compartilham. Agora usa o PSS no Linux e a memória privada no Windows — o total bate com o gerenciador de tarefas.
 
 ### Removido

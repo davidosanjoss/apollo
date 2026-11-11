@@ -221,6 +221,7 @@ export class Browser {
       this.pipeline.attach(ses, workspaceId);
       this.applySpellcheck(ses);
       this.downloads.attach(ses);
+      this.watchServiceWorkers(ses, workspaceId);
       ses.setDisplayMediaRequestHandler((request, callback) => { void this.handleDisplayMedia(request, callback); });
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
@@ -1443,6 +1444,38 @@ export class Browser {
     const panelId = tabId ? null : this.panelIdOf(wc);
     const ws = tabId ? this.store.getTab(tabId)?.workspaceId : panelId ? this.store.getPanel(panelId)?.workspaceId : undefined;
     return origin && ws ? this.permissions.notificationState(ws, origin) : null;
+  }
+
+  // Notificações criadas pelo service worker do site (registration.showNotification).
+  private readonly swWired = new WeakSet<Electron.ServiceWorkerMain>();
+  /** Testes: service workers em que o preload do Apollo carregou (por escopo). */
+  readonly swPreloaded = new Set<string>();
+
+  private watchServiceWorkers(ses: Session, workspaceId: string): void {
+    ses.registerPreloadScript({ type: 'service-worker', id: 'apollo-sw', filePath: path.join(__dirname, 'sw-preload.js') });
+    ses.serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+      if (runningStatus !== 'starting' && runningStatus !== 'running') return;
+      const worker = ses.serviceWorkers.getWorkerFromVersionID(versionId);
+      if (!worker || this.swWired.has(worker)) return;
+      this.swWired.add(worker);
+      worker.ipc.on('apollo:sw-notification-click', () => this.showFromServiceWorker(workspaceId, worker.scope));
+      worker.ipc.on('apollo:sw-preload-loaded', () => { this.swPreloaded.add(worker.scope); });
+    });
+  }
+
+  /** Clique numa notificação do service worker: a aba do site (a mais recente), o painel, ou uma aba nova. */
+  showFromServiceWorker(workspaceId: string, scope: string): void {
+    const origin = originOf(scope);
+    if (!origin || !this.store.getWorkspace(workspaceId)) return;
+    const tab = this.store.listTabs(workspaceId).filter((t) => originOf(t.url) === origin)
+      .sort((a, b) => (this.lastSeen.get(b.id) ?? 0) - (this.lastSeen.get(a.id) ?? 0))[0];
+    const panel = tab ? null : this.store.listPanels().find((p) => p.workspaceId === workspaceId && originOf(p.url) === origin);
+    if (tab) this.revealTab(tab.id);
+    else if (panel) { if (this.activePanelId !== panel.id) this.openPanel(panel.id); }
+    else { this.switchWorkspace(workspaceId); this.createTab(workspaceId, scope, { activate: true }); }
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
   }
 
   /** Clicou numa notificação: mostra a aba (mesmo em outro workspace) ou abre o painel. */
