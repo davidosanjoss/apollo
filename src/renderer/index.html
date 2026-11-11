@@ -167,7 +167,8 @@
             <h2>Favoritos</h2>
             <label class="remember"><input type="checkbox" id="settings-bookmark-bar"> Mostrar a barra de favoritos (Ctrl+Shift+B)</label>
             <p class="hint">Cada workspace tem os próprios favoritos, com pastas e subpastas.</p>
-            <p><button type="button" id="settings-manage-bookmarks">Gerenciar favoritos…</button></p>
+            <p><button type="button" id="settings-manage-bookmarks">Gerenciar favoritos…</button>
+              <button type="button" id="settings-import-bookmarks">Importar de outro navegador…</button></p>
           </div>
 
           <div class="settings-section" data-section="media" hidden>
@@ -397,6 +398,20 @@
         <span class="spacer"></span>
         <button type="button" id="bookmark-cancel">Cancelar</button>
         <button type="submit" class="primary">Salvar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="import-dialog">
+    <form method="dialog">
+      <h2>Importar favoritos</h2>
+      <p class="hint">De navegadores instalados neste computador (Opera, Chrome, Edge, Brave, Chromium, Firefox). Os favoritos entram numa pasta nova na barra do workspace escolhido, com as pastas de lá.</p>
+      <label>Para o workspace <select id="import-ws"></select></label>
+      <ul id="import-list"></ul>
+      <p id="import-result" class="hint"></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
       </div>
     </form>
   </dialog>

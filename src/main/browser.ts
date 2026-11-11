@@ -54,6 +54,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { countBookmarks, detectSources, readSource, type ImportSource } from './import/bookmarks';
 import { applyUserAgent, setGoogleCompat } from './user-agent';
 import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
@@ -985,6 +986,40 @@ export class Browser {
 
   private bookmarkBarOn(): boolean {
     return this.store.getKv('bookmark-bar') !== '0';
+  }
+
+  // ------------------------------------------------------------ importar favoritos
+
+  private importSources: ImportSource[] = [];
+  private importCounts = new Map<string, number>();
+  private importScanned = false;
+  private importResult: UiState['importResult'] = null;
+
+  /** Procura navegadores com favoritos (a interface só recebe nome e quantidade). */
+  private scanImportSources(): void {
+    const home = process.env.APOLLO_TEST_IMPORT_HOME; // testes: uma pasta pessoal falsa
+    this.importSources = home ? detectSources({ home, platform: process.platform }) : detectSources();
+    this.importCounts.clear();
+    for (const s of this.importSources) {
+      try { this.importCounts.set(s.id, countBookmarks(readSource(s))); } catch { this.importCounts.set(s.id, 0); }
+    }
+    this.importScanned = true;
+    this.importResult = null;
+  }
+
+  private importBookmarks(sourceId: string, workspaceId: string): void {
+    const src = this.importSources.find((s) => s.id === sourceId);
+    if (!src || !this.store.getWorkspace(workspaceId)) return;
+    try {
+      const tree = readSource(src);
+      const count = countBookmarks(tree);
+      if (!count) { this.importResult = { label: src.label, count: 0, error: 'Nenhum favorito para importar.' }; return; }
+      const date = new Date().toLocaleDateString('pt-BR');
+      this.store.importBookmarkTree(workspaceId, `Importados do ${src.label} (${date})`, tree, newId);
+      this.importResult = { label: src.label, count };
+    } catch (err) {
+      this.importResult = { label: src.label, count: 0, error: `Não foi possível ler os favoritos: ${(err as Error).message}` };
+    }
   }
 
   // ------------------------------------------------------------ histórico (janela)
@@ -2139,6 +2174,8 @@ export class Browser {
       case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.parentId, cmd.index); break;
       case 'bookmark:menu': this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
       case 'bookmark:context': this.showBookmarkContext(cmd.bookmarkId, cmd.x, cmd.y); break;
+      case 'import:scan': this.scanImportSources(); break;
+      case 'import:bookmarks': this.importBookmarks(cmd.sourceId, cmd.workspaceId); break;
       case 'settings:bookmark-bar': this.store.setKv('bookmark-bar', cmd.show ? '1' : '0'); break;
       case 'history:view': this.historyQuery = cmd.open ? cmd.query : null; break;
       case 'history:delete': this.store.deleteVisit(this.activeWorkspaceId, cmd.url); break;
@@ -2509,6 +2546,8 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
+      importSources: this.importScanned ? this.importSources.map((x) => ({ id: x.id, label: x.label, count: this.importCounts.get(x.id) ?? 0 })) : null,
+      importResult: this.importResult,
       historyView: this.historyQuery === null ? null : {
         query: this.historyQuery,
         entries: this.store.recentHistory(ws.id, this.historyQuery).map(({ url, title, lastVisit }) => ({ url, title, lastVisit })),

@@ -249,6 +249,9 @@ export interface UiState {
   screenPicker: ScreenPickerInfo | null;
   /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
+  /** Importar favoritos: navegadores encontrados (null = ainda não procurou) e o último resultado. */
+  importSources: { id: string; label: string; count: number }[] | null;
+  importResult: { label: string; count: number; error?: string } | null;
   /** Janela de histórico aberta (null = fechada). */
   historyView: HistoryViewInfo | null;
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
@@ -467,6 +470,9 @@ export type UiCommand =
   /** Botão direito num favorito/pasta da barra (null = na barra vazia). */
   | { type: 'bookmark:context'; bookmarkId: string | null; x: number; y: number }
   | { type: 'settings:bookmark-bar'; show: boolean }
+  /** Procurar navegadores instalados com favoritos / importar de um deles para um workspace. */
+  | { type: 'import:scan' }
+  | { type: 'import:bookmarks'; sourceId: string; workspaceId: string }
   /** Janela de histórico (abrir/fechar e o filtro digitado). */
   | { type: 'history:view'; open: boolean; query: string }
   | { type: 'history:delete'; url: string }

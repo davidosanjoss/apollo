@@ -630,3 +630,19 @@ describe('v13: ícone do workspace', () => {
     expect(snapshot(store, {}).workspaces.a.icon).toBeUndefined(); // sem ícone: igual ao formato antigo
   });
 });
+
+describe('importar árvore de favoritos', () => {
+  it('cria a pasta de importação com a estrutura dentro (pastas e favoritos em ordem)', () => {
+    ws('a');
+    let n = 0;
+    const root = store.importBookmarkTree('a', 'Importados do Opera', [
+      { title: 'Barra de favoritos', children: [{ title: 'Moodle', url: 'https://moodle.ufmg.br/' }, { title: 'Trabalho', children: [{ title: 'Jira', url: 'https://jira.x/' }] }] },
+    ], () => `id${n++}`);
+    const all = store.listBookmarks('a');
+    expect(all.find((b) => b.id === root)).toMatchObject({ title: 'Importados do Opera', folder: true, parentId: null });
+    const bar = store.childBookmarks('a', root);
+    expect(bar.map((b) => b.title)).toEqual(['Barra de favoritos']);
+    expect(store.childBookmarks('a', bar[0].id).map((b) => [b.title, b.folder])).toEqual([['Moodle', false], ['Trabalho', true]]);
+    expect(store.findBookmark('a', 'https://jira.x/')?.title).toBe('Jira');
+  });
+});

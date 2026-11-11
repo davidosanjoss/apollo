@@ -106,6 +106,7 @@ function render(): void {
   renderFind(s);
   renderBookmarks(s);
   renderHistory(s);
+  renderImport(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
@@ -776,6 +777,37 @@ function renderBookmarks(s: UiState): void {
   }));
 }
 
+// ------------------------------------------------------------ importar favoritos
+
+const importDialog = $<HTMLDialogElement>('#import-dialog');
+
+function openImport(): void {
+  if (!state) return;
+  $('#import-list').replaceChildren(el('li', { className: 'empty', textContent: 'Procurando navegadores…' }));
+  $('#import-result').textContent = '';
+  $<HTMLSelectElement>('#import-ws').replaceChildren(...state.workspaces.filter((w) => !w.temporary).map((w) =>
+    el('option', { value: w.id, textContent: `${w.icon ? `${w.icon} ` : ''}${w.name}`, selected: w.id === state!.activeWorkspaceId })));
+  send({ type: 'import:scan' });
+  importDialog.showModal();
+}
+
+function renderImport(s: UiState): void {
+  if (!importDialog.open || !s.importSources) return;
+  $('#import-list').replaceChildren(...(s.importSources.length ? s.importSources.map((src) => {
+    const li = el('li');
+    const b = el('button', { type: 'button', textContent: 'Importar', disabled: src.count === 0 });
+    b.dataset.sourceId = src.id;
+    b.onclick = () => send({ type: 'import:bookmarks', sourceId: src.id, workspaceId: $<HTMLSelectElement>('#import-ws').value });
+    li.append(el('span', { className: 't', textContent: src.label }),
+      el('span', { className: 'n', textContent: src.count === 1 ? '1 favorito' : `${src.count} favoritos` }), b);
+    return li;
+  }) : [el('li', { className: 'empty', textContent: 'Nenhum navegador com favoritos encontrado neste computador.' })]));
+  const r = s.importResult;
+  const out = $('#import-result');
+  out.className = r ? (r.error ? 'fail' : 'ok') : 'hint';
+  out.textContent = !r ? '' : r.error ? r.error : `${r.count} favoritos importados do ${r.label}: estão na pasta "Importados do ${r.label}" na barra de favoritos.`;
+}
+
 // ------------------------------------------------------------ histórico (janela)
 
 const historyDialog = $<HTMLDialogElement>('#history-dialog');
@@ -1138,6 +1170,7 @@ document.addEventListener('keydown', (e) => {
 });
 $('#settings-open-history').onclick = () => openHistory();
 $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
+$('#settings-import-bookmarks').onclick = () => openImport();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });

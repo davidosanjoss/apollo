@@ -5,6 +5,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
+- Importar favoritos do Opera, Chrome, Edge, Brave, Chromium e Firefox instalados no computador (Configurações → Favoritos → Importar de outro navegador): cada perfil aparece com a quantidade; os favoritos entram numa pasta nova da barra do workspace escolhido, com as pastas de lá (inclusive a Discagem rápida do Opera).
+- Modelos de issue (bug, sugestão) e de PR; relato privado de falhas de segurança.
 - Pacote no AUR (`apollo-browser-bin`), atualizado automaticamente a cada versão; instalado assim, o aviso de versão nova manda atualizar pelo gerenciador de pacotes.
 - Todo PR para `dev` ou `main` precisa da aprovação do mantenedor (CODEOWNERS + regra do repositório).
 - Ícone do Apollo: um sol de raios ondulados (instaladores, AppImage, janela e menu de aplicativos). Gerado por `scripts/make-icon.mjs`.

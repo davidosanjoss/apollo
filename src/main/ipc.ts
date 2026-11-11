@@ -179,6 +179,8 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && (c.from === undefined || (num(c.from) && Number.isInteger(c.from))) ? (c as UiCommand) : null;
     case 'bookmark:context': return (c.bookmarkId === null || id(c.bookmarkId)) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'settings:bookmark-bar': return typeof c.show === 'boolean' ? (c as UiCommand) : null;
+    case 'import:scan': return { type: c.type } as UiCommand;
+    case 'import:bookmarks': return str(c.sourceId, 64) && id(c.workspaceId) ? (c as UiCommand) : null;
     case 'history:view': return typeof c.open === 'boolean' && str(c.query, 500) ? (c as UiCommand) : null;
     case 'history:delete': return url(c.url) ? (c as UiCommand) : null;
     case 'bookmark:open':

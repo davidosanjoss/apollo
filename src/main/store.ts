@@ -134,6 +134,9 @@ export function historySearchText(url: string, title: string): string {
   return fold(`${title} ${u}`);
 }
 
+/** Árvore a importar (ver import/bookmarks.ts). */
+export interface ImportTreeNode { title: string; url?: string; children?: ImportTreeNode[] }
+
 export interface Bookmark {
   id: string;
   workspaceId: string;
@@ -569,6 +572,24 @@ export class Store {
     this.db.prepare("INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, '', NULL, ?, ?, ?, 1)")
       .run(f.id, f.workspaceId, f.title, this.nextPosition(f.workspaceId, parentId), Date.now(), parentId);
     return this.getBookmark(f.id)!;
+  }
+
+  /**
+   * Importação: cria a pasta `title` no fim da barra do workspace e, dentro dela, a árvore
+   * inteira (numa transação só). Devolve o id da pasta criada.
+   */
+  importBookmarkTree(workspaceId: string, title: string, nodes: ImportTreeNode[], makeId: () => string): string {
+    return this.tx(() => {
+      const root = this.addFolder({ id: makeId(), workspaceId, title }).id;
+      const insert = (parentId: string, list: ImportTreeNode[]) => list.forEach((n, position) => {
+        const id = makeId();
+        this.db.prepare(`INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder)
+          VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`).run(id, workspaceId, n.title, n.url ?? '', position, Date.now(), parentId, n.url ? 0 : 1);
+        if (!n.url) insert(id, n.children ?? []);
+      });
+      insert(root, nodes);
+      return root;
+    });
   }
 
   /** Pai só se for uma pasta do mesmo workspace; senão, raiz. */
