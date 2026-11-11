@@ -6,7 +6,8 @@ Obrigado pelo interesse! Correções, melhorias e ideias são bem-vindas.
 
 - Para mudanças grandes (funcionalidade nova, troca de arquitetura), abra uma *issue* antes para conversarmos sobre a ideia.
 - Bugs: descreva o que aconteceu, o que esperava e como reproduzir (sistema, versão do Apollo).
-- Falhas de segurança: **não** abra issue pública. Use *Security → Report a vulnerability* no GitHub.
+- Falhas de segurança: **não** abra issue pública. Use *Security → Report a vulnerability* no GitHub (relato privado).
+- Use os modelos de issue (*Bug* ou *Sugestão*) e o checklist do PR.
 
 ## Fluxo
 
