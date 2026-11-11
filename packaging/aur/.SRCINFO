@@ -1,0 +1,27 @@
+pkgbase = apollo-browser-bin
+	pkgdesc = Navegador com workspaces isolados, painéis laterais, bloqueio de anúncios e Bitwarden integrado (Chromium/Electron)
+	pkgver = 0.8.0
+	pkgrel = 1
+	url = https://github.com/davidosanjoss/apollo
+	arch = x86_64
+	license = GPL-3.0-or-later
+	depends = alsa-lib
+	depends = gtk3
+	depends = libsecret
+	depends = libxss
+	depends = nss
+	depends = xdg-utils
+	optdepends = kwallet: guardar a conexão da sincronização e do Bitwarden no KDE
+	optdepends = gnome-keyring: guardar a conexão da sincronização e do Bitwarden no GNOME
+	provides = apollo-browser
+	conflicts = apollo-browser
+	options = !strip
+	options = !debug
+	source = https://github.com/davidosanjoss/apollo/releases/download/v0.8.0/apollo-0.8.0.tar.gz
+	source = apollo-browser.desktop
+	source = apollo-browser.svg
+	sha256sums = 4e21a3aa81e515db850e1bce4c6d4adbe51ba9d192c2cef60b1d83d723a73046
+	sha256sums = f5761e9624926fe8f4efa9b93fa62b6457d23bf631a9474e4fea5a4c587af50f
+	sha256sums = 63b9252a6bb99a14ef88adbf124385e3bc2302995575728a4f63bfc15e38a5d1
+
+pkgname = apollo-browser-bin

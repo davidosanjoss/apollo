@@ -4,7 +4,7 @@
 // (base): o que só mudou de um lado vale; o que mudou dos dois lados fica com a versão
 // deste computador; apagado de um lado e editado do outro fica (não se perde edição).
 
-export interface SyncWorkspace { name: string; color: string; home: string; hibernateAfterMin: number; hiddenHibernateMin: number | null; position: number }
+export interface SyncWorkspace { name: string; color: string; home: string; hibernateAfterMin: number; hiddenHibernateMin: number | null; position: number; icon?: string | null }
 export interface SyncBookmark { workspaceId: string; parentId: string | null; folder: boolean; title: string; url: string; position: number }
 export interface SyncPanel { workspaceId: string; url: string; mobile: boolean; width: number; hibernateMin: number | null; position: number }
 export interface SyncCustomization { name: string; sites: string; css: string; js: string; enabled: boolean }

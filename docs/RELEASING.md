@@ -5,7 +5,6 @@
 | Repositório | Visibilidade | Conteúdo |
 |---|---|---|
 | `davidosanjoss/apollo` | público | Código, branches, CI e as Releases (instaladores e manifestos de atualização) |
-| `davidosanjoss/apollo-releases` | público | Antigo lugar das Releases (até a 0.7.0). Recebe uma cópia de cada versão enquanto houver instalações antigas, que procuram atualização lá |
 
 ## Branches
 
@@ -30,13 +29,13 @@ O CI roda em todo push na `dev` e em PRs para a `dev` (Linux) e em PRs para a `m
    npm version 0.2.0 --no-git-tag-version
    git commit -am "chore: release v0.2.0"
    ```
-2. Abrir PR `dev → main` e fazer o merge depois que o CI passar.
+2. Abrir PR `dev → main` e fazer o merge depois que o CI passar: `gh pr merge <n> --merge --admin` (o `--admin` dispensa só a aprovação do mantenedor, que é você; o CI continua obrigatório).
 3. Criar a tag **na main**:
    ```bash
    git checkout main && git pull
    git tag v0.2.0 && git push origin v0.2.0
    ```
-4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** nas Releases deste repositório e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG. Depois, copia a versão para o `apollo-releases` (transição; precisa do secret `RELEASES_TOKEN`).
+4. O workflow `Release` valida (tag na main e igual ao `package.json`), roda checagem de tipos e **todos os testes** (unitários em Linux e Windows, integração no Linux) — se algo falhar, nada é publicado —, gera AppImage, tar.gz, instalador `.exe` e zip, sobe tudo como **rascunho** nas Releases deste repositório e só publica quando Linux e Windows terminaram, com as notas do CHANGELOG.
 5. Sincronizar: `git checkout dev && git merge main`.
 
 ## Atualização automática
@@ -47,18 +46,22 @@ O app consulta as Releases deste repositório (API pública do GitHub, sem dados
 - `zip` e `tar.gz`: atualização manual.
 - Em desenvolvimento (`npm start`) o atualizador e o aviso ficam desligados (os testes usam `APOLLO_UPDATES_API` com uma API falsa).
 
-## Token da cópia para o apollo-releases (transição)
+## Token de publicação
 
-A publicação neste repositório usa o `GITHUB_TOKEN` do próprio workflow. Só a cópia para o `apollo-releases` precisa do secret `RELEASES_TOKEN` (sem ele, a cópia é pulada):
+Não precisa de nenhum: o workflow publica com o `GITHUB_TOKEN` dele (permissão `contents: write` só nos jobs de build e publicação). Até a 0.7.0 as versões ficavam num repositório separado (`apollo-releases`, descontinuado); todas foram trazidas para cá.
 
-1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
-   - Repository access: **Only select repositories** → `apollo-releases`
-   - Permissions: **Contents: Read and write** (o resto fica sem acesso)
-   - Expiração: a que preferir (anote para renovar)
-2. Salvar como secret neste repositório (o valor é pedido no terminal):
-   ```bash
-   gh secret set RELEASES_TOKEN -R davidosanjoss/apollo
-   ```
+## AUR (Arch, CachyOS, Manjaro…)
+
+Pacote `apollo-browser-bin` (arquivos em `packaging/aur/`): instala o `tar.gz` da release em `/opt/apollo-browser`, com o comando `apollo-browser`, a entrada no menu e o ícone. O Apollo instalado assim sabe que quem atualiza é o gerenciador de pacotes (aviso de versão sem botão de download).
+
+O job `aur` do workflow `Release` atualiza o pacote a cada versão (versão, hashes, `.SRCINFO`) se existir o secret `AUR_SSH_PRIVATE_KEY`. Configuração, uma vez:
+
+1. Criar conta em <https://aur.archlinux.org/register>.
+2. Gerar uma chave só para isso: `ssh-keygen -t ed25519 -f ~/.ssh/aur -C aur` (sem senha, para o workflow usar).
+3. No AUR, *My Account → SSH Public Key*: colar o conteúdo de `~/.ssh/aur.pub`.
+4. Salvar a chave privada como secret: `gh secret set AUR_SSH_PRIVATE_KEY -R davidosanjoss/apollo < ~/.ssh/aur`.
+
+O primeiro envio cria o pacote no AUR (o workflow faz isso na próxima versão). Para publicar a versão atual na hora, à mão: clonar `ssh://aur@aur.archlinux.org/apollo-browser-bin.git` e rodar `packaging/aur/publish.sh <versão> <pasta do clone>` (com a chave em `~/.ssh/config` para `aur.archlinux.org`).
 
 ## DRM no Windows (opcional)
 
@@ -73,5 +76,4 @@ Sem isso, o build sai normalmente, só sem a assinatura.
 
 | Repositório | Proteção |
 |---|---|
-| `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |
-| `apollo-releases` | `main`: sem push direto (só PR), sem force-push, sem apagar, vale para admins. Tags `v*` imutáveis. |
+| `apollo` | `main`: só por PR com o CI verde (Linux e Windows), sem force-push, sem apagar, vale para admins. `dev`: sem force-push, sem apagar. Tags `v*`: imutáveis (não podem ser apagadas nem movidas). **Todo PR para `dev` ou `main` precisa da aprovação do mantenedor** (`.github/CODEOWNERS`); só o administrador dispensa isso (push direto na `dev`, merge do lançamento). Só o mantenedor tem acesso de escrita: contribuições vêm de forks. PRs de quem contribui pela primeira vez esperam aprovação para rodar o CI. |

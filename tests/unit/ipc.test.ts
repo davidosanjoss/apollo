@@ -238,3 +238,11 @@ describe('isTrustedSender', () => {
     expect(isTrustedSender(event({ senderFrame: null }), ui)).toBe(false);
   });
 });
+
+describe('ícone do workspace', () => {
+  it('aceita um emoji (inclusive composto) ou até 2 caracteres; recusa HTML, espaços e textos', async () => {
+    const { validIcon } = await import('../../src/main/ipc');
+    for (const ok of [undefined, null, '🏠', '✈️', '👨‍👩‍👧', '❤️', 'AB']) expect(validIcon(ok)).toBe(true);
+    for (const bad of ['', ' 🏠', '<b>', 'abc', '🏠🏠🏠', 42, 'a"']) expect(validIcon(bad)).toBe(false);
+  });
+});

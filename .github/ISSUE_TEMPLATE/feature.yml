@@ -1,0 +1,28 @@
+name: Sugestão
+description: Uma ideia para o Apollo
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Qual problema isso resolve?
+      description: O que é difícil ou impossível hoje.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Como poderia funcionar
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas
+      description: Como outros navegadores fazem, ou outras soluções que você considerou.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacidade
+      options:
+        - label: A ideia não envia dados do usuário para serviços externos (ou explico abaixo por que precisa)

@@ -17,6 +17,7 @@ function fakeSession() {
 }
 
 const TAB_WC = { id: 1 } as unknown as WebContents;
+const PANEL_WC = { id: 2 } as unknown as WebContents;
 const POPUP_WC = { id: 2 } as unknown as WebContents;
 const SITE = 'https://site.com';
 
@@ -37,7 +38,7 @@ beforeEach(() => {
   store.createWorkspace({ id: 'w', name: 'W', color: '#000000', home: '' });
   store.createWorkspace({ id: 'outro', name: 'O', color: '#000000', home: '' });
   onChange = vi.fn<() => void>();
-  pm = new PermissionManager(store, (wc) => (wc === TAB_WC ? 'tab1' : null), onChange);
+  pm = new PermissionManager(store, (wc) => (wc === TAB_WC ? 'tab1' : null), onChange, (wc) => (wc === PANEL_WC ? 'p1' : null));
   const fake = fakeSession();
   h = fake.h;
   pm.attach(fake.ses, 'w');
@@ -189,5 +190,27 @@ describe('painel do site', () => {
   it('não aparece em páginas internas', () => {
     expect(pm.siteInfo('w', 'apollo://home')).toBeNull();
     expect(pm.siteInfo('w', null)).toBeNull();
+  });
+});
+
+// Pedido do usuário: câmera e microfone no WhatsApp/Teams dos painéis (antes, negado direto).
+describe('pedidos de painéis', () => {
+  it('painel pergunta na barra (com o painel aberto); a aba ativa tem prioridade', () => {
+    const r = request('media', { mediaTypes: ['video', 'audio'] }, PANEL_WC);
+    expect(r.value).toBe('pendente');
+    expect(pm.promptFor(null, 'p1')).toMatchObject({ tabId: null, panelId: 'p1', kinds: ['media-video', 'media-audio'] });
+    expect(pm.promptFor('tab1', null)).toBeNull(); // painel fechado: não aparece
+    request('geolocation');
+    expect(pm.promptFor('tab1', 'p1')?.tabId).toBe('tab1');
+    pm.answer(pm.promptFor(null, 'p1')!.id, 'allow', true);
+    expect(r.value).toBe(true);
+    expect(store.getPermission('w', SITE, 'media-video')).toBe('allow');
+  });
+
+  it('fechar o painel nega o pedido pendente; popup (nem aba nem painel) continua negado', () => {
+    const r = request('media', { mediaTypes: ['audio'] }, PANEL_WC);
+    pm.cancelForPanel('p1');
+    expect(r.value).toBe(false);
+    expect(request('media', { mediaTypes: ['audio'] }, { id: 9 } as unknown as WebContents).value).toBe(false);
   });
 });

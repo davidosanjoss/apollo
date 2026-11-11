@@ -10,6 +10,8 @@ export interface WorkspaceInfo {
   hibernateAfterMin: number;
   /** Quando o workspace não está na tela (null = mesma regra, -1 = ao sair dele). */
   hiddenHibernateMin: number | null;
+  /** Ícone na barra lateral (emoji); null = primeira letra do nome. */
+  icon: string | null;
   /** Padrões do workspace (null = segue o global). */
   privacy: Record<PrivacyFeature, boolean | null>;
   /** Sessão só em memória; some ao fechar o Apollo. */
@@ -67,7 +69,9 @@ export type PermissionDecision = 'allow' | 'deny';
 
 export interface PermissionPrompt {
   id: string;
-  tabId: string;
+  /** Pedido de uma aba ou de um painel lateral (um dos dois). */
+  tabId: string | null;
+  panelId: string | null;
   origin: string;
   kinds: PermissionKind[];
 }
@@ -101,6 +105,8 @@ export interface UpdateNotice {
   url: string;
   /** Esta instalação baixa e instala sozinha (senão: abrir a página de download). */
   canInstall: boolean;
+  /** Instalado por um gerenciador de pacotes (AUR): atualizar por ele. */
+  managedBy?: 'aur' | null;
 }
 
 export interface UpdateAbout {
@@ -245,6 +251,9 @@ export interface UiState {
   screenPicker: ScreenPickerInfo | null;
   /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
+  /** Importar favoritos: navegadores encontrados (null = ainda não procurou) e o último resultado. */
+  importSources: { id: string; label: string; count: number }[] | null;
+  importResult: { label: string; count: number; error?: string } | null;
   /** Janela de histórico aberta (null = fechada). */
   historyView: HistoryViewInfo | null;
   /** Favorito da página da aba ativa (estrela acesa), ou null. */
@@ -463,6 +472,9 @@ export type UiCommand =
   /** Botão direito num favorito/pasta da barra (null = na barra vazia). */
   | { type: 'bookmark:context'; bookmarkId: string | null; x: number; y: number }
   | { type: 'settings:bookmark-bar'; show: boolean }
+  /** Procurar navegadores instalados com favoritos / importar de um deles para um workspace. */
+  | { type: 'import:scan' }
+  | { type: 'import:bookmarks'; sourceId: string; workspaceId: string }
   /** Janela de histórico (abrir/fechar e o filtro digitado). */
   | { type: 'history:view'; open: boolean; query: string }
   | { type: 'history:delete'; url: string }
@@ -494,8 +506,8 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean; icon?: string | null }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; icon?: string | null }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }

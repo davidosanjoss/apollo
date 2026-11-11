@@ -16,6 +16,8 @@ Navegador pessoal, leve e focado em privacidade, construído sobre Chromium (Ele
 
 Versões estáveis: [Releases](https://github.com/davidosanjoss/apollo/releases) (AppImage e tar.gz para Linux; instalador `.exe` e zip para Windows). O app avisa quando há versão nova e mostra o que mudou; AppImage e instalador do Windows se atualizam sozinhos.
 
+Arch, CachyOS, Manjaro e derivados: pelo AUR, `paru -S apollo-browser-bin` (ou `yay`); as atualizações vêm com o resto do sistema.
+
 Para usar como navegador padrão: Configurações → Sobre o Apollo → *Tornar o Apollo o navegador padrão*.
 
 ## Rodando a partir do código

@@ -1,0 +1,37 @@
+# Maintainer: davidosanjoss <https://github.com/davidosanjoss>
+# Pacote do AUR: https://aur.archlinux.org/packages/apollo-browser-bin
+# Atualizado a cada versão por packaging/aur/update.sh (ou pelo workflow Release).
+pkgname=apollo-browser-bin
+_pkgname=apollo-browser
+pkgver=0.8.0
+pkgrel=1
+pkgdesc='Navegador com workspaces isolados, painéis laterais, bloqueio de anúncios e Bitwarden integrado (Chromium/Electron)'
+arch=('x86_64')
+url='https://github.com/davidosanjoss/apollo'
+license=('GPL-3.0-or-later')
+depends=('alsa-lib' 'gtk3' 'libsecret' 'libxss' 'nss' 'xdg-utils')
+optdepends=('kwallet: guardar a conexão da sincronização e do Bitwarden no KDE'
+            'gnome-keyring: guardar a conexão da sincronização e do Bitwarden no GNOME')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=('!strip' '!debug')
+source=("$url/releases/download/v$pkgver/apollo-$pkgver.tar.gz"
+        "$_pkgname.desktop"
+        "$_pkgname.svg")
+sha256sums=('4e21a3aa81e515db850e1bce4c6d4adbe51ba9d192c2cef60b1d83d723a73046'
+            'f5761e9624926fe8f4efa9b93fa62b6457d23bf631a9474e4fea5a4c587af50f'
+            '63b9252a6bb99a14ef88adbf124385e3bc2302995575728a4f63bfc15e38a5d1')
+
+package() {
+  install -d "$pkgdir/opt/$_pkgname"
+  cp -a "apollo-$pkgver/." "$pkgdir/opt/$_pkgname/"
+  # Sandbox do Chromium precisa de setuid root quando o sistema não tem user namespaces.
+  chmod 4755 "$pkgdir/opt/$_pkgname/chrome-sandbox"
+  # O Apollo vê que foi instalado pelo AUR: avisa de versão nova sem mandar baixar.
+  echo 'aur' > "$pkgdir/opt/$_pkgname/resources/package-type"
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_pkgname/apollo" "$pkgdir/usr/bin/$_pkgname"
+  install -Dm644 "$_pkgname.desktop" "$pkgdir/usr/share/applications/$_pkgname.desktop"
+  install -Dm644 "$_pkgname.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/$_pkgname.svg"
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/licenses/$pkgname/README" <<< 'GPL-3.0-or-later: https://github.com/davidosanjoss/apollo/blob/main/LICENSE'
+}

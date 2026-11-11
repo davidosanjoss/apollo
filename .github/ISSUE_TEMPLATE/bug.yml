@@ -1,0 +1,60 @@
+name: Bug
+description: Algo não funciona como deveria
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por relatar! Antes, veja se já não existe uma issue igual.
+        **Falha de segurança?** Não abra issue pública: use *Security → Report a vulnerability*.
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu
+      description: E o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Como reproduzir
+      description: Passo a passo, de preferência com um site público.
+      placeholder: |
+        1. Abrir …
+        2. Clicar em …
+        3. Ver o erro …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão do Apollo
+      description: Configurações → Sobre o Apollo.
+      placeholder: "0.8.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Como instalou
+      options:
+        - AppImage (Linux)
+        - tar.gz (Linux)
+        - AUR (Arch/CachyOS…)
+        - Instalador .exe (Windows)
+        - zip (Windows)
+        - Rodando do código (npm start)
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Sistema
+      placeholder: "CachyOS, KDE Plasma 6 (Wayland) / Windows 11"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Mais detalhes
+      description: Prints, log do terminal (`apollo` aberto pelo terminal mostra erros), `npm run diagnose`. Tire dados pessoais (e-mails, endereços internos).

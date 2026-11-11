@@ -29,6 +29,10 @@ const id = (v: unknown): v is string => str(v, 64) && (v as string).length > 0;
 const groupColor = (v: unknown) => typeof v === 'string' && (GROUP_COLORS as readonly string[]).includes(v);
 const hibernate = (v: unknown) => v === undefined || (HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
 const hiddenHibernate = (v: unknown) => v === undefined || (HIDDEN_HIBERNATE_OPTIONS_MIN as readonly unknown[]).includes(v);
+/** Ícone do workspace: um emoji/símbolo curto (no máximo 2 "caracteres" visíveis), ou null. */
+export const validIcon = (v: unknown) => v === undefined || v === null
+  || (typeof v === 'string' && v.trim() === v && v.length > 0 && v.length <= 16
+    && [...new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(v)].length <= 2 && !/[<>&"'\s]/.test(v));
 const password = (v: unknown) => typeof v === 'string' && v.length > 0 && v.length <= 1024;
 const url = (v: unknown): v is string => str(v, 8192) && /^(https?|apollo|file|about|data|view-source):/i.test(v as string);
 
@@ -51,10 +55,10 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'workspace:delete': return str(c.workspaceId, 64) ? (c as UiCommand) : null;
     case 'workspace:create':
       return str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192) && hibernate(c.hibernateAfterMin)
-        && hiddenHibernate(c.hiddenHibernateMin) && (c.temporary === undefined || typeof c.temporary === 'boolean') ? (c as UiCommand) : null;
+        && hiddenHibernate(c.hiddenHibernateMin) && (c.temporary === undefined || typeof c.temporary === 'boolean') && validIcon(c.icon) ? (c as UiCommand) : null;
     case 'workspace:update':
       return str(c.workspaceId, 64) && str(c.name, 30) && (c.name as string).trim() && color(c.color) && str(c.home, 8192)
-        && hibernate(c.hibernateAfterMin) && hiddenHibernate(c.hiddenHibernateMin) ? (c as UiCommand) : null;
+        && hibernate(c.hibernateAfterMin) && hiddenHibernate(c.hiddenHibernateMin) && validIcon(c.icon) ? (c as UiCommand) : null;
     case 'tab:move':
       return id(c.tabId) && num(c.index) && Number.isInteger(c.index)
         && (c.groupId === undefined || c.groupId === null || id(c.groupId)) ? (c as UiCommand) : null;
@@ -175,6 +179,8 @@ export function parseCommand(raw: unknown): UiCommand | null {
         && (c.from === undefined || (num(c.from) && Number.isInteger(c.from))) ? (c as UiCommand) : null;
     case 'bookmark:context': return (c.bookmarkId === null || id(c.bookmarkId)) && num(c.x) && num(c.y) ? (c as UiCommand) : null;
     case 'settings:bookmark-bar': return typeof c.show === 'boolean' ? (c as UiCommand) : null;
+    case 'import:scan': return { type: c.type } as UiCommand;
+    case 'import:bookmarks': return str(c.sourceId, 64) && id(c.workspaceId) ? (c as UiCommand) : null;
     case 'history:view': return typeof c.open === 'boolean' && str(c.query, 500) ? (c as UiCommand) : null;
     case 'history:delete': return url(c.url) ? (c as UiCommand) : null;
     case 'bookmark:open':

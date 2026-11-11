@@ -18,6 +18,8 @@ export interface Workspace {
   /** Sessão só em memória; o workspace some ao fechar o Apollo. */
   temporary: boolean;
   activeTabId: string | null;
+  /** Ícone na barra lateral (emoji); null = primeira letra do nome. */
+  icon: string | null;
 }
 
 export interface Tab {
@@ -56,6 +58,7 @@ const toWorkspace = (r: Row): Workspace => ({
   hiddenHibernateMin: r.hidden_hibernate_min === undefined ? 10 : (r.hidden_hibernate_min as number | null),
   temporary: r.temporary === 1,
   activeTabId: (r.active_tab_id as string | null) ?? null,
+  icon: (r.icon as string | null | undefined) ?? null,
 });
 
 const toTab = (r: Row): Tab => ({
@@ -131,6 +134,9 @@ export function historySearchText(url: string, title: string): string {
   return fold(`${title} ${u}`);
 }
 
+/** Árvore a importar (ver import/bookmarks.ts). */
+export interface ImportTreeNode { title: string; url?: string; children?: ImportTreeNode[] }
+
 export interface Bookmark {
   id: string;
   workspaceId: string;
@@ -203,14 +209,14 @@ export class Store {
     return row ? toWorkspace(row) : null;
   }
 
-  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'hiddenHibernateMin' | 'temporary'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }): Workspace {
+  createWorkspace(ws: Omit<Workspace, 'activeTabId' | 'hibernateAfterMin' | 'hiddenHibernateMin' | 'temporary' | 'icon'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }): Workspace {
     const { next } = this.db.prepare('SELECT COALESCE(MAX(position) + 1, 0) AS next FROM workspaces').get() as { next: number };
     const hibernateAfterMin = ws.hibernateAfterMin ?? 30;
     const temporary = ws.temporary ?? false;
     const hiddenHibernateMin = ws.hiddenHibernateMin === undefined ? 10 : ws.hiddenHibernateMin;
     this.db.prepare('INSERT INTO workspaces(id, name, color, home, position, created_at, hibernate_after_min, hidden_hibernate_min, temporary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(ws.id, ws.name, ws.color, ws.home, next, Date.now(), hibernateAfterMin, hiddenHibernateMin, temporary ? 1 : 0);
-    return { ...ws, hibernateAfterMin, hiddenHibernateMin, temporary, activeTabId: null };
+    return { ...ws, hibernateAfterMin, hiddenHibernateMin, temporary, activeTabId: null, icon: null };
   }
 
   /** Apaga os workspaces temporários (ao abrir e ao fechar). Devolve os ids apagados. */
@@ -218,6 +224,11 @@ export class Store {
     const ids = (this.db.prepare('SELECT id FROM workspaces WHERE temporary = 1').all() as Row[]).map((r) => r.id as string);
     for (const id of ids) this.deleteWorkspace(id);
     return ids;
+  }
+
+  /** Ícone do workspace (null = volta para a primeira letra). */
+  setWorkspaceIcon(id: string, icon: string | null): void {
+    this.db.prepare('UPDATE workspaces SET icon = ? WHERE id = ?').run(icon, id);
   }
 
   updateWorkspace(id: string, patch: Pick<Workspace, 'name' | 'color' | 'home'> & { hibernateAfterMin?: number; hiddenHibernateMin?: number | null }): void {
@@ -561,6 +572,24 @@ export class Store {
     this.db.prepare("INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder) VALUES (?, ?, ?, '', NULL, ?, ?, ?, 1)")
       .run(f.id, f.workspaceId, f.title, this.nextPosition(f.workspaceId, parentId), Date.now(), parentId);
     return this.getBookmark(f.id)!;
+  }
+
+  /**
+   * Importação: cria a pasta `title` no fim da barra do workspace e, dentro dela, a árvore
+   * inteira (numa transação só). Devolve o id da pasta criada.
+   */
+  importBookmarkTree(workspaceId: string, title: string, nodes: ImportTreeNode[], makeId: () => string): string {
+    return this.tx(() => {
+      const root = this.addFolder({ id: makeId(), workspaceId, title }).id;
+      const insert = (parentId: string, list: ImportTreeNode[]) => list.forEach((n, position) => {
+        const id = makeId();
+        this.db.prepare(`INSERT INTO bookmarks(id, workspace_id, title, url, favicon, position, created_at, parent_id, is_folder)
+          VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)`).run(id, workspaceId, n.title, n.url ?? '', position, Date.now(), parentId, n.url ? 0 : 1);
+        if (!n.url) insert(id, n.children ?? []);
+      });
+      insert(root, nodes);
+      return root;
+    });
   }
 
   /** Pai só se for uma pasta do mesmo workspace; senão, raiz. */

@@ -4,7 +4,7 @@ import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, 
 import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
-import { memoryBreakdown } from './memory';
+import { memoryBreakdown, parseSmapsRollup } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
 import { privacyMenu } from './privacy/menu';
@@ -54,6 +54,7 @@ import { captureSessionCookies, restoreSessionCookies, type Cipher } from './ses
 import { newId } from './store';
 import { normalizeUrl } from '../shared/url';
 import { DownloadManager } from './downloads';
+import { countBookmarks, detectSources, readSource, type ImportSource } from './import/bookmarks';
 import { applyUserAgent, setGoogleCompat } from './user-agent';
 import { clampRatio, parseSplits, partnerOf, splitBounds, type Split } from './split';
 import { parseReaderStyle, type ReaderStyle } from '../reader/template';
@@ -68,8 +69,8 @@ import { buildContextMenu, type ContextAction, type ContextInfo, type ContextIte
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, PermissionDecision, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
-import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN } from '../shared/types';
+import type { MemoryReport, ModuleId, PermissionDecision, PermissionKind, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 
 
@@ -152,7 +153,7 @@ export class Browser {
     /** null = sem chaveiro do sistema: cookies de sessão não são salvos. */
     private readonly cipher: Cipher | null = null,
   ) {
-    this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push());
+    this.permissions = new PermissionManager(store, (wc) => this.tabIdOf(wc), () => this.push(), (wc) => (wc ? this.panelIdOf(wc) : null));
     this.downloads = new DownloadManager({
       dir: () => process.env.APOLLO_TEST_DOWNLOADS_DIR || app.getPath('downloads'),
       ask: () => this.store.getKv('download-ask') === '1',
@@ -220,6 +221,7 @@ export class Browser {
       this.pipeline.attach(ses, workspaceId);
       this.applySpellcheck(ses);
       this.downloads.attach(ses);
+      this.watchServiceWorkers(ses, workspaceId);
       ses.setDisplayMediaRequestHandler((request, callback) => { void this.handleDisplayMedia(request, callback); });
       this.sessionsReady.set(workspaceId, this.restoreCookies(ses, workspaceId));
     }
@@ -537,8 +539,27 @@ export class Browser {
     this.hibernationSoon.unref();
   }
 
+  /** PSS por processo (Linux), lido em segundo plano; o cálculo usa o último valor lido. */
+  private pssKb = new Map<number, number>();
+
+  /** Relê o PSS de cada processo do Apollo (assíncrono: não trava a interface). */
+  private async refreshPss(): Promise<void> {
+    if (process.platform !== 'linux') return;
+    const next = new Map<number, number>();
+    await Promise.all(app.getAppMetrics().map(async (m) => {
+      const r = parseSmapsRollup(await fs.promises.readFile(`/proc/${m.pid}/smaps_rollup`, 'utf8').catch(() => ''));
+      if (r) next.set(m.pid, r.pssKb);
+    }));
+    this.pssKb = next;
+  }
+
   private memoryInfo(): { usedMb: number; otherMb: number; perTab: Map<string, number> } {
-    const metrics = app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, workingSetKb: m.memory.workingSetSize }));
+    const metrics = app.getAppMetrics().map((m) => ({
+      pid: m.pid,
+      type: m.type,
+      // Linux: PSS; Windows: memória privada; senão (ou sem leitura ainda), o residente.
+      workingSetKb: this.pssKb.get(m.pid) ?? (m.memory as { privateBytes?: number }).privateBytes ?? m.memory.workingSetSize,
+    }));
     const tabs = [...this.views].map(([tabId, view]) => ({
       tabId,
       pid: view.webContents.isDestroyed() ? null : view.webContents.getOSProcessId(),
@@ -968,6 +989,40 @@ export class Browser {
     return this.store.getKv('bookmark-bar') !== '0';
   }
 
+  // ------------------------------------------------------------ importar favoritos
+
+  private importSources: ImportSource[] = [];
+  private importCounts = new Map<string, number>();
+  private importScanned = false;
+  private importResult: UiState['importResult'] = null;
+
+  /** Procura navegadores com favoritos (a interface só recebe nome e quantidade). */
+  private scanImportSources(): void {
+    const home = process.env.APOLLO_TEST_IMPORT_HOME; // testes: uma pasta pessoal falsa
+    this.importSources = home ? detectSources({ home, platform: process.platform }) : detectSources();
+    this.importCounts.clear();
+    for (const s of this.importSources) {
+      try { this.importCounts.set(s.id, countBookmarks(readSource(s))); } catch { this.importCounts.set(s.id, 0); }
+    }
+    this.importScanned = true;
+    this.importResult = null;
+  }
+
+  private importBookmarks(sourceId: string, workspaceId: string): void {
+    const src = this.importSources.find((s) => s.id === sourceId);
+    if (!src || !this.store.getWorkspace(workspaceId)) return;
+    try {
+      const tree = readSource(src);
+      const count = countBookmarks(tree);
+      if (!count) { this.importResult = { label: src.label, count: 0, error: 'Nenhum favorito para importar.' }; return; }
+      const date = new Date().toLocaleDateString('pt-BR');
+      this.store.importBookmarkTree(workspaceId, `Importados do ${src.label} (${date})`, tree, newId);
+      this.importResult = { label: src.label, count };
+    } catch (err) {
+      this.importResult = { label: src.label, count: 0, error: `Não foi possível ler os favoritos: ${(err as Error).message}` };
+    }
+  }
+
   // ------------------------------------------------------------ histórico (janela)
 
   private historyQuery: string | null = null; // null = janela fechada
@@ -1250,6 +1305,7 @@ export class Browser {
   }
 
   private destroyPanelView(id: string): void {
+    this.permissions.cancelForPanel(id);
     const v = this.panelViews.get(id);
     if (!v) return;
     if (this.activePanelId === id) { this.win.contentView.removeChildView(v); this.activePanelId = null; }
@@ -1305,20 +1361,23 @@ export class Browser {
         click: this.run({ type: 'panel:set', panelId: id, hibernateMin: m }),
       })) },
       { type: 'separator' },
-      // Painel não tem a barra de permissão das abas: notificações decididas aqui.
+      // Permissões do site do painel (também perguntadas na barra quando o painel está aberto).
       ...(() => {
         const origin = originOf(p.url);
         if (!origin) return [];
-        const cur = this.store.getPermission(p.workspaceId, origin, 'notifications');
-        const set = (decision: PermissionDecision | null) => () => {
-          this.permissions.set(p.workspaceId, origin, 'notifications', decision);
-          this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
-        };
-        return [{ label: 'Notificações', submenu: [
-          { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
-          { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
-          { label: 'Perguntar (o site pede)', type: 'radio' as const, checked: cur === null, click: set(null) },
-        ] }, { type: 'separator' as const }];
+        const kinds: PermissionKind[] = ['media-video', 'media-audio', 'notifications'];
+        return [{ label: 'Permissões', submenu: kinds.map((kind) => {
+          const cur = this.store.getPermission(p.workspaceId, origin, kind);
+          const set = (decision: PermissionDecision | null) => () => {
+            this.permissions.set(p.workspaceId, origin, kind, decision);
+            if (kind === 'notifications') this.panelViews.get(id)?.webContents.reload(); // o site relê a permissão
+          };
+          return { label: PERMISSION_LABELS[kind], submenu: [
+            { label: 'Permitir', type: 'radio' as const, checked: cur === 'allow', click: set('allow') },
+            { label: 'Bloquear', type: 'radio' as const, checked: cur === 'deny', click: set('deny') },
+            { label: 'Perguntar', type: 'radio' as const, checked: cur === null, click: set(null) },
+          ] };
+        }) }, { type: 'separator' as const }];
       })(),
       { label: 'Remover painel', click: this.run({ type: 'panel:remove', panelId: id }) },
     ], x, y);
@@ -1332,8 +1391,8 @@ export class Browser {
 
   toggleMemoryMonitor(open: boolean): void {
     if (open && !this.memoryTimer) {
-      this.refreshMemory();
-      this.memoryTimer = setInterval(() => this.refreshMemory(), 2000);
+      this.memoryTimer = setInterval(() => void this.refreshMemory(), 2000);
+      void this.refreshMemory();
     } else if (!open && this.memoryTimer) {
       clearInterval(this.memoryTimer);
       this.memoryTimer = null;
@@ -1342,7 +1401,9 @@ export class Browser {
     this.push();
   }
 
-  private refreshMemory(): void {
+  private async refreshMemory(): Promise<void> {
+    await this.refreshPss();
+    if (!this.memoryTimer) return; // o monitor fechou enquanto lia
     const { usedMb, otherMb, perTab } = this.memoryInfo();
     const tabs = this.store.listWorkspaces().flatMap((ws) => this.store.listTabs(ws.id).map((t) => ({
       id: t.id,
@@ -1383,6 +1444,38 @@ export class Browser {
     const panelId = tabId ? null : this.panelIdOf(wc);
     const ws = tabId ? this.store.getTab(tabId)?.workspaceId : panelId ? this.store.getPanel(panelId)?.workspaceId : undefined;
     return origin && ws ? this.permissions.notificationState(ws, origin) : null;
+  }
+
+  // Notificações criadas pelo service worker do site (registration.showNotification).
+  private readonly swWired = new WeakSet<Electron.ServiceWorkerMain>();
+  /** Testes: service workers em que o preload do Apollo carregou (por escopo). */
+  readonly swPreloaded = new Set<string>();
+
+  private watchServiceWorkers(ses: Session, workspaceId: string): void {
+    ses.registerPreloadScript({ type: 'service-worker', id: 'apollo-sw', filePath: path.join(__dirname, 'sw-preload.js') });
+    ses.serviceWorkers.on('running-status-changed', ({ versionId, runningStatus }) => {
+      if (runningStatus !== 'starting' && runningStatus !== 'running') return;
+      const worker = ses.serviceWorkers.getWorkerFromVersionID(versionId);
+      if (!worker || this.swWired.has(worker)) return;
+      this.swWired.add(worker);
+      worker.ipc.on('apollo:sw-notification-click', () => this.showFromServiceWorker(workspaceId, worker.scope));
+      worker.ipc.on('apollo:sw-preload-loaded', () => { this.swPreloaded.add(worker.scope); });
+    });
+  }
+
+  /** Clique numa notificação do service worker: a aba do site (a mais recente), o painel, ou uma aba nova. */
+  showFromServiceWorker(workspaceId: string, scope: string): void {
+    const origin = originOf(scope);
+    if (!origin || !this.store.getWorkspace(workspaceId)) return;
+    const tab = this.store.listTabs(workspaceId).filter((t) => originOf(t.url) === origin)
+      .sort((a, b) => (this.lastSeen.get(b.id) ?? 0) - (this.lastSeen.get(a.id) ?? 0))[0];
+    const panel = tab ? null : this.store.listPanels().find((p) => p.workspaceId === workspaceId && originOf(p.url) === origin);
+    if (tab) this.revealTab(tab.id);
+    else if (panel) { if (this.activePanelId !== panel.id) this.openPanel(panel.id); }
+    else { this.switchWorkspace(workspaceId); this.createTab(workspaceId, scope, { activate: true }); }
+    if (this.win.isMinimized()) this.win.restore();
+    this.win.show();
+    this.win.focus();
   }
 
   /** Clicou numa notificação: mostra a aba (mesmo em outro workspace) ou abre o painel. */
@@ -1442,6 +1535,7 @@ export class Browser {
       memoryUsedMb: usedMb,
     }, now, minuteMs());
     for (const id of ids) this.hibernateTab(id);
+    if (limit) void this.refreshPss(); // números atuais para a próxima rodada
     return ids;
   }
 
@@ -1961,14 +2055,16 @@ export class Browser {
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null): void {
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null, icon?: string | null): void {
     const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin, temporary });
+    if (icon) this.store.setWorkspaceIcon(ws.id, icon);
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
 
-  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null): void {
+  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null, icon?: string | null): void {
     this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin });
+    if (icon !== undefined) this.store.setWorkspaceIcon(workspaceId, icon);
     this.push();
   }
 
@@ -2115,6 +2211,8 @@ export class Browser {
       case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.parentId, cmd.index); break;
       case 'bookmark:menu': this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
       case 'bookmark:context': this.showBookmarkContext(cmd.bookmarkId, cmd.x, cmd.y); break;
+      case 'import:scan': this.scanImportSources(); break;
+      case 'import:bookmarks': this.importBookmarks(cmd.sourceId, cmd.workspaceId); break;
       case 'settings:bookmark-bar': this.store.setKv('bookmark-bar', cmd.show ? '1' : '0'); break;
       case 'history:view': this.historyQuery = cmd.open ? cmd.query : null; break;
       case 'history:delete': this.store.deleteVisit(this.activeWorkspaceId, cmd.url); break;
@@ -2148,8 +2246,8 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin); break;
-      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin, cmd.icon); break;
+      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin, cmd.icon); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
       case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
@@ -2452,13 +2550,13 @@ export class Browser {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
         const full = this.store.getWorkspace(id)!;
-        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary };
+        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary, icon: full.icon };
       }),
       activeWorkspaceId: ws.id,
       tabs,
       groups: this.store.listGroups(ws.id).map(({ id, name, color, collapsed }) => ({ id, name, color, collapsed })),
       activeTabId: ws.activeTabId,
-      permissionPrompt: this.permissions.promptFor(ws.activeTabId),
+      permissionPrompt: this.permissions.promptFor(ws.activeTabId, this.activePanelId),
       sitePermissions: this.permissions.siteInfo(ws.id, active?.url ?? null),
       sitePrivacy: this.sitePrivacy(active),
       update: this.update,
@@ -2485,6 +2583,8 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
+      importSources: this.importScanned ? this.importSources.map((x) => ({ id: x.id, label: x.label, count: this.importCounts.get(x.id) ?? 0 })) : null,
+      importResult: this.importResult,
       historyView: this.historyQuery === null ? null : {
         query: this.historyQuery,
         entries: this.store.recentHistory(ws.id, this.historyQuery).map(({ url, title, lastVisit }) => ({ url, title, lastVisit })),

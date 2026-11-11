@@ -58,7 +58,8 @@ function render(): void {
     return b;
   }, (b, w, i) => {
     b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '') + (w.temporary ? ' temporary' : '');
-    b.textContent = w.name.trim().charAt(0).toUpperCase() || '?';
+    b.textContent = w.icon || w.name.trim().charAt(0).toUpperCase() || '?';
+    b.classList.toggle('has-icon', Boolean(w.icon));
     b.title = `${w.name}${w.temporary ? ' (temporário)' : ''}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
     b.style.background = w.color;
   });
@@ -105,6 +106,7 @@ function render(): void {
   renderFind(s);
   renderBookmarks(s);
   renderHistory(s);
+  renderImport(s);
   renderPermissionPrompt(s);
   renderSavePrompt(s);
   renderSiteBar(s);
@@ -775,6 +777,37 @@ function renderBookmarks(s: UiState): void {
   }));
 }
 
+// ------------------------------------------------------------ importar favoritos
+
+const importDialog = $<HTMLDialogElement>('#import-dialog');
+
+function openImport(): void {
+  if (!state) return;
+  $('#import-list').replaceChildren(el('li', { className: 'empty', textContent: 'Procurando navegadores…' }));
+  $('#import-result').textContent = '';
+  $<HTMLSelectElement>('#import-ws').replaceChildren(...state.workspaces.filter((w) => !w.temporary).map((w) =>
+    el('option', { value: w.id, textContent: `${w.icon ? `${w.icon} ` : ''}${w.name}`, selected: w.id === state!.activeWorkspaceId })));
+  send({ type: 'import:scan' });
+  importDialog.showModal();
+}
+
+function renderImport(s: UiState): void {
+  if (!importDialog.open || !s.importSources) return;
+  $('#import-list').replaceChildren(...(s.importSources.length ? s.importSources.map((src) => {
+    const li = el('li');
+    const b = el('button', { type: 'button', textContent: 'Importar', disabled: src.count === 0 });
+    b.dataset.sourceId = src.id;
+    b.onclick = () => send({ type: 'import:bookmarks', sourceId: src.id, workspaceId: $<HTMLSelectElement>('#import-ws').value });
+    li.append(el('span', { className: 't', textContent: src.label }),
+      el('span', { className: 'n', textContent: src.count === 1 ? '1 favorito' : `${src.count} favoritos` }), b);
+    return li;
+  }) : [el('li', { className: 'empty', textContent: 'Nenhum navegador com favoritos encontrado neste computador.' })]));
+  const r = s.importResult;
+  const out = $('#import-result');
+  out.className = r ? (r.error ? 'fail' : 'ok') : 'hint';
+  out.textContent = !r ? '' : r.error ? r.error : `${r.count} favoritos importados do ${r.label}: estão na pasta "Importados do ${r.label}" na barra de favoritos.`;
+}
+
 // ------------------------------------------------------------ histórico (janela)
 
 const historyDialog = $<HTMLDialogElement>('#history-dialog');
@@ -843,7 +876,8 @@ function renderPermissionPrompt(s: UiState): void {
   if (!p) return;
   bar.dataset.promptId = p.id;
   const host = new URL(p.origin).host;
-  $('#permission-text').textContent = `${host} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
+  const where = p.panelId ? ' (painel)' : '';
+  $('#permission-text').textContent = `${host}${where} quer usar: ${p.kinds.map((k) => PERMISSION_LABELS[k]).join(', ')}`;
 }
 
 /** Select de 3 estados: herdar (mostrando o valor herdado) / bloquear / permitir. */
@@ -926,8 +960,10 @@ function renderUpdateNotice(s: UiState): void {
   shownNotice = key;
   const fresh = n.kind === 'available';
   $('#update-dialog-title').textContent = fresh ? `Apollo ${n.version} disponível` : `Novidades do Apollo ${n.version}`;
+  const how = n.managedBy === 'aur' ? 'Atualize pelo seu gerenciador de pacotes (ex.: paru -Syu).'
+    : n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.';
   $('#update-dialog-sub').textContent = fresh
-    ? `Você está na versão ${s.updateAbout.version}. ${n.canInstall ? 'A atualização baixa em segundo plano; suas abas voltam depois de reiniciar.' : 'Baixe a versão nova na página de lançamentos.'}`
+    ? `Você está na versão ${s.updateAbout.version}. ${how}`
     : 'O Apollo foi atualizado. O que mudou:';
   // Notas: só texto (textContent), agrupadas em listas.
   const nodes: HTMLElement[] = [];
@@ -945,7 +981,7 @@ function renderUpdateNotice(s: UiState): void {
   $('#update-skip').hidden = !fresh;
   $('#update-dismiss').textContent = fresh ? 'Depois' : 'Fechar';
   const go = $<HTMLButtonElement>('#update-go');
-  go.hidden = !fresh;
+  go.hidden = !fresh || n.managedBy === 'aur'; // AUR: o gerenciador de pacotes atualiza
   go.textContent = n.canInstall ? 'Baixar e instalar' : 'Abrir a página de download';
   go.dataset.action = n.canInstall ? 'install' : 'page';
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) if (d !== updateDialog) d.close();
@@ -1006,12 +1042,35 @@ const hiddenLabel = (m: number | null) => (m === null ? 'Mesma regra de cima' : 
 $('#ws-hidden-hibernate').replaceChildren(...HIDDEN_HIBERNATE_OPTIONS_MIN.map((m) =>
   el('option', { value: m === null ? '' : String(m), textContent: hiddenLabel(m) })));
 
+// --- ícone do workspace (emoji)
+
+const WS_ICONS = ['🏠', '💼', '🎓', '🏦', '💻', '🎮', '🛒', '✈️', '🎵', '📚', '❤️', '⭐', '🔬', '🏥', '📷', '🧪', '☀️', '🐱', '⚽', '💰'];
+const wsIconInput = $<HTMLInputElement>('#ws-icon');
+function markIcon(): void {
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#ws-icon-grid button')) b.classList.toggle('selected', b.textContent === wsIconInput.value);
+}
+$('#ws-icon-grid').replaceChildren(...WS_ICONS.map((icon) => {
+  const b = el('button', { type: 'button', textContent: icon, title: icon });
+  b.setAttribute('role', 'radio');
+  b.onclick = () => { wsIconInput.value = icon; markIcon(); };
+  return b;
+}));
+wsIconInput.addEventListener('input', markIcon);
+$('#ws-icon-none').onclick = () => { wsIconInput.value = ''; markIcon(); };
+/** Só o primeiro "caractere visível" (um emoji pode ter vários códigos). */
+const firstGrapheme = (s: string) => {
+  const first = [...new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(s.trim())][0]?.segment ?? '';
+  return first && !/[<>&"'\s]/.test(first) ? first : '';
+};
+
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
   $('#ws-dialog-title').textContent = ws ? 'Editar workspace' : 'Novo workspace';
   $<HTMLInputElement>('#ws-name').value = ws?.name ?? '';
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
+  wsIconInput.value = ws?.icon ?? '';
+  markIcon();
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
   const hidden = ws ? ws.hiddenHibernateMin : 10;
   $<HTMLSelectElement>('#ws-hidden-hibernate').value = hidden === null ? '' : String(hidden);
@@ -1038,9 +1097,10 @@ $('#ws-form').addEventListener('submit', () => {
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   const hiddenRaw = $<HTMLSelectElement>('#ws-hidden-hibernate').value;
   const hiddenHibernateMin = hiddenRaw === '' ? null : Number(hiddenRaw);
+  const icon = firstGrapheme(wsIconInput.value) || null;
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin, icon });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked, icon });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();
@@ -1111,6 +1171,7 @@ document.addEventListener('keydown', (e) => {
 });
 $('#settings-open-history').onclick = () => openHistory();
 $('#settings-manage-bookmarks').onclick = () => openBookmarkManager();
+$('#settings-import-bookmarks').onclick = () => openImport();
 $('#settings-open-vault').onclick = () => openVault();
 $<HTMLInputElement>('#settings-bookmark-bar').onchange = (e) => send({ type: 'settings:bookmark-bar', show: (e.target as HTMLInputElement).checked });
 $('#about-check').onclick = () => send({ type: 'update:check' });

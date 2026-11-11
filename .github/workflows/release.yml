@@ -1,17 +1,12 @@
 name: Release
 
 # Tag vX.Y.Z na main → builds Linux/Windows publicados nas Releases deste repositório.
-# Transição: também copia a versão para davidosanjoss/apollo-releases (onde as instalações
-# até a 0.7.0 procuram atualização), se o secret RELEASES_TOKEN existir.
 on:
   push:
     tags: ['v*.*.*']
 
 permissions:
   contents: read
-
-env:
-  MIRROR_REPO: davidosanjoss/apollo-releases
 
 jobs:
   validate:
@@ -95,8 +90,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    env:
-      HAS_MIRROR: ${{ secrets.RELEASES_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Publicar release com notas do CHANGELOG
@@ -108,14 +101,33 @@ jobs:
           [ -s notes.md ] || echo "Veja o histórico de mudanças." > notes.md
           gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
             --title "Apollo $GITHUB_REF_NAME" --notes-file notes.md --draft=false --latest
-      # Transição: instalações até a 0.7.0 procuram atualização no apollo-releases.
-      # Remover quando ninguém mais usar essas versões.
-      - name: Copiar para o apollo-releases (transição)
-        if: env.HAS_MIRROR == 'true'
+
+  # Pacote do AUR (apollo-browser-bin). Só roda com o secret AUR_SSH_PRIVATE_KEY (ver
+  # docs/RELEASING.md); sem ele, os passos são pulados.
+  aur:
+    needs: publish
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      HAS_AUR: ${{ secrets.AUR_SSH_PRIVATE_KEY != '' }}
+    steps:
+      - name: Ferramentas
+        if: env.HAS_AUR == 'true'
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
+      - uses: actions/checkout@v4
+        if: env.HAS_AUR == 'true'
+      - name: Publicar no AUR
+        if: env.HAS_AUR == 'true'
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
-          mkdir assets
-          GH_TOKEN="${{ secrets.GITHUB_TOKEN }}" gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -D assets
-          gh release create "$GITHUB_REF_NAME" -R "$MIRROR_REPO" --title "Apollo $GITHUB_REF_NAME" \
-            --notes-file notes.md --latest assets/*
+          version="${GITHUB_REF_NAME#v}"
+          useradd -m builder
+          install -d -m 700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org > /home/builder/.ssh/known_hosts 2>/dev/null
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n' > /home/builder/.ssh/config
+          chown -R builder:builder /home/builder/.ssh && chmod 600 /home/builder/.ssh/*
+          cp -r packaging/aur /home/builder/packaging && chown -R builder:builder /home/builder/packaging
+          runuser -u builder -- git clone ssh://aur@aur.archlinux.org/apollo-browser-bin.git /home/builder/aur
+          runuser -u builder -- bash -c "cd /home/builder && packaging/publish.sh '$version' /home/builder/aur"

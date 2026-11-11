@@ -1,6 +1,6 @@
 {
   "name": "apollo",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Navegador pessoal com workspaces de sessão isolada",
   "main": "build/main.js",
   "private": true,
@@ -59,13 +59,15 @@
         "tar.gz"
       ],
       "category": "Network",
-      "executableName": "apollo"
+      "executableName": "apollo",
+      "icon": "assets/icon.png"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": false,

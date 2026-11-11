@@ -6,13 +6,15 @@ Obrigado pelo interesse! Correções, melhorias e ideias são bem-vindas.
 
 - Para mudanças grandes (funcionalidade nova, troca de arquitetura), abra uma *issue* antes para conversarmos sobre a ideia.
 - Bugs: descreva o que aconteceu, o que esperava e como reproduzir (sistema, versão do Apollo).
-- Falhas de segurança: **não** abra issue pública. Use *Security → Report a vulnerability* no GitHub.
+- Falhas de segurança: **não** abra issue pública. Use *Security → Report a vulnerability* no GitHub (relato privado).
+- Use os modelos de issue (*Bug* ou *Sugestão*) e o checklist do PR.
 
 ## Fluxo
 
 1. Faça um fork e crie uma branch a partir da `dev` (`feat/…`, `fix/…`).
 2. Abra o pull request **para a `dev`** (a `main` só recebe versões estáveis).
-3. O CI roda tipos e testes. Para quem contribui pela primeira vez, o CI espera a aprovação de um mantenedor.
+3. O CI roda tipos e testes (Linux e Windows). Para quem contribui pela primeira vez, o CI espera a aprovação do mantenedor.
+4. Todo PR precisa da aprovação do mantenedor antes do merge.
 
 ## Ambiente
 

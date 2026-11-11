@@ -126,6 +126,33 @@ export async function startSite(): Promise<TestSite> {
           <footer>Rodapé do site</footer>
           <script>setInterval(() => { document.body && document.body.insertAdjacentText('beforeend', 'INVADIU'); }, 300);</script>`, 'Notícia');
       }
+      case '/sw.js':
+        // Service worker de teste: mostra notificação quando a página pede; "clique falso" a pedido.
+        res.writeHead(200, { 'content-type': 'text/javascript' });
+        return res.end(`self.addEventListener('message', async (e) => {
+          if (e.data === 'mostrar') await self.registration.showNotification('Nova mensagem', { body: 'Oi', tag: 'msg' });
+          if (e.data === 'clique-falso') self.dispatchEvent(new Event('notificationclick'));
+          e.source && e.source.postMessage('ok:' + e.data);
+        });
+        self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));`);
+      case '/sw-page':
+        return html(`<p>mensagens</p><script>
+          window.respostas = [];
+          navigator.serviceWorker.addEventListener('message', (e) => window.respostas.push(e.data));
+          window.pronto = navigator.serviceWorker.register('/sw.js').then(() => navigator.serviceWorker.ready).then(() => true);
+          window.mandar = (m) => navigator.serviceWorker.ready.then((r) => r.active.postMessage(m));
+          </script>`, u.searchParams.get('title') ?? 'Mensageiro');
+      case '/camera':
+        // Como uma chamada do WhatsApp/Teams: pede câmera e microfone.
+        return html(`<button id="ligar" style="width:200px;height:60px">Ligar</button><script>
+          window.resultado = 'nada';
+          document.getElementById('ligar').onclick = async () => {
+            try {
+              const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+              window.resultado = 'ok:' + s.getTracks().map((t) => t.kind).sort().join('+');
+              s.getTracks().forEach((t) => t.stop());
+            } catch (e) { window.resultado = 'erro:' + e.name; }
+          };</script>`, 'Chamada');
       case '/terminal':
         // Como um terminal web (xterm.js): usa Ctrl+R (busca no histórico) e não deixa o navegador agir.
         return html(`<pre id="saida" style="min-height:200px">$ </pre><script>
