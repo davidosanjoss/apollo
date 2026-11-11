@@ -43,6 +43,25 @@ StartupNotify=true
 `;
 }
 
+/**
+ * O AppImage mudou de caminho (atualização): a entrada do Apollo no menu (criada pelo botão
+ * "navegador padrão") passa a apontar para o arquivo novo. Também conserta, ao abrir, uma
+ * entrada que aponta para um AppImage que não existe mais. Devolve true se mudou algo.
+ */
+export function retargetDesktopEntry(newAppImage: string, oldAppImage: string | null = null, home = os.homedir(),
+  exists: (p: string) => boolean = fs.existsSync): boolean {
+  const file = path.join(home, '.local/share/applications', DESKTOP_FILE);
+  let text: string;
+  try { text = fs.readFileSync(file, 'utf8'); } catch { return false; }
+  const m = /^Exec="([^"]+\.AppImage)"(.*)$/m.exec(text);
+  if (!m) return false; // não é a entrada de um AppImage (ex.: instalado pelo AUR)
+  const current = m[1].replace(/\\(["\\`$])/g, '$1');
+  const stale = oldAppImage ? current === oldAppImage : !exists(current);
+  if (!stale || current === newAppImage) return false;
+  fs.writeFileSync(file, text.replace(m[0], `Exec=${launchCommand({ appImage: newAppImage, execPath: '', packaged: true, appPath: '' })}${m[2]}`));
+  return true;
+}
+
 const run = (cmd: string, args: string[]) => new Promise<string>((resolve, reject) =>
   execFile(cmd, args, { timeout: 8000 }, (err, stdout) => (err ? reject(err) : resolve(stdout.trim()))));
 

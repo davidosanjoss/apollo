@@ -20,7 +20,7 @@ import { canSelfUpdate, setupUpdater } from './updater';
 import { RELEASES_API, UpdateCheck } from './update-check';
 import { SyncService } from './sync/service';
 import { cleanUserAgent, setNativeUserAgent } from './user-agent';
-import { isDefaultBrowser, launchCommand, makeDefaultLinux, urlFromArgv } from './default-browser';
+import { isDefaultBrowser, launchCommand, makeDefaultLinux, retargetDesktopEntry, urlFromArgv } from './default-browser';
 import { AUR_DESKTOP_FILE, packageType } from './package-type';
 import { clientHintsModule } from './client-hints';
 import { runDiagnose } from './diagnose';
@@ -394,6 +394,11 @@ app.whenReady().then(async () => {
   // Aberto já com um link.
   const startUrl = urlFromArgv(process.argv);
   if (startUrl) win.webContents.once('did-finish-load', () => browser.openExternalUrl(startUrl));
+
+  // AppImage que mudou de lugar ou de nome: a entrada do menu volta a apontar para ele.
+  if (process.platform === 'linux' && process.env.APPIMAGE) {
+    try { retargetDesktopEntry(process.env.APPIMAGE); } catch { /* sem entrada: nada a fazer */ }
+  }
 
   // Navegador padrão: estado e o botão nas Configurações.
   const refreshDefault = () => void isDefaultBrowser().then((v) => { browser.defaultBrowser = v; browser.push(); });
