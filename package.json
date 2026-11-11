@@ -59,13 +59,15 @@
         "tar.gz"
       ],
       "category": "Network",
-      "executableName": "apollo"
+      "executableName": "apollo",
+      "icon": "assets/icon.png"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "icon": "assets/icon.png"
     },
     "nsis": {
       "oneClick": false,

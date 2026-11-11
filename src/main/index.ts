@@ -112,6 +112,8 @@ function readWindowState(store: Store) {
 function createWindow(store: Store, box: SecretBox | null): { win: BrowserWindow; browser: Browser } {
   const state = readWindowState(store);
   const win = new BrowserWindow({
+    // Ícone da janela (X11/Windows; no Wayland vale o da entrada .desktop).
+    icon: path.join(app.getAppPath(), 'assets', 'icon.png'),
     ...(state.x !== undefined ? { x: state.x, y: state.y } : {}),
     width: state.width,
     height: state.height,

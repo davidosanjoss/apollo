@@ -382,6 +382,15 @@ body.fullscreen #bookmark-bar { display: none !important; }
   border-radius: 8px; background: rgba(0, 0, 0, .8); color: #fff; font-size: 13px; pointer-events: none; }
 #fullscreen-hint kbd { border: 1px solid #777; border-radius: 4px; padding: 0 5px; }
 
+/* ícone do workspace */
+.ws-icon-field { margin-bottom: 12px; }
+.ws-icon-field .field-label { display: block; color: var(--muted); margin-bottom: 6px; }
+#ws-icon-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; margin-bottom: 6px; }
+#ws-icon-grid button { font-size: 18px; padding: 4px 0; border: 2px solid transparent; border-radius: 6px; background: var(--panel-2); cursor: pointer; }
+#ws-icon-grid button.selected { border-color: var(--accent); }
+#ws-icon { width: 140px; }
+.ws-btn.has-icon { font-size: 18px; }
+
 #home-view { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 6px; background: var(--bg); padding-bottom: 12vh; }
 #home-greeting, #home-date { margin: 0; color: var(--muted); font-size: 16px; }

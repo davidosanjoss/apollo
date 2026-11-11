@@ -4,7 +4,7 @@ import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, 
 import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
-import { memoryBreakdown } from './memory';
+import { memoryBreakdown, parseSmapsRollup } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
 import type { BlockKind } from './privacy/blocker';
 import { privacyMenu } from './privacy/menu';
@@ -537,8 +537,27 @@ export class Browser {
     this.hibernationSoon.unref();
   }
 
+  /** PSS por processo (Linux), lido em segundo plano; o cálculo usa o último valor lido. */
+  private pssKb = new Map<number, number>();
+
+  /** Relê o PSS de cada processo do Apollo (assíncrono: não trava a interface). */
+  private async refreshPss(): Promise<void> {
+    if (process.platform !== 'linux') return;
+    const next = new Map<number, number>();
+    await Promise.all(app.getAppMetrics().map(async (m) => {
+      const r = parseSmapsRollup(await fs.promises.readFile(`/proc/${m.pid}/smaps_rollup`, 'utf8').catch(() => ''));
+      if (r) next.set(m.pid, r.pssKb);
+    }));
+    this.pssKb = next;
+  }
+
   private memoryInfo(): { usedMb: number; otherMb: number; perTab: Map<string, number> } {
-    const metrics = app.getAppMetrics().map((m) => ({ pid: m.pid, type: m.type, workingSetKb: m.memory.workingSetSize }));
+    const metrics = app.getAppMetrics().map((m) => ({
+      pid: m.pid,
+      type: m.type,
+      // Linux: PSS; Windows: memória privada; senão (ou sem leitura ainda), o residente.
+      workingSetKb: this.pssKb.get(m.pid) ?? (m.memory as { privateBytes?: number }).privateBytes ?? m.memory.workingSetSize,
+    }));
     const tabs = [...this.views].map(([tabId, view]) => ({
       tabId,
       pid: view.webContents.isDestroyed() ? null : view.webContents.getOSProcessId(),
@@ -1332,8 +1351,8 @@ export class Browser {
 
   toggleMemoryMonitor(open: boolean): void {
     if (open && !this.memoryTimer) {
-      this.refreshMemory();
-      this.memoryTimer = setInterval(() => this.refreshMemory(), 2000);
+      this.memoryTimer = setInterval(() => void this.refreshMemory(), 2000);
+      void this.refreshMemory();
     } else if (!open && this.memoryTimer) {
       clearInterval(this.memoryTimer);
       this.memoryTimer = null;
@@ -1342,7 +1361,9 @@ export class Browser {
     this.push();
   }
 
-  private refreshMemory(): void {
+  private async refreshMemory(): Promise<void> {
+    await this.refreshPss();
+    if (!this.memoryTimer) return; // o monitor fechou enquanto lia
     const { usedMb, otherMb, perTab } = this.memoryInfo();
     const tabs = this.store.listWorkspaces().flatMap((ws) => this.store.listTabs(ws.id).map((t) => ({
       id: t.id,
@@ -1442,6 +1463,7 @@ export class Browser {
       memoryUsedMb: usedMb,
     }, now, minuteMs());
     for (const id of ids) this.hibernateTab(id);
+    if (limit) void this.refreshPss(); // números atuais para a próxima rodada
     return ids;
   }
 
@@ -1961,14 +1983,16 @@ export class Browser {
     this.showActive();
   }
 
-  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null): void {
+  createWorkspace(name: string, color: string, home: string, hibernateAfterMin?: number, temporary?: boolean, hiddenHibernateMin?: number | null, icon?: string | null): void {
     const ws = this.store.createWorkspace({ id: newId(), name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin, temporary });
+    if (icon) this.store.setWorkspaceIcon(ws.id, icon);
     this.ensureHasTab(ws.id);
     this.switchWorkspace(ws.id);
   }
 
-  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null): void {
+  updateWorkspace(workspaceId: string, name: string, color: string, home: string, hibernateAfterMin?: number, hiddenHibernateMin?: number | null, icon?: string | null): void {
     this.store.updateWorkspace(workspaceId, { name, color, home: home || APOLLO_HOME, hibernateAfterMin, hiddenHibernateMin });
+    if (icon !== undefined) this.store.setWorkspaceIcon(workspaceId, icon);
     this.push();
   }
 
@@ -2148,8 +2172,8 @@ export class Browser {
       case 'group:menu': this.showGroupMenu(cmd.groupId, cmd.x, cmd.y); break;
       case 'group:new-tab': this.newTabInGroup(cmd.groupId); break;
       case 'workspace:switch': this.switchWorkspace(cmd.workspaceId); break;
-      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin); break;
-      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin); break;
+      case 'workspace:create': this.createWorkspace(cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.temporary, cmd.hiddenHibernateMin, cmd.icon); break;
+      case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin, cmd.icon); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
       case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
@@ -2452,7 +2476,7 @@ export class Browser {
       workspaces: this.store.listWorkspaces().map(({ id, name, color, home, hibernateAfterMin }) => {
         const w = this.store.getPrivacyLayers(id, null).workspace;
         const full = this.store.getWorkspace(id)!;
-        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary };
+        return { id, name, color, home, hibernateAfterMin, hiddenHibernateMin: full.hiddenHibernateMin, privacy: nullable(w), temporary: full.temporary, icon: full.icon };
       }),
       activeWorkspaceId: ws.id,
       tabs,

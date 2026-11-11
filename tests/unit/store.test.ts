@@ -611,3 +611,22 @@ describe('sincronização: ponte com os dados locais', () => {
     expect(hooks.deleted).toEqual(['B']);
   });
 });
+
+describe('v13: ícone do workspace', () => {
+  it('guarda, troca e volta para a letra (null); sincroniza', async () => {
+    ws('a');
+    expect(store.getWorkspace('a')!.icon).toBeNull();
+    store.setWorkspaceIcon('a', '🎓');
+    expect(store.getWorkspace('a')!.icon).toBe('🎓');
+    const { snapshot, apply } = await import('../../src/main/sync/local');
+    const { diff } = await import('../../src/main/sync/merge');
+    const snap = snapshot(store, {});
+    expect(snap.workspaces.a.icon).toBe('🎓');
+    const remote = structuredClone(snap);
+    remote.workspaces.a.icon = '💼';
+    apply(store, {}, remote, diff(snap, remote), { deleteWorkspace: () => {}, removePanel: () => {}, reloadPanel: () => {}, done: () => {} });
+    expect(store.getWorkspace('a')!.icon).toBe('💼');
+    store.setWorkspaceIcon('a', null);
+    expect(snapshot(store, {}).workspaces.a.icon).toBeUndefined(); // sem ícone: igual ao formato antigo
+  });
+});

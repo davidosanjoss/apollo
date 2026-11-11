@@ -58,7 +58,8 @@ function render(): void {
     return b;
   }, (b, w, i) => {
     b.className = 'ws-btn' + (w.id === ws.id ? ' active' : '') + (w.temporary ? ' temporary' : '');
-    b.textContent = w.name.trim().charAt(0).toUpperCase() || '?';
+    b.textContent = w.icon || w.name.trim().charAt(0).toUpperCase() || '?';
+    b.classList.toggle('has-icon', Boolean(w.icon));
     b.title = `${w.name}${w.temporary ? ' (temporário)' : ''}${i < 9 ? ` (Ctrl+${i + 1})` : ''}\nClique direito para editar`;
     b.style.background = w.color;
   });
@@ -1006,12 +1007,35 @@ const hiddenLabel = (m: number | null) => (m === null ? 'Mesma regra de cima' : 
 $('#ws-hidden-hibernate').replaceChildren(...HIDDEN_HIBERNATE_OPTIONS_MIN.map((m) =>
   el('option', { value: m === null ? '' : String(m), textContent: hiddenLabel(m) })));
 
+// --- ícone do workspace (emoji)
+
+const WS_ICONS = ['🏠', '💼', '🎓', '🏦', '💻', '🎮', '🛒', '✈️', '🎵', '📚', '❤️', '⭐', '🔬', '🏥', '📷', '🧪', '☀️', '🐱', '⚽', '💰'];
+const wsIconInput = $<HTMLInputElement>('#ws-icon');
+function markIcon(): void {
+  for (const b of document.querySelectorAll<HTMLButtonElement>('#ws-icon-grid button')) b.classList.toggle('selected', b.textContent === wsIconInput.value);
+}
+$('#ws-icon-grid').replaceChildren(...WS_ICONS.map((icon) => {
+  const b = el('button', { type: 'button', textContent: icon, title: icon });
+  b.setAttribute('role', 'radio');
+  b.onclick = () => { wsIconInput.value = icon; markIcon(); };
+  return b;
+}));
+wsIconInput.addEventListener('input', markIcon);
+$('#ws-icon-none').onclick = () => { wsIconInput.value = ''; markIcon(); };
+/** Só o primeiro "caractere visível" (um emoji pode ter vários códigos). */
+const firstGrapheme = (s: string) => {
+  const first = [...new Intl.Segmenter('pt', { granularity: 'grapheme' }).segment(s.trim())][0]?.segment ?? '';
+  return first && !/[<>&"'\s]/.test(first) ? first : '';
+};
+
 function openWorkspaceDialog(ws: WorkspaceInfo | null = null): void {
   editing = ws;
   $('#ws-dialog-title').textContent = ws ? 'Editar workspace' : 'Novo workspace';
   $<HTMLInputElement>('#ws-name').value = ws?.name ?? '';
   $<HTMLInputElement>('#ws-color').value = ws?.color ?? '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
   $<HTMLInputElement>('#ws-home').value = ws && !isHomeUrl(ws.home) ? ws.home : '';
+  wsIconInput.value = ws?.icon ?? '';
+  markIcon();
   $<HTMLSelectElement>('#ws-hibernate').value = String(ws?.hibernateAfterMin ?? 30);
   const hidden = ws ? ws.hiddenHibernateMin : 10;
   $<HTMLSelectElement>('#ws-hidden-hibernate').value = hidden === null ? '' : String(hidden);
@@ -1038,9 +1062,10 @@ $('#ws-form').addEventListener('submit', () => {
   const hibernateAfterMin = Number($<HTMLSelectElement>('#ws-hibernate').value);
   const hiddenRaw = $<HTMLSelectElement>('#ws-hidden-hibernate').value;
   const hiddenHibernateMin = hiddenRaw === '' ? null : Number(hiddenRaw);
+  const icon = firstGrapheme(wsIconInput.value) || null;
   if (!name) return;
-  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin });
-  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked });
+  if (editing) send({ type: 'workspace:update', workspaceId: editing.id, name, color, home, hibernateAfterMin, hiddenHibernateMin, icon });
+  else send({ type: 'workspace:create', name, color, home, hibernateAfterMin, hiddenHibernateMin, temporary: $<HTMLInputElement>('#ws-temporary').checked, icon });
 });
 
 $('#ws-cancel').onclick = () => dialog.close();

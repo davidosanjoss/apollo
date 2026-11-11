@@ -10,6 +10,8 @@ export interface WorkspaceInfo {
   hibernateAfterMin: number;
   /** Quando o workspace não está na tela (null = mesma regra, -1 = ao sair dele). */
   hiddenHibernateMin: number | null;
+  /** Ícone na barra lateral (emoji); null = primeira letra do nome. */
+  icon: string | null;
   /** Padrões do workspace (null = segue o global). */
   privacy: Record<PrivacyFeature, boolean | null>;
   /** Sessão só em memória; some ao fechar o Apollo. */
@@ -494,8 +496,8 @@ export type UiCommand =
   | { type: 'group:new-tab'; groupId: string }
   | { type: 'group:menu'; groupId: string; x: number; y: number }
   | { type: 'workspace:switch'; workspaceId: string }
-  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean }
-  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null }
+  | { type: 'workspace:create'; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; temporary?: boolean; icon?: string | null }
+  | { type: 'workspace:update'; workspaceId: string; name: string; color: string; home: string; hibernateAfterMin?: number; hiddenHibernateMin?: number | null; icon?: string | null }
   | { type: 'workspace:delete'; workspaceId: string }
   | { type: 'layout:bounds'; x: number; y: number; width: number; height: number }
   | { type: 'layout:overlay'; open: boolean }

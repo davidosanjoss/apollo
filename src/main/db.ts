@@ -166,6 +166,10 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX downloads_recent ON downloads(started_at);
   `,
+
+  /* v13: ícone do workspace (emoji; null = primeira letra do nome) */ `
+  ALTER TABLE workspaces ADD COLUMN icon TEXT;
+  `,
 ];
 
 export function openDatabase(file: string): DatabaseSync {

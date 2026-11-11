@@ -322,6 +322,14 @@
       <h2 id="ws-dialog-title">Novo workspace</h2>
       <label>Nome <input id="ws-name" required maxlength="30" autocomplete="off"></label>
       <label>Cor <input id="ws-color" type="color" value="#7c5cff"></label>
+      <div class="ws-icon-field">
+        <span class="field-label">Ícone na barra lateral</span>
+        <div id="ws-icon-grid" role="radiogroup" aria-label="Ícone"></div>
+        <div class="settings-row">
+          <input id="ws-icon" maxlength="16" autocomplete="off" spellcheck="false" placeholder="ou cole um emoji" aria-label="Ícone (emoji)">
+          <button type="button" id="ws-icon-none">Sem ícone (usar a letra)</button>
+        </div>
+      </div>
       <label>Página inicial <input id="ws-home" placeholder="Vazio = página inicial do Apollo" autocomplete="off"></label>
       <label>Hibernar abas paradas após <select id="ws-hibernate"></select></label>
       <label>Quando este workspace não está na tela, hibernar as abas dele <select id="ws-hidden-hibernate"></select></label>

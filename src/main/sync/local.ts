@@ -20,7 +20,7 @@ export function snapshot(store: Store, map: WorkspaceMap): SyncData {
   const kept = new Set(workspaces.map((w) => w.id));
   workspaces.forEach((w, position) => {
     d.workspaces[out(w.id)] = { name: w.name, color: w.color, home: w.home, hibernateAfterMin: w.hibernateAfterMin,
-      hiddenHibernateMin: w.hiddenHibernateMin, position };
+      hiddenHibernateMin: w.hiddenHibernateMin, position, ...(w.icon ? { icon: w.icon } : {}) };
   });
   for (const w of workspaces) {
     for (const b of store.listBookmarks(w.id)) {
@@ -72,6 +72,7 @@ export function apply(store: Store, map: WorkspaceMap, merged: SyncData, ch: Cha
     const lid = local(id);
     if (store.getWorkspace(lid)) store.updateWorkspace(lid, { name: w.name, color: w.color, home: w.home, hibernateAfterMin: w.hibernateAfterMin, hiddenHibernateMin: w.hiddenHibernateMin });
     else store.createWorkspace({ id: lid, name: w.name, color: w.color, home: w.home, hibernateAfterMin: w.hibernateAfterMin, hiddenHibernateMin: w.hiddenHibernateMin });
+    store.setWorkspaceIcon(lid, w.icon ?? null);
   }
   for (const [id, w] of Object.entries(merged.workspaces)) store.setRowPosition('workspaces', local(id), w.position);
 
