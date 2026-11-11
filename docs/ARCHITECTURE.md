@@ -134,5 +134,20 @@ Google Drive (pasta do app) ou OneDrive (pasta do app), com OAuth + PKCE e retor
 1. ✅ Base: TypeScript, WebContentsView, SQLite, pipeline de rede, permissões, fuses
 2. ✅ Sessão e abas: restauração, grupos, hibernação, monitor de memória
 3. ✅ Privacidade: bloqueador em camadas, cookies de terceiros, DoH, limpeza de URL, workspace temporário
-4. Bitwarden nativo
+4. ✅ Bitwarden nativo
 5. ✅ Módulos, painéis laterais, paleta de comandos
+6. ✅ Navegador completo: favoritos com pastas, histórico, downloads, localizar, zoom por site, menu de contexto, imprimir, tela cheia, compartilhar tela, tela dividida, modo leitura, vídeo flutuante, notificações, navegador padrão, aviso de versão nova
+7. ✅ Código aberto (GPL-3.0), releases no próprio repositório, proteções e revisão de PRs
+
+### Próximos
+
+- Importar do Opera/Chrome: favoritos (com pastas) e histórico.
+- Painéis com câmera e microfone (barra de permissão também nos painéis).
+- Notificações enviadas pelo *service worker* do site (WhatsApp, Teams): clicar levar à aba.
+- Para contribuições: modelos de issue/PR, Dependabot, CodeQL; interface também em inglês.
+- Windows: testes de integração no CI, instalador assinado (custo: ~US$ 10/mês), DRM (VMP do castLabs, conta gratuita).
+
+### Backlog (com data)
+
+- **AUR** (`apollo-browser-bin`): pacote pronto em `packaging/aur/` e job de publicação no workflow `Release`. Falta a configuração da conta e do secret `AUR_SSH_PRIVATE_KEY` (ver [RELEASING.md](RELEASING.md)) — o cadastro no AUR estava temporariamente fechado em novembro de 2026; retomar quando reabrir.
+- **Sincronização com ID de aplicativo oficial** (janeiro de 2027): registrar um domínio, publicar a política de privacidade, cadastrar o app no Google (escopo `drive.appdata`, não sensível: sem auditoria paga) e na Microsoft (verificação de publicador, gratuita), e embutir os IDs para ninguém precisar criar o próprio. Junto: envio condicional (evitar perda quando dois computadores enviam ao mesmo tempo).
