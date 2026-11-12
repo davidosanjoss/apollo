@@ -4,10 +4,16 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
-## [0.9.1] - 2026-11-11
+## [0.9.2] - 2026-11-12
+
+Mesmo conteúdo da 0.9.1, que não chegou a ser publicada (o release falhou no CI).
 
 ### Corrigido
 - Atualização do AppImage ("Instalar e reiniciar"): o Apollo não abria de novo, e o arquivo mudava de nome a cada versão (Apollo-0.8.0.AppImage → Apollo-0.9.0.AppImage), quebrando o atalho do menu e o navegador padrão. Agora o AppImage se chama sempre `Apollo.AppImage` (a atualização grava por cima do mesmo arquivo), a versão nova abre sozinha depois que a antiga fecha, e a entrada do Apollo no menu acompanha o arquivo (e se conserta ao abrir, se apontar para um AppImage que não existe mais). Na primeira atualização com essa correção o arquivo passa a se chamar `Apollo.AppImage`.
+
+## [0.9.1] - 2026-11-11
+
+Não publicada: os testes do release falharam por um erro do espelho de pacotes do Ubuntu. O conteúdo saiu na 0.9.2.
 
 ## [0.9.0] - 2026-11-11
 
