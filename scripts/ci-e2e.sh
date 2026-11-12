@@ -6,6 +6,8 @@ set -euo pipefail
 
 # Ubuntu 24.04 bloqueia user namespaces sem privilégio; o sandbox do Chromium precisa deles.
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+# A lista de pacotes da imagem do runner envelhece; sem update, o espelho devolve 404.
+sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends gnome-keyring >/dev/null
 
 export XDG_CURRENT_DESKTOP=GNOME
