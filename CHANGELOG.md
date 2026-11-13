@@ -4,10 +4,10 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.10.0] - 2026-11-13
+
 ### Adicionado
 - Sugestões na barra de endereço, como no Opera: ao digitar, aparecem as pesquisas sugeridas pelo Google e, separados, o que casa no histórico, nos favoritos e nas abas abertas do workspace (sem acento, palavras em qualquer ordem). Setas escolhem, Enter ou clique abrem, Esc fecha. O site que começa com o digitado completa o domínio na própria barra ("you" → youtube.com). Para as pesquisas sugeridas, vai ao Google só o texto digitado (sem cookies nem login); dá para desligar em Configurações → Histórico, e nos workspaces temporários nunca é usado.
-
-## [0.9.3] - 2026-11-13
 
 ### Corrigido
 - KDE: depois de uma atualização do AppImage, o navegador padrão (links de outros apps) continuava chamando o arquivo antigo, que não existe mais. A entrada do Apollo no menu era corrigida, mas o KDE não percebia; agora ele refaz o cache de aplicativos na hora.
