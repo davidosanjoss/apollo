@@ -212,6 +212,8 @@ export interface SettingsInfo {
   sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
+  /** Sugestões de pesquisa (Google) ao digitar na barra de endereço. */
+  searchSuggest: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
   bookmarkBar: boolean;
 }
@@ -415,6 +417,8 @@ export type UiCommand =
   | { type: 'address:select'; index: number }
   | { type: 'address:close' }
   | { type: 'settings:history'; on: boolean }
+  /** Sugestões de pesquisa do Google na barra de endereço. */
+  | { type: 'settings:search-suggest'; on: boolean }
   /** Apaga o histórico de visitas de todos os workspaces. */
   | { type: 'history:clear' }
   | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }

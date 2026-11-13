@@ -5,7 +5,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 ## [Não lançado]
 
 ### Adicionado
-- Sugestões na barra de endereço: ao digitar, aparece uma lista com o que casa no histórico, nos favoritos e nas abas abertas do workspace (sem acento, palavras em qualquer ordem). Setas escolhem, Enter ou clique abrem, Esc fecha. O primeiro resultado completa o domínio na própria barra ("you" → youtube.com). Nada do que é digitado sai do computador antes do Enter.
+- Sugestões na barra de endereço, como no Opera: ao digitar, aparecem as pesquisas sugeridas pelo Google e, separados, o que casa no histórico, nos favoritos e nas abas abertas do workspace (sem acento, palavras em qualquer ordem). Setas escolhem, Enter ou clique abrem, Esc fecha. O site que começa com o digitado completa o domínio na própria barra ("you" → youtube.com). Para as pesquisas sugeridas, vai ao Google só o texto digitado (sem cookies nem login); dá para desligar em Configurações → Histórico, e nos workspaces temporários nunca é usado.
 
 ## [0.9.3] - 2026-11-13
 

@@ -1,9 +1,10 @@
-// Sugestões da barra de endereço (puro, testável): histórico, favoritos e abas do
-// workspace que casam com o que foi digitado, e o autocompletar na própria barra.
-// Nada sai do computador: a busca no site de pesquisa só acontece no Enter.
+// Sugestões da barra de endereço (puro, testável), como no Opera: pesquisas sugeridas pelo
+// buscador e, separados, histórico, favoritos e abas do workspace que casam com o que foi
+// digitado; e o autocompletar na própria barra.
 import { fold } from './text';
+import { SEARCH_URL } from './url';
 
-export type SuggestionKind = 'history' | 'bookmark' | 'tab';
+export type SuggestionKind = 'search' | 'history' | 'bookmark' | 'tab';
 
 export interface Suggestion {
   kind: SuggestionKind;
@@ -24,9 +25,13 @@ export interface SuggestSources {
   history: { url: string; title: string }[];
   bookmarks: { url: string; title: string }[];
   tabs: { id: string; url: string; title: string }[];
+  /** Pesquisas sugeridas pelo buscador (vazio = desligado, offline ou ainda chegando). */
+  searches?: string[];
 }
 
-export const MAX_SUGGESTIONS = 8;
+export const MAX_SUGGESTIONS = 10;
+/** Resultados locais (histórico, favoritos, abas) na lista. */
+export const MAX_LOCAL = 6;
 
 /** Endereço como se lê: sem esquema e sem "www." ("https://www.ufmg.br/x" → "ufmg.br/x"). */
 export function bareUrl(url: string): string {
@@ -59,24 +64,30 @@ export function buildSuggestions(text: string, src: SuggestSources, limit = MAX_
 
   // Endereços que começam com o digitado primeiro (o mais curto antes: "you" → youtube.com, não youtube.com/watch…).
   const prefixed = all.filter((s) => prefixOf(t, s.url)).sort((a, b) => bareUrl(a.url).length - bareUrl(b.url).length);
-  const out: Suggestion[] = [];
+  const local: Suggestion[] = [];
   const seen = new Set<string>();
   for (const s of [...prefixed, ...all]) {
     const key = s.url.replace(/\/$/, '');
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(s);
-    if (out.length >= limit) break;
+    local.push(s);
+    if (local.length >= Math.min(MAX_LOCAL, limit)) break;
   }
-  return out;
+  const searches: Suggestion[] = (src.searches ?? [])
+    .map((q) => ({ kind: 'search' as const, url: searchUrl(q), title: q }));
+  // Como no Opera: o site que completa a barra no topo, depois as pesquisas, depois o resto do local.
+  const top = local.length && prefixOf(t, local[0].url) ? local.slice(0, 1) : [];
+  return [...top, ...searches, ...local.slice(top.length)].slice(0, limit);
 }
+
+export const searchUrl = (q: string) => SEARCH_URL + encodeURIComponent(q.trim());
 
 /**
  * Autocompletar: se a primeira sugestão começa com o digitado, completa até o fim do
  * domínio ("you" → "youtube.com"); se já passou do domínio, até o endereço inteiro.
  */
 export function inlineCompletion(text: string, first: Suggestion | undefined): InlineCompletion | null {
-  if (!first || !text || /\s/.test(text) || !prefixOf(text, first.url)) return null;
+  if (!first || first.kind === 'search' || !text || /\s/.test(text) || !prefixOf(text, first.url)) return null;
   const bare = bareUrl(first.url);
   let host: string;
   let origin: string;

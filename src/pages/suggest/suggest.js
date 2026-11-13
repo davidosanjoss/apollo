@@ -1,6 +1,6 @@
 // Lista de sugestões da barra de endereço (desenho e clique; quem decide é o main).
 const list = document.getElementById('list');
-const ICON = { history: '🕘', bookmark: '★', tab: '⧉' };
+const ICON = { search: '⌕', history: '🕘', bookmark: '★', tab: '⧉' };
 const BADGE = { tab: 'Ir para a aba' };
 
 function bare(url) {
@@ -28,7 +28,11 @@ window.suggest.onItems(({ items, selected }) => {
     title.textContent = it.title || bare(it.url);
     const url = document.createElement('span');
     url.className = 'url';
-    url.textContent = it.title ? bare(it.url) : '';
+    url.textContent = it.kind === 'search' ? '' : it.title ? bare(it.url) : '';
+    li.classList.add(it.kind);
+    // Como no Opera: uma linha separa as pesquisas sugeridas do que vem do computador.
+    const prev = items[i - 1];
+    if (prev && (prev.kind === 'search') !== (it.kind === 'search')) li.classList.add('divider');
     li.append(icon, title, url);
     if (BADGE[it.kind]) {
       const b = document.createElement('span');

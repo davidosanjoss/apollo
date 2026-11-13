@@ -55,3 +55,23 @@ describe('sugestões da barra de endereço', () => {
     expect(bareUrl('https://www.ufmg.br/a%20b')).toBe('ufmg.br/a b');
   });
 });
+
+describe('sugestões de pesquisa (buscador) junto com as locais', () => {
+  it('site que completa no topo, depois as pesquisas, depois o resto local', () => {
+    const s = buildSuggestions('you', src({
+      history: [{ url: 'https://www.youtube.com/', title: 'YouTube' }, { url: 'https://blog.com/you', title: 'you' }],
+      searches: ['youtube music', 'you tube kids'],
+    }));
+    expect(s.map((x) => [x.kind, x.title])).toEqual([
+      ['history', 'YouTube'], ['search', 'youtube music'], ['search', 'you tube kids'], ['history', 'you'],
+    ]);
+    expect(s[1].url).toBe('https://www.google.com/search?q=youtube%20music');
+    expect(inlineCompletion('you', s[0])?.text).toBe('youtube.com');
+  });
+
+  it('sem site que completa: pesquisas primeiro; pesquisa nunca completa a barra', () => {
+    const s = buildSuggestions('receita bolo', src({ history: [{ url: 'https://tudogostoso.com/bolo', title: 'Receita de bolo' }], searches: ['receita bolo de cenoura'] }));
+    expect(s.map((x) => x.kind)).toEqual(['search', 'history']);
+    expect(inlineCompletion('receita', s[0])).toBeNull();
+  });
+});

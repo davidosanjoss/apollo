@@ -1256,6 +1256,7 @@ function renderSettings(s: UiState): void {
   const dd = $<HTMLSelectElement>('#download-days');
   if (document.activeElement !== dd) dd.value = String(s.settings.downloadKeepDays);
   $<HTMLInputElement>('#history-on').checked = s.settings.historyOn;
+  $<HTMLInputElement>('#search-suggest-on').checked = s.settings.searchSuggest;
   const sc = $<HTMLSelectElement>('#spellcheck');
   if (document.activeElement !== sc) sc.value = s.settings.spellcheck;
   const t = s.settings.dnsTest;
@@ -1280,6 +1281,7 @@ function renderSettings(s: UiState): void {
 
 $('#settings-btn').onclick = () => (settingsOpen() ? closeSettings() : openSettings());
 $<HTMLInputElement>('#history-on').onchange = (e) => send({ type: 'settings:history', on: (e.target as HTMLInputElement).checked });
+$<HTMLInputElement>('#search-suggest-on').onchange = (e) => send({ type: 'settings:search-suggest', on: (e.target as HTMLInputElement).checked });
 $('#history-clear').onclick = () => {
   send({ type: 'history:clear' });
   $('#history-clear').textContent = 'Histórico apagado';
@@ -1830,7 +1832,9 @@ address.addEventListener('keydown', (e) => {
     const n = list.length;
     // -1 = o que foi digitado; desce até o fim e volta.
     suggestIndex = e.key === 'ArrowDown' ? (suggestIndex + 2) % (n + 1) - 1 : (suggestIndex + n + 1) % (n + 1) - 1;
-    input.value = suggestIndex >= 0 ? list[suggestIndex].url : addressTyped;
+    const item = suggestIndex >= 0 ? list[suggestIndex] : undefined;
+    // Pesquisa mostra o texto (como no Opera); site mostra o endereço.
+    input.value = !item ? addressTyped : item.kind === 'search' ? item.title : item.url;
     send({ type: 'address:select', index: suggestIndex });
   } else if (e.key === 'Enter') {
     const picked = suggestIndex >= 0 ? list[suggestIndex] : undefined;
