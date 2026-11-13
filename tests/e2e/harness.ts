@@ -459,7 +459,7 @@ process.once('exit', () => { for (const p of running) p.kill('SIGKILL'); });
 /** Chama o Apollo de novo (como um link clicado em outro programa): a cópia nova entrega o link e sai. */
 export function launchSecond(userData: string, args: string[]): Promise<number | null> {
   const headless = process.platform === 'linux' && !process.env.APOLLO_E2E_SHOW ? ['--ozone-platform=headless'] : [];
-  const p = spawn(electronBin, [ROOT, ...headless, ...args], { env: { ...process.env, APOLLO_USER_DATA: userData }, stdio: 'ignore' });
+  const p = spawn(electronBin, [ROOT, ...headless, ...args], { env: { ...process.env, APOLLO_USER_DATA: userData, APOLLO_SUGGEST_API: '' }, stdio: 'ignore' });
   return new Promise((resolve) => p.once('exit', resolve));
 }
 
@@ -494,7 +494,8 @@ export class Apollo {
     const inspectPort = env.APOLLO_TEST_HOOKS ? await freePort() : null;
     const inspect = inspectPort ? [`--inspect=127.0.0.1:${inspectPort}`] : [];
     const proc = spawn(electronBin, [...inspect, ROOT, `--remote-debugging-port=${port}`, ...headless, ...args], {
-      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', ...env },
+      // APOLLO_SUGGEST_API vazio: os testes nunca pedem sugestões ao Google de verdade.
+      env: { ...process.env, APOLLO_USER_DATA: userData, ELECTRON_ENABLE_LOGGING: '0', APOLLO_SUGGEST_API: '', ...env },
       stdio: ['ignore', 'ignore', process.env.APOLLO_E2E_LOG ? 'inherit' : 'ignore'],
     });
     const app = new Apollo(proc, port, userData);

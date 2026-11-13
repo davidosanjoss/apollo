@@ -2291,9 +2291,9 @@ export class Browser {
 
   private addressAt = { x: 0, y: 0, width: 0 };
   private addressSelected = -1;
-  /** Testes e desenvolvimento: sem Google (APOLLO_SUGGEST_API aponta para um servidor falso). */
+  /** Google, também no `npm start`. Testes: APOLLO_SUGGEST_API vazio (desligado) ou um servidor falso. */
   private readonly searchSuggester = new SearchSuggester(
-    process.env.APOLLO_SUGGEST_API || (app.isPackaged ? GOOGLE_SUGGEST_API : null),
+    process.env.APOLLO_SUGGEST_API !== undefined ? process.env.APOLLO_SUGGEST_API || null : GOOGLE_SUGGEST_API,
     (url, init) => net.fetch(url, init),
   );
 
