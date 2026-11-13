@@ -342,6 +342,12 @@ app.whenReady().then(async () => {
   browser.syncService = sync;
   void sync.start();
 
+  // Clique numa sugestão da barra de endereço (só da lista de sugestões).
+  ipcMain.on('suggest:pick', (event, index: unknown) => {
+    if (!browser || !browser.addressPopup.isSender(event) || !Number.isInteger(index)) return;
+    browser.pickSuggestion(index as number);
+  });
+
   ipcMain.on('ui:command', (event, raw) => {
     if (!isTrustedSender(event, win.webContents)) return;
     const cmd = parseCommand(raw);

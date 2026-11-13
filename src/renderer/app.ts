@@ -1782,16 +1782,82 @@ $('#update-primary').onclick = () => {
 };
 $('#update-later').onclick = () => { updateDismissed = true; $('#update-bar').hidden = true; };
 
-$<HTMLInputElement>('#address').addEventListener('input', () => { addressEdited = true; });
-$<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
-  const input = e.target as HTMLInputElement;
-  if (e.key === 'Enter') {
-    const url = normalizeUrl(input.value);
+// ------------------------------------------------------------ sugestões da barra
+// O main busca no histórico, favoritos e abas do workspace e desenha a lista (por cima da
+// página). Aqui: o texto digitado, a linha destacada pelas setas e o autocompletar.
+const address = $<HTMLInputElement>('#address');
+/** O que a pessoa digitou (sem o pedaço completado automaticamente). */
+let addressTyped = '';
+let suggestIndex = -1;
+let suggestOpen = false;
+/** Apagando (Backspace/Delete): não completar de novo o que acabou de ser apagado. */
+let noInline = false;
+
+const suggestions = () => (state?.addressSuggest && state.addressSuggest.text === addressTyped ? state.addressSuggest : null);
+const askSuggestions = () => {
+  const r = address.getBoundingClientRect();
+  send({ type: 'address:suggest', text: addressTyped.slice(0, 500), x: Math.max(0, r.left), y: r.bottom + 2, width: r.width });
+  suggestOpen = true;
+};
+const closeSuggestions = () => {
+  suggestIndex = -1;
+  if (!suggestOpen) return;
+  suggestOpen = false;
+  send({ type: 'address:close' });
+};
+/** Chegaram as sugestões: completa o domínio na própria barra, com o resto selecionado. */
+const applyInline = () => {
+  const inline = suggestions()?.inline;
+  if (!inline || noInline || suggestIndex !== -1 || document.activeElement !== address) return;
+  if (address.value !== addressTyped || address.selectionStart !== addressTyped.length) return;
+  address.value = inline.text;
+  address.setSelectionRange(addressTyped.length, inline.text.length);
+};
+
+address.addEventListener('input', (e) => {
+  addressEdited = true;
+  addressTyped = address.value;
+  suggestIndex = -1;
+  noInline = (e as InputEvent).inputType?.startsWith('delete') ?? false;
+  if (addressTyped.trim()) askSuggestions();
+  else closeSuggestions();
+});
+address.addEventListener('keydown', (e) => {
+  const input = address;
+  const list = suggestions()?.items ?? [];
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && suggestOpen && list.length) {
+    e.preventDefault();
+    const n = list.length;
+    // -1 = o que foi digitado; desce até o fim e volta.
+    suggestIndex = e.key === 'ArrowDown' ? (suggestIndex + 2) % (n + 1) - 1 : (suggestIndex + n + 1) % (n + 1) - 1;
+    input.value = suggestIndex >= 0 ? list[suggestIndex].url : addressTyped;
+    send({ type: 'address:select', index: suggestIndex });
+  } else if (e.key === 'Enter') {
+    const picked = suggestIndex >= 0 ? list[suggestIndex] : undefined;
+    const inline = suggestions()?.inline;
+    if (picked?.kind === 'tab' && picked.tabId) {
+      closeSuggestions();
+      addressEdited = false;
+      input.blur();
+      send({ type: 'tab:reveal', tabId: picked.tabId });
+      return;
+    }
+    const url = picked ? picked.url
+      : inline && input.value === inline.text && input.value !== addressTyped ? inline.url
+      : normalizeUrl(input.value);
     if (!url) return;
+    closeSuggestions();
     addressEdited = false;
     input.blur();
     send({ type: 'tab:navigate', url });
   } else if (e.key === 'Escape') {
+    if (suggestOpen) {
+      // Primeiro Esc: fecha a lista e volta ao que foi digitado.
+      closeSuggestions();
+      input.value = addressTyped;
+      e.preventDefault();
+      return;
+    }
     const tab = state?.tabs.find((t) => t.id === state?.activeTabId);
     input.value = isHomeUrl(tab?.url) ? '' : tab?.url ?? '';
     addressEdited = false;
@@ -1799,7 +1865,7 @@ $<HTMLInputElement>('#address').addEventListener('keydown', (e) => {
     send({ type: 'tab:focus' });
   }
 });
-$<HTMLInputElement>('#address').addEventListener('blur', () => render());
+address.addEventListener('blur', () => { closeSuggestions(); render(); });
 
 // ------------------------------------------------------------ diálogos × página nativa
 // A página é desenhada pelo processo principal POR CIMA desta interface: enquanto houver
@@ -1821,6 +1887,7 @@ window.apollo.onState((next) => {
   // Trocou de site: fecha o painel de permissões.
   state = next;
   render();
+  applyInline();
   if (pendingGroupEdit) openGroupDialog(pendingGroupEdit);
 });
 

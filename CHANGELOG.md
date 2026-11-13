@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Sugestões na barra de endereço: ao digitar, aparece uma lista com o que casa no histórico, nos favoritos e nas abas abertas do workspace (sem acento, palavras em qualquer ordem). Setas escolhem, Enter ou clique abrem, Esc fecha. O primeiro resultado completa o domínio na própria barra ("you" → youtube.com). Nada do que é digitado sai do computador antes do Enter.
+
 ## [0.9.3] - 2026-11-13
 
 ### Corrigido

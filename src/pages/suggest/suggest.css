@@ -1,0 +1,16 @@
+/* Linhas de 34px e margem de 6px: iguais a ROW_HEIGHT e LIST_PADDING (src/main/address-popup.ts). */
+:root { --panel: #1f1f25; --panel-2: #2a2a32; --text: #e6e6ea; --muted: #9a9aa5; --accent: #7c5cff; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font: 13px system-ui, sans-serif; color: var(--text); }
+#list {
+  list-style: none; margin: 0; padding: 6px; height: 100%;
+  background: var(--panel); border: 1px solid var(--panel-2); border-radius: 0 0 10px 10px;
+}
+li { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 6px; cursor: pointer; user-select: none; }
+li:hover { background: var(--panel-2); }
+li.selected { background: var(--accent); color: #fff; }
+.icon { width: 16px; flex-shrink: 0; text-align: center; color: var(--muted); }
+li.selected .icon, li.selected .url, li.selected .badge { color: #ffffffcc; }
+.title { flex-shrink: 1; min-width: 0; max-width: 55%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.url { flex: 1; min-width: 0; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.badge { color: var(--muted); font-size: 11px; flex-shrink: 0; }

@@ -3,6 +3,8 @@ import path from 'node:path';
 import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
+import { AddressPopup } from './address-popup';
+import { buildSuggestions, inlineCompletion, type InlineCompletion, type Suggestion } from '../shared/suggest';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown, parseSmapsRollup } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
@@ -2166,6 +2168,14 @@ export class Browser {
       case 'vault:autofill': this.autofill(); break;
       case 'palette:toggle': this.paletteOpen = cmd.open; if (!cmd.open) this.paletteQuery = ''; break;
       case 'palette:query': this.paletteQuery = cmd.text; break;
+      case 'address:suggest':
+        this.addressSuggest = this.suggestFor(cmd.text);
+        this.lastSuggestions = this.addressSuggest.items;
+        if (this.overlayOpen) this.addressPopup.hide();
+        else this.addressPopup.show({ x: cmd.x, y: cmd.y, width: cmd.width }, this.addressSuggest.items, -1);
+        break;
+      case 'address:select': this.suggestPopup?.select(cmd.index); return;
+      case 'address:close': this.closeSuggestions(); break;
       case 'settings:history': this.store.setKv('history-off', cmd.on ? '0' : '1'); break;
       case 'history:clear': this.store.clearHistory(); break;
       case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
@@ -2250,7 +2260,7 @@ export class Browser {
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin, cmd.icon); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
-      case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
+      case 'layout:overlay': this.overlayOpen = cmd.open; if (cmd.open) this.closeSuggestions(); this.layout(); break;
       case 'permission:answer': this.permissions.answer(cmd.promptId, cmd.decision, cmd.remember); break;
       case 'permission:set': this.permissions.set(this.activeWorkspaceId, cmd.origin, cmd.kind, cmd.decision); break;
       case 'update:download':
@@ -2268,6 +2278,41 @@ export class Browser {
 
   private paletteOpen = false;
   private paletteQuery = '';
+
+  /** Sugestões da barra de endereço (o que foi digitado e a lista mostrada). */
+  private addressSuggest: { text: string; items: Suggestion[]; inline: InlineCompletion | null } | null = null;
+  /** Última lista mostrada: o clique na lista chega junto com o "fechar" da barra que perdeu o foco. */
+  private lastSuggestions: Suggestion[] = [];
+  private suggestPopup: AddressPopup | null = null;
+  get addressPopup(): AddressPopup {
+    return (this.suggestPopup ??= new AddressPopup(this.win));
+  }
+
+  private suggestFor(text: string): { text: string; items: Suggestion[]; inline: InlineCompletion | null } {
+    const ws = this.activeWorkspace();
+    const items = buildSuggestions(text, {
+      history: text.trim() ? this.store.searchHistory(ws.id, text, 12) : [],
+      bookmarks: this.store.listBookmarks(ws.id).filter((b) => !b.folder),
+      tabs: this.store.listTabs(ws.id).filter((t) => t.id !== ws.activeTabId),
+    });
+    return { text, items, inline: inlineCompletion(text, items[0]) };
+  }
+
+  /** Clique numa sugestão da lista. */
+  pickSuggestion(index: number): void {
+    const item = this.lastSuggestions[index];
+    this.closeSuggestions();
+    if (!item) return;
+    if (item.kind === 'tab' && item.tabId) this.revealTab(item.tabId);
+    else this.navigate(item.url);
+    this.withActiveView((wc) => wc.focus());
+    this.push();
+  }
+
+  private closeSuggestions(): void {
+    this.addressSuggest = null;
+    this.suggestPopup?.hide();
+  }
 
   private historyOn(workspaceId: string): boolean {
     return this.store.getKv('history-off') !== '1' && !this.store.getWorkspace(workspaceId)?.temporary;
@@ -2570,6 +2615,7 @@ export class Browser {
       paletteTabs: this.paletteOpen
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
+      addressSuggest: this.addressSuggest,
       paletteHistory: this.paletteOpen && this.paletteQuery.trim()
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
