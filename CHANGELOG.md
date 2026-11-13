@@ -4,6 +4,8 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.9.3] - 2026-11-13
+
 ### Corrigido
 - KDE: depois de uma atualização do AppImage, o navegador padrão (links de outros apps) continuava chamando o arquivo antigo, que não existe mais. A entrada do Apollo no menu era corrigida, mas o KDE não percebia; agora ele refaz o cache de aplicativos na hora.
 
