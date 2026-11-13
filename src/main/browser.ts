@@ -1,8 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, desktopCapturer, Menu, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, Menu, net, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
+import { AddressPopup } from './address-popup';
+import { GOOGLE_SUGGEST_API, SearchSuggester } from './search-suggest';
+import { buildSuggestions, inlineCompletion, type InlineCompletion, type Suggestion } from '../shared/suggest';
 import { effectiveTimeout, pickTabsToHibernate, type HibernationCandidate } from './hibernation';
 import { memoryBreakdown, parseSmapsRollup } from './memory';
 import { ALL_OFF, DEFAULT_TOGGLES, resolve as resolvePrivacy, siteOf, type Overrides, type Resolved } from './privacy/rules';
@@ -129,7 +132,7 @@ export class Browser {
   private blockedPushTimer: NodeJS.Timeout | null = null;
 
   // Configurações (DNS): o index.ts aplica e informa aqui.
-  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'> = {
+  private settings: Omit<SettingsInfo, 'privacy' | 'spellcheck' | 'downloadAsk' | 'historyOn' | 'searchSuggest' | 'bookmarkBar' | 'downloadKeepDays' | 'autoPip' | 'pipOnTop' | 'vaultMatch' | 'defaultBrowser' | 'googleCompat' | 'sync'> = {
     dns: { mode: 'secure', dohUrl: null, provider: null },
     dnsTest: { status: 'idle' },
   };
@@ -2166,6 +2169,14 @@ export class Browser {
       case 'vault:autofill': this.autofill(); break;
       case 'palette:toggle': this.paletteOpen = cmd.open; if (!cmd.open) this.paletteQuery = ''; break;
       case 'palette:query': this.paletteQuery = cmd.text; break;
+      case 'address:suggest':
+        this.addressAt = { x: cmd.x, y: cmd.y, width: cmd.width };
+        this.addressSelected = -1;
+        this.suggestAddress(cmd.text);
+        break;
+      case 'address:select': this.addressSelected = cmd.index; this.suggestPopup?.select(cmd.index); return;
+      case 'settings:search-suggest': this.store.setKv('search-suggest', cmd.on ? '1' : '0'); break;
+      case 'address:close': this.closeSuggestions(); break;
       case 'settings:history': this.store.setKv('history-off', cmd.on ? '0' : '1'); break;
       case 'history:clear': this.store.clearHistory(); break;
       case 'panel:add': this.addPanel(cmd.url, cmd.workspaceId, cmd.mobile); break;
@@ -2250,7 +2261,7 @@ export class Browser {
       case 'workspace:update': this.updateWorkspace(cmd.workspaceId, cmd.name, cmd.color, cmd.home, cmd.hibernateAfterMin, cmd.hiddenHibernateMin, cmd.icon); break;
       case 'workspace:delete': void this.deleteWorkspace(cmd.workspaceId); break;
       case 'layout:bounds': this.bounds = { x: cmd.x, y: cmd.y, width: cmd.width, height: cmd.height }; this.layout(); break;
-      case 'layout:overlay': this.overlayOpen = cmd.open; this.layout(); break;
+      case 'layout:overlay': this.overlayOpen = cmd.open; if (cmd.open) this.closeSuggestions(); this.layout(); break;
       case 'permission:answer': this.permissions.answer(cmd.promptId, cmd.decision, cmd.remember); break;
       case 'permission:set': this.permissions.set(this.activeWorkspaceId, cmd.origin, cmd.kind, cmd.decision); break;
       case 'update:download':
@@ -2268,6 +2279,77 @@ export class Browser {
 
   private paletteOpen = false;
   private paletteQuery = '';
+
+  /** Sugestões da barra de endereço (o que foi digitado e a lista mostrada). */
+  private addressSuggest: { text: string; items: Suggestion[]; inline: InlineCompletion | null } | null = null;
+  /** Última lista mostrada: o clique na lista chega junto com o "fechar" da barra que perdeu o foco. */
+  private lastSuggestions: Suggestion[] = [];
+  private suggestPopup: AddressPopup | null = null;
+  get addressPopup(): AddressPopup {
+    return (this.suggestPopup ??= new AddressPopup(this.win));
+  }
+
+  private addressAt = { x: 0, y: 0, width: 0 };
+  private addressSelected = -1;
+  /** Google, também no `npm start`. Testes: APOLLO_SUGGEST_API vazio (desligado) ou um servidor falso. */
+  private readonly searchSuggester = new SearchSuggester(
+    process.env.APOLLO_SUGGEST_API !== undefined ? process.env.APOLLO_SUGGEST_API || null : GOOGLE_SUGGEST_API,
+    (url, init) => net.fetch(url, init),
+  );
+
+  private searchSuggestOn(workspaceId: string): boolean {
+    return this.store.getKv('search-suggest') !== '0' && !this.store.getWorkspace(workspaceId)?.temporary;
+  }
+
+  private suggestFor(text: string, searches: string[] = []): { text: string; items: Suggestion[]; inline: InlineCompletion | null } {
+    const ws = this.activeWorkspace();
+    const items = buildSuggestions(text, {
+      history: text.trim() ? this.store.searchHistory(ws.id, text, 12) : [],
+      bookmarks: this.store.listBookmarks(ws.id).filter((b) => !b.folder),
+      tabs: this.store.listTabs(ws.id).filter((t) => t.id !== ws.activeTabId),
+      searches,
+    });
+    return { text, items, inline: inlineCompletion(text, items[0]) };
+  }
+
+  private showSuggestions(): void {
+    this.lastSuggestions = this.addressSuggest?.items ?? [];
+    if (this.overlayOpen || !this.addressSuggest) this.addressPopup.hide();
+    else this.addressPopup.show(this.addressAt, this.addressSuggest.items, this.addressSelected);
+  }
+
+  /** O local aparece na hora; as pesquisas do buscador entram quando chegam (se o texto ainda for o mesmo). */
+  private suggestAddress(text: string): void {
+    this.addressSuggest = this.suggestFor(text);
+    this.showSuggestions();
+    const ws = this.activeWorkspaceId;
+    if (!this.searchSuggester.enabled || !this.searchSuggestOn(ws)) return;
+    void this.searchSuggester.suggest(text).then((searches) => {
+      // Mudou o texto, fechou a barra, trocou de workspace ou já está escolhendo com as setas: deixa como está.
+      if (!searches?.length || this.addressSuggest?.text !== text || this.activeWorkspaceId !== ws || this.addressSelected !== -1) return;
+      this.addressSuggest = this.suggestFor(text, searches);
+      this.showSuggestions();
+      this.push();
+    });
+  }
+
+  /** Clique numa sugestão da lista. */
+  pickSuggestion(index: number): void {
+    const item = this.lastSuggestions[index];
+    this.closeSuggestions();
+    if (!item) return;
+    if (item.kind === 'tab' && item.tabId) this.revealTab(item.tabId);
+    else this.navigate(item.url);
+    this.withActiveView((wc) => wc.focus());
+    this.push();
+  }
+
+  private closeSuggestions(): void {
+    this.addressSuggest = null;
+    this.addressSelected = -1;
+    this.searchSuggester.cancel();
+    this.suggestPopup?.hide();
+  }
 
   private historyOn(workspaceId: string): boolean {
     return this.store.getKv('history-off') !== '1' && !this.store.getWorkspace(workspaceId)?.temporary;
@@ -2570,13 +2652,14 @@ export class Browser {
       paletteTabs: this.paletteOpen
         ? this.store.listWorkspaces().flatMap((w) => this.store.listTabs(w.id).map((t) => ({ id: t.id, title: t.title, url: t.url, workspaceId: w.id })))
         : null,
+      addressSuggest: this.addressSuggest,
       paletteHistory: this.paletteOpen && this.paletteQuery.trim()
         ? this.store.searchHistory(ws.id, this.paletteQuery).map(({ url, title }) => ({ url, title }))
         : null,
       settings: { ...this.settings, privacy: nullable(this.store.getPrivacyLayers(ws.id, null).global),
         spellcheck: parseSpellcheck(this.store.getKv('spellcheck')), downloadAsk: this.store.getKv('download-ask') === '1', downloadKeepDays: this.downloadKeepDays(), autoPip: this.autoPipOn(), pipOnTop: this.pipOnTop(), vaultMatch: this.vaultMatch() === MATCH.Domain ? 'domain' : 'host', defaultBrowser: this.defaultBrowser, googleCompat: this.store.getKv('google-compat') !== '0',
         sync: this.syncService?.info() ?? { status: 'off', provider: null, lastSync: null, error: null, remembered: false },
-        historyOn: this.store.getKv('history-off') !== '1', bookmarkBar: this.bookmarkBarOn() },
+        historyOn: this.store.getKv('history-off') !== '1', searchSuggest: this.store.getKv('search-suggest') !== '0', bookmarkBar: this.bookmarkBarOn() },
       panels: this.panelsInfo(),
       activePanelId: this.activePanelId,
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),

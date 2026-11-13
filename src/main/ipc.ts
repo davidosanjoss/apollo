@@ -107,7 +107,11 @@ export function parseCommand(raw: unknown): UiCommand | null {
     case 'vault:autofill': return { type: c.type } as UiCommand;
     case 'palette:toggle': return typeof c.open === 'boolean' ? (c as UiCommand) : null;
     case 'palette:query': return str(c.text, 500) ? (c as UiCommand) : null;
-    case 'settings:history': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
+    case 'address:suggest': return str(c.text, 500) && num(c.x) && num(c.y) && num(c.width) ? (c as UiCommand) : null;
+    case 'address:select': return Number.isInteger(c.index) && (c.index as number) >= -1 && (c.index as number) < 50 ? (c as UiCommand) : null;
+    case 'address:close': return { type: c.type } as UiCommand;
+    case 'settings:history':
+    case 'settings:search-suggest': return typeof c.on === 'boolean' ? (c as UiCommand) : null;
     case 'history:clear': return { type: c.type } as UiCommand;
     case 'panel:add':
       return str(c.url, 2048) && /^https?:\/\//i.test(c.url as string) && id(c.workspaceId) && typeof c.mobile === 'boolean' ? (c as UiCommand) : null;

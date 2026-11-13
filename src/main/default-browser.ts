@@ -49,7 +49,7 @@ StartupNotify=true
  * entrada que aponta para um AppImage que não existe mais. Devolve true se mudou algo.
  */
 export function retargetDesktopEntry(newAppImage: string, oldAppImage: string | null = null, home = os.homedir(),
-  exists: (p: string) => boolean = fs.existsSync): boolean {
+  exists: (p: string) => boolean = fs.existsSync, refresh: (apps: string) => void = refreshMenuCaches): boolean {
   const file = path.join(home, '.local/share/applications', DESKTOP_FILE);
   let text: string;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return false; }
@@ -58,8 +58,27 @@ export function retargetDesktopEntry(newAppImage: string, oldAppImage: string | 
   const current = m[1].replace(/\\(["\\`$])/g, '$1');
   const stale = oldAppImage ? current === oldAppImage : !exists(current);
   if (!stale || current === newAppImage) return false;
-  fs.writeFileSync(file, text.replace(m[0], `Exec=${launchCommand({ appImage: newAppImage, execPath: '', packaged: true, appPath: '' })}${m[2]}`));
+  writeDesktopFile(file, text.replace(m[0], `Exec=${launchCommand({ appImage: newAppImage, execPath: '', packaged: true, appPath: '' })}${m[2]}`));
+  refresh(path.dirname(file));
   return true;
+}
+
+/**
+ * Grava a entrada num arquivo temporário e renomeia por cima. O KDE só refaz o cache de
+ * aplicativos (ksycoca) quando a pasta muda; reescrever o arquivo no lugar não muda a pasta,
+ * e o KDE continuava chamando o AppImage antigo como navegador padrão.
+ */
+function writeDesktopFile(file: string, text: string): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, text);
+  fs.renameSync(tmp, file);
+}
+
+/** Avisa o menu do sistema (base de MIME e, no KDE, o ksycoca) sem esperar. */
+export function refreshMenuCaches(apps: string): void {
+  for (const [cmd, args] of [['update-desktop-database', [apps]], ['kbuildsycoca6', []], ['kbuildsycoca5', []]] as const) {
+    execFile(cmd, [...args], { timeout: 30000 }, () => { /* ausente nesta distro/desktop: tudo bem */ });
+  }
 }
 
 const run = (cmd: string, args: string[]) => new Promise<string>((resolve, reject) =>
@@ -92,8 +111,8 @@ export async function makeDefaultLinux(o: { exec: string; iconSvg: string | null
     fs.writeFileSync(path.join(dir, 'apollo.svg'), o.iconSvg);
     icon = 'apollo';
   }
-  fs.writeFileSync(path.join(apps, DESKTOP_FILE), desktopEntry(o.exec, icon));
-  await run('update-desktop-database', [apps]).catch(() => {}); // nem toda distro tem
+  writeDesktopFile(path.join(apps, DESKTOP_FILE), desktopEntry(o.exec, icon));
+  refreshMenuCaches(apps);
   await run('xdg-settings', ['set', 'default-web-browser', DESKTOP_FILE]);
   await run('xdg-mime', ['default', DESKTOP_FILE, 'x-scheme-handler/http', 'x-scheme-handler/https', 'text/html', 'application/xhtml+xml']).catch(() => {});
 }

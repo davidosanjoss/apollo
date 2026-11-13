@@ -69,6 +69,16 @@ await Promise.all([
     target: 'node24',
     external: ['electron'],
   }),
+  // Preload da lista de sugestões da barra de endereço
+  build({
+    ...common,
+    entryPoints: ['src/preload/suggest.ts'],
+    outfile: 'build/suggest-preload.js',
+    platform: 'node',
+    format: 'cjs',
+    target: 'node24',
+    external: ['electron'],
+  }),
   // UI
   build({
     ...common,

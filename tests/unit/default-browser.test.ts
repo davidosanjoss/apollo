@@ -40,6 +40,7 @@ describe('navegador padrão', () => {
 // Apollo-0.9.0.AppImage e a entrada do menu (navegador padrão) ficou apontando para o
 // arquivo apagado — o Apollo não abria mais pelo menu nem pelos links.
 describe('entrada do menu acompanha o AppImage', () => {
+  const noop = () => {}; // não mexer no menu de verdade de quem roda os testes
   const setup = (exec: string) => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'apollo-de-'));
     const dir = path.join(home, '.local/share/applications');
@@ -50,7 +51,7 @@ describe('entrada do menu acompanha o AppImage', () => {
 
   it('atualização com troca de nome: passa a apontar para o arquivo novo', () => {
     const { home, read } = setup('"/u/builds/Apollo-0.8.0.AppImage"');
-    expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', '/u/builds/Apollo-0.8.0.AppImage', home)).toBe(true);
+    expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', '/u/builds/Apollo-0.8.0.AppImage', home, undefined, noop)).toBe(true);
     expect(read()).toContain('Exec="/u/builds/Apollo.AppImage" %U');
     expect(read()).toContain('MimeType=text/html;');
     fs.rmSync(home, { recursive: true, force: true });
@@ -59,8 +60,23 @@ describe('entrada do menu acompanha o AppImage', () => {
   it('ao abrir: conserta entrada que aponta para um AppImage apagado; não mexe se o arquivo existe', () => {
     const { home, read } = setup('"/u/builds/Apollo-0.8.0.AppImage"');
     expect(retargetDesktopEntry('/u/builds/Apollo-0.9.0.AppImage', null, home, () => true)).toBe(false);
-    expect(retargetDesktopEntry('/u/builds/Apollo-0.9.0.AppImage', null, home, () => false)).toBe(true);
+    expect(retargetDesktopEntry('/u/builds/Apollo-0.9.0.AppImage', null, home, () => false, noop)).toBe(true);
     expect(read()).toContain('Exec="/u/builds/Apollo-0.9.0.AppImage" %U');
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  // Regressão: a entrada era reescrita no lugar; a pasta não mudava, o KDE não refazia o
+  // cache (ksycoca) e o navegador padrão seguia chamando o AppImage antigo (0.9.0 → 0.9.2).
+  it('troca o arquivo inteiro, mudando a pasta, para o menu do sistema perceber', () => {
+    const { home } = setup('"/u/builds/Apollo-0.9.0.AppImage"');
+    const dir = path.join(home, '.local/share/applications');
+    const old = new Date(Date.now() - 86_400_000);
+    fs.utimesSync(dir, old, old);
+    const refreshed: string[] = [];
+    expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', null, home, () => false, (d) => refreshed.push(d))).toBe(true);
+    expect(refreshed).toEqual([dir]); // e pede ao sistema para refazer o cache do menu
+    expect(fs.statSync(dir).mtimeMs).toBeGreaterThan(old.getTime() + 1000);
+    expect(fs.readdirSync(dir)).toEqual(['apollo.desktop']); // sem sobra do temporário
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -69,7 +85,7 @@ describe('entrada do menu acompanha o AppImage', () => {
     expect(retargetDesktopEntry('/x/Apollo.AppImage', null, dev.home, () => false)).toBe(false);
     expect(retargetDesktopEntry('/x/Apollo.AppImage', null, path.join(os.tmpdir(), 'nao-existe-apollo'))).toBe(false);
     const esp = setup(launchCommand({ appImage: '/u/meus $apps/Apollo-0.8.0.AppImage', execPath: '', packaged: true, appPath: '' }));
-    expect(retargetDesktopEntry('/u/meus $apps/Apollo.AppImage', '/u/meus $apps/Apollo-0.8.0.AppImage', esp.home)).toBe(true);
+    expect(retargetDesktopEntry('/u/meus $apps/Apollo.AppImage', '/u/meus $apps/Apollo-0.8.0.AppImage', esp.home, undefined, noop)).toBe(true);
     expect(esp.read()).toContain('Exec="/u/meus \\$apps/Apollo.AppImage" %U');
     for (const h of [dev.home, esp.home]) fs.rmSync(h, { recursive: true, force: true });
   });

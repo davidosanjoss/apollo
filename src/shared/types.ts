@@ -212,6 +212,8 @@ export interface SettingsInfo {
   sync: SyncInfo;
   /** Guardar histórico de visitas (nunca nos workspaces temporários). */
   historyOn: boolean;
+  /** Sugestões de pesquisa (Google) ao digitar na barra de endereço. */
+  searchSuggest: boolean;
   /** Mostrar a barra de favoritos (Ctrl+Shift+B). */
   bookmarkBar: boolean;
 }
@@ -242,6 +244,8 @@ export interface UiState {
   paletteTabs: { id: string; title: string; url: string; workspaceId: string }[] | null;
   /** Histórico do workspace que casa com o que foi digitado na paleta (null = paleta fechada ou vazia). */
   paletteHistory: { url: string; title: string }[] | null;
+  /** Sugestões da barra de endereço para o texto digitado (null = barra sem sugestões). */
+  addressSuggest: { text: string; items: import('./suggest').Suggestion[]; inline: import('./suggest').InlineCompletion | null } | null;
   panels: PanelInfo[];
   /** Painel aberto (só um por vez). */
   activePanelId: string | null;
@@ -407,7 +411,14 @@ export type UiCommand =
   | { type: 'palette:toggle'; open: boolean }
   /** Texto digitado na paleta (para buscar no histórico). */
   | { type: 'palette:query'; text: string }
+  /** Barra de endereço: texto digitado e onde fica a barra (para a lista de sugestões aparecer embaixo). */
+  | { type: 'address:suggest'; text: string; x: number; y: number; width: number }
+  /** Destaque da lista (-1 = nenhum), mudado pelas setas. */
+  | { type: 'address:select'; index: number }
+  | { type: 'address:close' }
   | { type: 'settings:history'; on: boolean }
+  /** Sugestões de pesquisa do Google na barra de endereço. */
+  | { type: 'settings:search-suggest'; on: boolean }
   /** Apaga o histórico de visitas de todos os workspaces. */
   | { type: 'history:clear' }
   | { type: 'panel:add'; url: string; workspaceId: string; mobile: boolean }
