@@ -53,7 +53,9 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-features', [
     'AcceleratedVideoDecodeLinuxGL',
     'AcceleratedVideoDecodeLinuxZeroCopyGL',
-    'AcceleratedVideoEncoder',
+    // Sem 'AcceleratedVideoEncoder': a codificação H.264 por VA-API (AMD/Mesa) gerava quadros
+    // que o outro lado não decodificava, e quem via o compartilhamento de tela do Teams via
+    // tudo preto. A decodificação (vídeos, YouTube) continua por hardware.
   ].join(','));
   // Gerenciamento de cor do Wayland (wp_color_manager_v1): compositores como o KWin
   // recusam a função de transferência que o Chromium pede e o log se enche de
