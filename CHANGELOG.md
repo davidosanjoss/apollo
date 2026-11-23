@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Melhorado
+- Favoritos dentro de pastas da barra agora mostram o ícone do site no menu da pasta (PNG, JPEG e .ico). O ícone é baixado uma vez e guardado em memória; na primeira vez que a pasta abre, o menu espera no máximo 0,6 s por ele.
+
 ## [0.10.1] - 2026-11-23
 
 ### Corrigido

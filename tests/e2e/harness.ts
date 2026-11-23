@@ -168,6 +168,12 @@ export async function startSite(): Promise<TestSite> {
           <p><a id="link" href="/page?title=Destino">Ir ao destino</a></p>
           <p><img id="img" src="/pixel" width="60" height="60" style="background:#c33"></p>
           <p><input id="campo" spellcheck="true" value="xyzzyq" style="width:300px"></p>`, 'Contexto');
+      case '/iconpage':
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); // o ícone precisa estar no <head>
+        return res.end(`<!doctype html><head><title>${u.searchParams.get('title') ?? 'Com ícone'}</title><link rel="icon" href="/icon.png"></head><body>ok</body>`);
+      case '/icon.png':
+        res.writeHead(200, { 'content-type': 'image/png' });
+        return res.end(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64'));
       case '/pixel':
         res.writeHead(200, { 'content-type': 'image/gif' });
         return res.end(Buffer.from('R0lGODlhAQABAAAAACw=', 'base64'));
