@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Corrigido
+- Gerenciador de favoritos: o ícone de cada site não tinha tamanho fixo. Ícones grandes apareciam no tamanho original, e quando um ícone falhava e virava a inicial, a linha mudava de largura sob o mouse.
+
 ## [0.11.0] - 2026-11-23
 
 ### Adicionado

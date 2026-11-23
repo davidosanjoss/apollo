@@ -77,6 +77,10 @@ describe('barra de favoritos', () => {
     await app.send({ type: 'bookmark:context', bookmarkId: null, x: 100, y: 100 });
     await clickMenu(['Gerenciar favoritos…']);
     await waitFor(() => dialogOpen('bookmarks-manager'), 'gerenciador');
+    // Regressão (CI do release v0.11.0): o ícone sem tamanho fixo mudava a linha de largura
+    // quando o favicon falhava e virava a inicial, e o clique no "＋" errava o botão.
+    expect(await ui<string[]>(`[...document.querySelectorAll('#bm-tree .row .i')].map((i) => {
+      const r = i.getBoundingClientRect(); return r.width + 'x' + r.height; })`)).toSatisfy((a: string[]) => a.length > 0 && a.every((x) => x === '16x16'));
     const fac = await id('Faculdade');
     await app.ui.mouseClick(`#bm-tree li[data-bookmark-id="${fac}"] > .row button[title="Nova subpasta"]`);
     await dialogSubmit('Cálculo');
