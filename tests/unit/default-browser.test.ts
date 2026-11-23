@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { pathToFileURL } from 'node:url';
-import { desktopEntry, launchCommand, retargetDesktopEntry, urlFromArgv } from '../../src/main/default-browser';
+import { EXEC_ENV, desktopEntry, launchCommand, retargetDesktopEntry, urlFromArgv } from '../../src/main/default-browser';
 
 describe('navegador padrão', () => {
   it('link da linha de comando: http(s), file:// e arquivo local; ignora opções', () => {
@@ -25,7 +26,7 @@ describe('navegador padrão', () => {
 
   it('entrada .desktop declara http, https e html', () => {
     const d = desktopEntry('"/x/Apollo.AppImage"', 'apollo');
-    expect(d).toContain('Exec="/x/Apollo.AppImage" %U');
+    expect(d).toContain('Exec=env -u CHROME_DESKTOP "/x/Apollo.AppImage" %U');
     expect(d).toContain('x-scheme-handler/http;x-scheme-handler/https;');
     expect(d).toContain('Categories=Network;WebBrowser;');
   });
@@ -52,7 +53,7 @@ describe('entrada do menu acompanha o AppImage', () => {
   it('atualização com troca de nome: passa a apontar para o arquivo novo', () => {
     const { home, read } = setup('"/u/builds/Apollo-0.8.0.AppImage"');
     expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', '/u/builds/Apollo-0.8.0.AppImage', home, undefined, noop)).toBe(true);
-    expect(read()).toContain('Exec="/u/builds/Apollo.AppImage" %U');
+    expect(read()).toContain('Exec=env -u CHROME_DESKTOP "/u/builds/Apollo.AppImage" %U');
     expect(read()).toContain('MimeType=text/html;');
     fs.rmSync(home, { recursive: true, force: true });
   });
@@ -61,7 +62,7 @@ describe('entrada do menu acompanha o AppImage', () => {
     const { home, read } = setup('"/u/builds/Apollo-0.8.0.AppImage"');
     expect(retargetDesktopEntry('/u/builds/Apollo-0.9.0.AppImage', null, home, () => true)).toBe(false);
     expect(retargetDesktopEntry('/u/builds/Apollo-0.9.0.AppImage', null, home, () => false, noop)).toBe(true);
-    expect(read()).toContain('Exec="/u/builds/Apollo-0.9.0.AppImage" %U');
+    expect(read()).toContain('Exec=env -u CHROME_DESKTOP "/u/builds/Apollo-0.9.0.AppImage" %U');
     fs.rmSync(home, { recursive: true, force: true });
   });
 
@@ -86,7 +87,38 @@ describe('entrada do menu acompanha o AppImage', () => {
     expect(retargetDesktopEntry('/x/Apollo.AppImage', null, path.join(os.tmpdir(), 'nao-existe-apollo'))).toBe(false);
     const esp = setup(launchCommand({ appImage: '/u/meus $apps/Apollo-0.8.0.AppImage', execPath: '', packaged: true, appPath: '' }));
     expect(retargetDesktopEntry('/u/meus $apps/Apollo.AppImage', '/u/meus $apps/Apollo-0.8.0.AppImage', esp.home, undefined, noop)).toBe(true);
-    expect(esp.read()).toContain('Exec="/u/meus \\$apps/Apollo.AppImage" %U');
+    expect(esp.read()).toContain('Exec=env -u CHROME_DESKTOP "/u/meus \\$apps/Apollo.AppImage" %U');
     for (const h of [dev.home, esp.home]) fs.rmSync(h, { recursive: true, force: true });
+  });
+});
+
+// Regressão (relatado): login do Claude Desktop não abria no Apollo. Apps em Electron chamam
+// xdg-open com o CHROME_DESKTOP deles; herdado, ele derrubava o Apollo ao iniciar (zygote),
+// antes de o link chegar à janela aberta. A entrada do menu tira a variável.
+describe('links vindos de apps em Electron', () => {
+  it('a entrada chama o Apollo sem o CHROME_DESKTOP herdado', () => {
+    expect(desktopEntry('"/x/Apollo.AppImage"', 'apollo')).toContain(`Exec=${EXEC_ENV}"/x/Apollo.AppImage" %U`);
+    expect(fs.readFileSync(path.join(__dirname, '../../packaging/aur/apollo-browser.desktop'), 'utf8'))
+      .toContain(`Exec=${EXEC_ENV}apollo-browser %U`);
+  });
+
+  it.skipIf(process.platform !== 'linux')('o prefixo de fato remove a variável', () => {
+    const out = execFileSync('sh', ['-c', `${EXEC_ENV}sh -c 'echo "\${CHROME_DESKTOP-sem}"'`],
+      { env: { ...process.env, CHROME_DESKTOP: 'claude-desktop.desktop' } }).toString().trim();
+    expect(out).toBe('sem');
+  });
+
+  it('entrada de versão antiga (sem o prefixo) é consertada ao abrir, mesmo com o AppImage no lugar', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'apollo-de-'));
+    const dir = path.join(home, '.local/share/applications');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, 'apollo.desktop');
+    fs.writeFileSync(file, desktopEntry('"/u/builds/Apollo.AppImage"', 'apollo').replace(EXEC_ENV, ''));
+    const refreshed: string[] = [];
+    expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', null, home, () => true, (d) => refreshed.push(d))).toBe(true);
+    expect(fs.readFileSync(file, 'utf8')).toContain(`Exec=${EXEC_ENV}"/u/builds/Apollo.AppImage" %U`);
+    expect(refreshed).toEqual([dir]);
+    expect(retargetDesktopEntry('/u/builds/Apollo.AppImage', null, home, () => true, () => {})).toBe(false); // já certa: não mexe
+    fs.rmSync(home, { recursive: true, force: true });
   });
 });

@@ -27,13 +27,20 @@ export function launchCommand(o: { appImage?: string; execPath: string; packaged
   return o.packaged ? q(o.execPath) : `${q(o.execPath)} ${q(o.appPath)}`;
 }
 
+/**
+ * Prefixo do Exec da entrada. Apps em Electron (Claude Desktop, VS Code, Slack…) abrem links
+ * com xdg-open passando o CHROME_DESKTOP deles; herdado, ele derruba o Chromium do Apollo
+ * antes de qualquer código nosso rodar ("Zygote process exited prematurely") e o link some.
+ */
+export const EXEC_ENV = 'env -u CHROME_DESKTOP ';
+
 export function desktopEntry(exec: string, icon: string): string {
   return `[Desktop Entry]
 Type=Application
 Name=Apollo
 GenericName=Navegador
 Comment=Navegador com workspaces, painéis e privacidade
-Exec=${exec} %U
+Exec=${EXEC_ENV}${exec} %U
 Icon=${icon}
 Terminal=false
 Categories=Network;WebBrowser;
@@ -46,19 +53,21 @@ StartupNotify=true
 /**
  * O AppImage mudou de caminho (atualização): a entrada do Apollo no menu (criada pelo botão
  * "navegador padrão") passa a apontar para o arquivo novo. Também conserta, ao abrir, uma
- * entrada que aponta para um AppImage que não existe mais. Devolve true se mudou algo.
+ * entrada que aponta para um AppImage que não existe mais, e a de versões antigas sem o
+ * EXEC_ENV. Devolve true se mudou algo.
  */
 export function retargetDesktopEntry(newAppImage: string, oldAppImage: string | null = null, home = os.homedir(),
   exists: (p: string) => boolean = fs.existsSync, refresh: (apps: string) => void = refreshMenuCaches): boolean {
   const file = path.join(home, '.local/share/applications', DESKTOP_FILE);
   let text: string;
   try { text = fs.readFileSync(file, 'utf8'); } catch { return false; }
-  const m = /^Exec="([^"]+\.AppImage)"(.*)$/m.exec(text);
+  const m = /^Exec=(env -u CHROME_DESKTOP )?"([^"]+\.AppImage)"(.*)$/m.exec(text);
   if (!m) return false; // não é a entrada de um AppImage (ex.: instalado pelo AUR)
-  const current = m[1].replace(/\\(["\\`$])/g, '$1');
-  const stale = oldAppImage ? current === oldAppImage : !exists(current);
-  if (!stale || current === newAppImage) return false;
-  writeDesktopFile(file, text.replace(m[0], `Exec=${launchCommand({ appImage: newAppImage, execPath: '', packaged: true, appPath: '' })}${m[2]}`));
+  const current = m[2].replace(/\\(["\\`$])/g, '$1');
+  const stale = (oldAppImage ? current === oldAppImage : !exists(current)) && current !== newAppImage;
+  if (!stale && m[1]) return false;
+  const target = stale ? newAppImage : current;
+  writeDesktopFile(file, text.replace(m[0], `Exec=${EXEC_ENV}${launchCommand({ appImage: target, execPath: '', packaged: true, appPath: '' })}${m[3]}`));
   refresh(path.dirname(file));
   return true;
 }
