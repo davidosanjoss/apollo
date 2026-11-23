@@ -105,7 +105,7 @@ Workspace ─ abas fixadas, grupos (nome, cor, recolhido) ─ abas
 - Fuses (aplicados em `scripts/after-pack.cjs`): `RunAsNode`, `NODE_OPTIONS` e `--inspect` desligados; `EnableCookieEncryption` e `OnlyLoadAppFromAsar` ligados; `file://` sem privilégios extras (a UI é servida por `apollo://`).
 - Cookies já existentes (não cifrados) continuam válidos após ligar a criptografia (testado).
 - Pendente: validação de integridade do ASAR no Windows (exige suporte do electron-builder; não testável sem Windows).
-- Windows: assinatura VMP do castLabs para DRM, aplicada depois dos fuses.
+- Windows: assinatura VMP do castLabs para DRM, aplicada depois dos fuses e, havendo assinatura de código, refeita depois dela (`scripts/after-sign.cjs`).
 
 ### D10: Permissões
 - Liberadas: tela cheia, escrita na área de transferência, DRM, pointer/keyboard lock.

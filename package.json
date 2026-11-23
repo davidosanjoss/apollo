@@ -53,6 +53,7 @@
       "assets/**/*"
     ],
     "afterPack": "scripts/after-pack.cjs",
+    "afterSign": "scripts/after-sign.cjs",
     "linux": {
       "target": [
         "AppImage",
