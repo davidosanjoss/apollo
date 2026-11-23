@@ -69,3 +69,42 @@ describe('compartilhar tela', () => {
     expect((await app.state()).screenPicker).toBeNull();
   });
 });
+
+// Regressão (relatado): no Teams a tela compartilhada chegava preta para os outros. A captura
+// estava certa; o H.264 codificado pela placa (VA-API) não decodificava do outro lado. Aqui a
+// aba compartilhada vai por uma chamada WebRTC local em H.264 e a imagem precisa chegar.
+// (No CI, sem placa de vídeo, confere o caminho em software; com APOLLO_E2E_SHOW=1, o real.)
+describe('compartilhar tela numa chamada', () => {
+  it('o vídeo em H.264 chega ao outro lado com imagem (não preto)', async () => {
+    await meeting.eval(`(() => { window.chamada = null; document.getElementById('compartilhar').onclick = async () => { try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+      a.onicecandidate = (e) => e.candidate && b.addIceCandidate(e.candidate);
+      b.onicecandidate = (e) => e.candidate && a.addIceCandidate(e.candidate);
+      const tr = a.addTransceiver(s.getVideoTracks()[0], { direction: 'sendonly' });
+      tr.setCodecPreferences(RTCRtpSender.getCapabilities('video').codecs.filter((c) => c.mimeType === 'video/H264'));
+      const remoto = new Promise((r) => { b.ontrack = (e) => r(new MediaStream([e.track])); });
+      await a.setLocalDescription(); await b.setRemoteDescription(a.localDescription);
+      await b.setLocalDescription(); await a.setRemoteDescription(b.localDescription);
+      const v = document.createElement('video'); v.muted = true; v.srcObject = await remoto; document.body.append(v);
+      await v.play();
+      await new Promise((r) => setTimeout(r, 1500));
+      const c = document.createElement('canvas'); c.width = 32; c.height = 18;
+      const g = c.getContext('2d'); g.drawImage(v, 0, 0, 32, 18);
+      const d = g.getImageData(0, 0, 32, 18).data; let t = 0;
+      for (let i = 0; i < d.length; i += 4) t += d[i] + d[i + 1] + d[i + 2];
+      let quadros = 0;
+      (await b.getStats()).forEach((x) => { if (x.type === 'inbound-rtp' && x.kind === 'video') quadros = x.framesDecoded; });
+      window.chamada = JSON.stringify({ quadros, brilho: Math.round(t / (d.length / 4) / 3) });
+      a.close(); b.close(); s.getTracks().forEach((x) => x.stop());
+    } catch (e) { window.chamada = 'erro:' + e.name; } }; return true; })()`);
+    await meeting.mouseClick('#compartilhar');
+    const s = await app.until((x) => x.screenPicker !== null, 'seletor aberto');
+    await app.send({ type: 'screen:pick', requestId: s.screenPicker!.id, sourceId: `tab:${sharedTabId}`, audio: false });
+    const r = await waitFor(() => meeting.eval<string>('window.chamada || ""'), 'imagem do outro lado', 20000);
+    const { quadros, brilho } = JSON.parse(r) as { quadros: number; brilho: number };
+    expect(quadros).toBeGreaterThan(0); // o outro lado decodificou
+    // A aba "Slides" é branca. No modo sem janela (CI) a aba capturada não tem imagem: só os quadros.
+    if (process.env.APOLLO_E2E_SHOW || process.platform !== 'linux') expect(brilho).toBeGreaterThan(200);
+  });
+});

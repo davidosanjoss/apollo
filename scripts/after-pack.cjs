@@ -3,7 +3,8 @@
 // 1. Fuses do Electron: desligam recursos que transformariam o binário do Apollo
 //    num executor de código arbitrário, e ligam a criptografia de cookies.
 // 2. Assinatura VMP do castLabs (DRM no Windows). Precisa vir DEPOIS dos fuses,
-//    porque os fuses alteram o binário e invalidariam a assinatura.
+//    porque os fuses alteram o binário e invalidariam a assinatura. Pelo mesmo motivo,
+//    com assinatura de código (Authenticode) ela é refeita em scripts/after-sign.cjs.
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses');
@@ -46,6 +47,8 @@ function vmpSign(context) {
     console.warn('[after-pack] castLabs EVS indisponível — build SEM assinatura VMP (DRM limitado no Windows).');
   }
 }
+
+exports.vmpSign = vmpSign;
 
 exports.default = async function afterPack(context) {
   await applyFuses(context);

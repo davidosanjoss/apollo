@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { app, BrowserWindow, clipboard, desktopCapturer, Menu, net, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, Menu, nativeImage, net, WebContentsView, session, type MenuItemConstructorOptions, type Session, type WebContents } from 'electron';
 import type { Bookmark, Store, Tab, Workspace } from './store';
 import { withNavigation, type TabHistory } from './history';
 import { AddressPopup } from './address-popup';
@@ -75,6 +75,7 @@ import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
 import type { MemoryReport, ModuleId, PermissionDecision, PermissionKind, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
+import { FaviconCache } from './favicon-image';
 
 
 const MAX_CLOSED_TABS = 25;
@@ -921,14 +922,30 @@ export class Browser {
     else this.createTab(b.workspaceId, b.url, { activate: true });
   }
 
-  /** Itens de uma pasta como menu nativo (subpastas viram submenus). */
+  /** Ícones dos sites para os menus nativos das pastas (o menu não carrega endereços). */
+  private readonly menuIcons = new FaviconCache<Electron.NativeImage>(
+    async (url) => {
+      const res = await this.sessionFor(this.activeWorkspaceId).fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return null;
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length <= 1_000_000 ? buf : null;
+    },
+    (d) => {
+      const img = d.kind === 'encoded' ? nativeImage.createFromBuffer(d.data)
+        : nativeImage.createFromBitmap(d.data, { width: d.width, height: d.height });
+      return img.isEmpty() ? null : img.resize({ width: 16, height: 16, quality: 'best' });
+    },
+  );
+
+  /** Itens de uma pasta como menu nativo (subpastas viram submenus), com o ícone de cada site. */
   private bookmarkMenuItems(folderId: string | null, from = 0): MenuItemConstructorOptions[] {
     const all = this.store.listBookmarks(this.activeWorkspaceId);
+    const icon = (favicon: string | null) => (favicon && this.menuIcons.peek(favicon)) || undefined;
     const build = (parent: string | null, skip = 0, depth = 0): MenuItemConstructorOptions[] => {
       const kids = all.filter((b) => b.parentId === parent).slice(skip);
       const items: MenuItemConstructorOptions[] = kids.map((b) => b.folder
         ? { label: `📁 ${b.title}`, submenu: depth < 12 ? build(b.id, 0, depth + 1) : [] }
-        : { label: b.title || b.url, click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) });
+        : { label: b.title || b.url, icon: icon(b.favicon), click: this.run({ type: 'bookmark:open', bookmarkId: b.id }) });
       const links = kids.filter((b) => !b.folder).length;
       if (parent && links > 1) {
         items.push({ type: 'separator' }, { label: `Abrir todos (${links}) em abas`, click: this.run({ type: 'bookmark:open', bookmarkId: parent }) });
@@ -939,8 +956,13 @@ export class Browser {
     return build(folderId, from);
   }
 
-  private showBookmarkMenu(folderId: string | null, x: number, y: number, from?: number): void {
-    if (folderId && this.store.getBookmark(folderId)?.workspaceId !== this.activeWorkspaceId) return;
+  private async showBookmarkMenu(folderId: string | null, x: number, y: number, from?: number): Promise<void> {
+    const ws = this.activeWorkspaceId;
+    if (folderId && this.store.getBookmark(folderId)?.workspaceId !== ws) return;
+    // Ícones que ainda não estão em memória: espera um pouco (só na primeira vez).
+    const missing = this.store.listBookmarks(ws).flatMap((b) => (b.favicon && this.menuIcons.peek(b.favicon) === undefined ? [b.favicon] : []));
+    if (missing.length) await this.menuIcons.many(missing.slice(0, 300), 600);
+    if (this.activeWorkspaceId !== ws) return;
     this.popup(this.bookmarkMenuItems(folderId, from ?? 0), x, y);
   }
 
@@ -2220,7 +2242,7 @@ export class Browser {
       case 'bookmark:add-folder': this.addBookmarkFolder(cmd.title, cmd.parentId); break;
       case 'bookmark:remove': this.store.removeBookmark(cmd.bookmarkId); break;
       case 'bookmark:move': this.store.moveBookmark(cmd.bookmarkId, cmd.parentId, cmd.index); break;
-      case 'bookmark:menu': this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
+      case 'bookmark:menu': void this.showBookmarkMenu(cmd.folderId, cmd.x, cmd.y, cmd.from); break;
       case 'bookmark:context': this.showBookmarkContext(cmd.bookmarkId, cmd.x, cmd.y); break;
       case 'import:scan': this.scanImportSources(); break;
       case 'import:bookmarks': this.importBookmarks(cmd.sourceId, cmd.workspaceId); break;

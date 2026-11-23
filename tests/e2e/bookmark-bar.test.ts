@@ -187,3 +187,22 @@ describe('ferramentas na barra direita e histórico', () => {
     expect(await dialogOpen('history-dialog')).toBe(false);
   });
 });
+
+describe('ícones nas pastas', () => {
+  // Pedido do usuário: favoritos dentro de pastas apareciam sem o ícone do site (o menu
+  // nativo não carrega endereços; o ícone é baixado e decodificado antes de abrir o menu).
+  it('favorito dentro da pasta mostra o ícone do site no menu', async () => {
+    await app.send({ type: 'tab:navigate', url: `${site.url}/iconpage?title=Com%20%C3%ADcone` });
+    await app.until((s) => app.activeTab(s).title === 'Com ícone' && Boolean(app.activeTab(s).favicon), 'página com ícone');
+    await app.send({ type: 'bookmark:add' });
+    await app.until((s) => s.bookmarks.some((b) => b.title === 'Com ícone' && b.favicon), 'favorito com ícone');
+    await app.send({ type: 'bookmark:add-folder', title: 'Ícones', parentId: null });
+    await app.until((s) => s.bookmarks.some((b) => b.title === 'Ícones'), 'pasta');
+    await app.send({ type: 'bookmark:move', bookmarkId: await id('Com ícone'), parentId: await id('Ícones'), index: 0 });
+    await app.until((s) => s.bookmarks.find((b) => b.title === 'Com ícone')?.parentId !== null, 'na pasta');
+    await app.send({ type: 'bookmark:menu', folderId: await id('Ícones'), x: 10, y: 10 });
+    await waitFor(async () => (await menuLabels()).includes('Com ícone'), 'menu da pasta');
+    expect(await main.eval<number[] | null>(`(() => { const it = globalThis.__apolloTest.browser.lastMenu.find((i) => i.label === 'Com ícone');
+      if (!it.icon || it.icon.isEmpty()) return null; const s = it.icon.getSize(); return [s.width, s.height]; })()`)).toEqual([16, 16]);
+  });
+});

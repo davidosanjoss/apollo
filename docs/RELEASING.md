@@ -72,6 +72,19 @@ Para Netflix/Prime funcionarem no Windows, o build precisa de assinatura VMP do 
 
 Sem isso, o build sai normalmente, só sem a assinatura.
 
+## Assinatura de código no Windows (opcional)
+
+Sem ela, o Windows avisa "editor desconhecido" ao instalar. Opções para pessoa física no
+Brasil: SignPath Foundation (grátis para código aberto, o editor aparece como "SignPath
+Foundation") ou Certum Open Source Code Signing na nuvem (anual, o editor é o seu nome).
+Azure Trusted Signing não aceita pessoa física fora de EUA/Canadá.
+
+A ordem das assinaturas já está pronta: fuses (`after-pack`) → assinatura de código
+(electron-builder) → VMP do castLabs, refeita em `scripts/after-sign.cjs` (a assinatura de
+código altera o .exe e invalidaria a VMP). O `afterSign` só roda quando houve assinatura de
+código; sem certificado, a VMP do `after-pack` vale. Falta só configurar o certificado no
+workflow de release.
+
 ## Proteções
 
 | Repositório | Proteção |

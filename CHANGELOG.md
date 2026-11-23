@@ -4,6 +4,14 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.11.0] - 2026-11-23
+
+### Adicionado
+- Favoritos dentro de pastas da barra agora mostram o ícone do site no menu da pasta (PNG, JPEG e .ico). O ícone é baixado uma vez e guardado em memória; na primeira vez que a pasta abre, o menu espera no máximo 0,6 s por ele.
+
+### Corrigido
+- Compartilhar tela no Teams (Linux): quem assistia via tudo preto. A captura estava certa, mas o vídeo em H.264 era codificado pela placa de vídeo (VA-API) em quadros que o outro lado não conseguia decodificar. A codificação por hardware foi desligada; a decodificação (vídeos, YouTube) continua pela placa.
+
 ## [0.10.1] - 2026-11-23
 
 ### Corrigido
