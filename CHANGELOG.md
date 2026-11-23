@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Corrigido
+- Links abertos por apps feitos em Electron (login do Claude Desktop, VS Code, Slack, Discord…) não abriam no Apollo: o Apollo herdava uma variável desses apps (`CHROME_DESKTOP`) e fechava ao iniciar, antes de receber o link. A entrada do Apollo no menu passa a chamá-lo sem essa variável, e a entrada antiga se atualiza sozinha ao abrir o Apollo.
+
 ## [0.10.0] - 2026-11-13
 
 ### Adicionado
