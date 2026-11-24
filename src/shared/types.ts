@@ -253,6 +253,8 @@ export interface UiState {
   customizations: CustomizationInfo[];
   /** Pedido de compartilhar tela aguardando a escolha do usuário. */
   screenPicker: ScreenPickerInfo | null;
+  /** Pedido de passkey (entrar ou criar) da aba ativa, à espera da escolha. */
+  passkeyPrompt: PasskeyPromptInfo | null;
   /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
   /** Importar favoritos: navegadores encontrados (null = ainda não procurou) e o último resultado. */
@@ -318,6 +320,25 @@ export interface ScreenSource {
   kind: 'screen' | 'window' | 'tab' | 'system';
   /** Miniatura (data: URL) ou null. */
   thumbnail: string | null;
+}
+
+/** Passkey: o site pediu para entrar com uma, ou para criar uma (salva no Bitwarden). */
+export interface PasskeyPromptInfo {
+  id: string;
+  kind: 'get' | 'create';
+  /** Site (rpId) da passkey. */
+  site: string;
+  vault: 'disconnected' | 'locked' | 'unlocked';
+  /** get: as passkeys do site; create: onde salvar ('new' = login novo). */
+  options: { id: string; label: string; detail: string | null; replaces: boolean }[];
+  /** create: usuário que o site informou. */
+  userName: string | null;
+  /** Windows: dá para usar o Windows Hello / chave de segurança no lugar. */
+  canFallback: boolean;
+  /** Aviso no lugar da escolha (ex.: nenhuma passkey para o site). */
+  message: string | null;
+  busy: boolean;
+  error: string | null;
 }
 
 export interface ScreenPickerInfo {
@@ -493,6 +514,8 @@ export type UiCommand =
   | { type: 'bookmark:open'; bookmarkId: string; newTab?: boolean }
   /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
   | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
+  | { type: 'passkey:answer'; promptId: string; choice: string | null; fallback?: boolean }
+  | { type: 'passkey:use'; optionId: string }
   /** Cria (sem id) ou edita uma personalização. */
   | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
   | { type: 'custom:delete'; id: string }

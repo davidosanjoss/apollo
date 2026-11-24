@@ -118,6 +118,7 @@ function render(): void {
   renderPanels(s);
   renderModules(s);
   renderScreenPicker(s);
+  renderPasskey(s);
   renderPalette();
 }
 
@@ -1643,6 +1644,74 @@ $('#screen-form').addEventListener('submit', (e) => {
 $('#screen-cancel').onclick = () => screenDialog.close();
 // Fechar de qualquer jeito (Esc, Cancelar) sem escolher = negar.
 screenDialog.addEventListener('close', () => { if (screenRequestId) answerScreen(null); });
+
+// ------------------------------------------------------------ passkeys (Bitwarden)
+
+const passkeyDialog = $<HTMLDialogElement>('#passkey-dialog');
+let passkeyShown: string | null = null;
+let passkeyKey = '';
+let passkeyChoice: string | null = null;
+
+function renderPasskey(s: UiState): void {
+  const p = s.passkeyPrompt;
+  if (!p) {
+    if (passkeyDialog.open) { passkeyShown = null; passkeyDialog.close(); }
+    passkeyShown = null;
+    return;
+  }
+  // Outro diálogo aberto (ex.: desbloqueando o Bitwarden): espera ele fechar.
+  const other = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].some((d) => d !== passkeyDialog);
+  if (other) return;
+  if (passkeyShown !== p.id) { passkeyShown = p.id; passkeyChoice = null; passkeyKey = ''; }
+  const key = JSON.stringify(p);
+  if (key !== passkeyKey) {
+    passkeyKey = key;
+    const create = p.kind === 'create';
+    $('#passkey-title').textContent = create ? 'Salvar passkey no Bitwarden' : 'Entrar com passkey';
+    $('#passkey-hint').textContent = create
+      ? `${p.site} quer criar uma passkey${p.userName ? ` para ${p.userName}` : ''}. Ela fica guardada no seu Bitwarden.`
+      : `${p.site} pede uma passkey. Escolha qual usar (guardadas no seu Bitwarden).`;
+    const msg = p.vault === 'disconnected' ? 'Conecte o Bitwarden para usar passkeys no Apollo.'
+      : p.vault === 'locked' ? 'Desbloqueie o Bitwarden para continuar.' : p.message;
+    $('#passkey-message').hidden = !msg;
+    $('#passkey-message').textContent = msg ?? '';
+    $('#passkey-error').hidden = !p.error;
+    $('#passkey-error').textContent = p.error ?? '';
+    if (p.options.length === 1) passkeyChoice = p.options[0].id;
+    if (passkeyChoice && !p.options.some((o) => o.id === passkeyChoice)) passkeyChoice = null;
+    $('#passkey-options').replaceChildren(...p.options.map((o) => {
+      const b = el('button', { type: 'button', className: `passkey-opt${o.id === passkeyChoice ? ' selected' : ''}${o.replaces ? ' replaces' : ''}` });
+      b.dataset.option = o.id;
+      b.append(el('span', { className: 't', textContent: o.label }), ...(o.detail ? [el('span', { className: 'd', textContent: o.detail })] : []));
+      b.onclick = () => { passkeyChoice = o.id; passkeyKey = ''; renderPasskey(state!); };
+      b.ondblclick = () => { passkeyChoice = o.id; answerPasskey(o.id); };
+      return b;
+    }));
+    const needsVault = p.vault !== 'unlocked';
+    $('#passkey-unlock').hidden = !needsVault;
+    $('#passkey-unlock').textContent = p.vault === 'disconnected' ? 'Conectar o Bitwarden' : 'Desbloquear o Bitwarden';
+    const ok = $<HTMLButtonElement>('#passkey-ok');
+    ok.hidden = needsVault || !p.options.length;
+    ok.disabled = p.busy || !passkeyChoice;
+    ok.textContent = p.busy ? 'Salvando…' : create ? 'Salvar passkey' : 'Entrar';
+    $('#passkey-fallback').hidden = !p.canFallback;
+    $<HTMLButtonElement>('#passkey-cancel').disabled = p.busy;
+  }
+  if (!passkeyDialog.open) passkeyDialog.showModal();
+}
+
+const answerPasskey = (choice: string | null, fallback = false) => {
+  const p = state?.passkeyPrompt;
+  if (p) send({ type: 'passkey:answer', promptId: p.id, choice, ...(fallback ? { fallback: true } : {}) });
+};
+$('#passkey-form').addEventListener('submit', (e) => { e.preventDefault(); if (passkeyChoice) answerPasskey(passkeyChoice); });
+$('#passkey-cancel').onclick = () => answerPasskey(null);
+$('#passkey-fallback').onclick = () => answerPasskey(null, true);
+$('#passkey-unlock').onclick = () => { passkeyDialog.close(); openVault(); };
+// Esc: cancela (o site recebe "cancelado"), a não ser que a janela tenha sido fechada para desbloquear.
+passkeyDialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!state?.passkeyPrompt?.busy) answerPasskey(null); });
+// Fechou o desbloqueio: a janela da passkey volta (com as passkeys, se desbloqueou).
+vaultDialog.addEventListener('close', () => { passkeyKey = ''; if (state) renderPasskey(state); });
 
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 

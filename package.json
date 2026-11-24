@@ -22,6 +22,7 @@
     "@ghostery/adblocker": "^2.20.3",
     "@ghostery/adblocker-content": "^2.20.3",
     "@ghostery/adblocker-electron-preload": "^2.20.3",
+    "@simplewebauthn/server": "14.0.3",
     "@types/node": "^24.19.2",
     "electron": "github:castlabs/electron-releases#v45.2.1+wvcus",
     "electron-builder": "^26.18.0",

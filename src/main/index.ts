@@ -274,6 +274,9 @@ app.whenReady().then(async () => {
     vault: () => vault.unlocked,
     saveLogin: (l) => vault.saveLogin(l),
     updatePassword: (id, p) => vault.updatePassword(id, p),
+    savePasskeyNew: (name, uri, pk) => vault.savePasskeyNew(name, uri, pk),
+    savePasskeyTo: (id, pk) => vault.savePasskeyTo(id, pk),
+    updatePasskeyCounter: (id, cred, n) => vault.updatePasskeyCounter(id, cred, n),
   });
   // Logins enviados nas abas (preload): só do frame principal de uma aba; URL do próprio frame.
   const fromTabFrame = (event: Electron.IpcMainEvent) => {
@@ -291,6 +294,19 @@ app.whenReady().then(async () => {
     const src = fromTabFrame(event);
     const u = text(username);
     if (src && u) browser.onUsernameStep(src.tabId, src.url, u);
+  });
+  // Passkeys (navigator.credentials da página, pelo preload): só do frame principal de uma
+  // aba, e a origem é a do próprio frame (não o que a página diz).
+  ipcMain.handle('apollo:webauthn', (event, raw: unknown) => {
+    const src = fromTabFrame(event as unknown as Electron.IpcMainEvent);
+    let origin: string | null = null;
+    try { origin = src ? new URL(src.url).origin : null; } catch { origin = null; }
+    if (!src || !origin || origin === 'null') return { error: 'NotAllowedError', message: 'A operação não é permitida aqui.' };
+    return browser.passkeyRequest(src.tabId, origin, raw);
+  });
+  ipcMain.on('apollo:webauthn-cancel', (event, reqId: unknown) => {
+    const src = fromTabFrame(event);
+    if (src) browser.passkeys.cancel(src.tabId, reqId);
   });
   // Bloqueio automático: tela bloqueada, suspensão e tempo ocioso do sistema.
   powerMonitor.on('lock-screen', () => vault.lock());

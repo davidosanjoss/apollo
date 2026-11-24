@@ -3,7 +3,7 @@ import { vaultMenu } from '../../src/main/vault/menu';
 import type { VaultLogin } from '../../src/main/vault/vault';
 
 const login = (over: Partial<VaultLogin> = {}): VaultLogin =>
-  ({ id: 'i1', name: 'Outlook', username: 'eu@empresa.com', uris: [], hasTotp: false, organizationId: null, ...over });
+  ({ id: 'i1', name: 'Outlook', username: 'eu@empresa.com', uris: [], hasTotp: false, organizationId: null, passkeys: [], ...over });
 
 describe('vaultMenu', () => {
   it('gerar senha em todos os estados (não precisa do cofre)', () => {

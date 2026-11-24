@@ -22,7 +22,8 @@ import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 const USER_SCRIPT_WORLD = 1001;
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
-import type { NewLogin, UnlockedVault } from './vault/vault';
+import type { NewLogin, NewPasskey, UnlockedVault } from './vault/vault';
+import { PasskeyBroker } from './vault/passkey-broker';
 import { MATCH } from './vault/match';
 import { decideSave, itemName, type SaveDecision } from './vault/save';
 import { DEFAULT_GENERATOR, generatePassword } from './vault/generator';
@@ -33,6 +34,9 @@ export interface VaultProvider {
   vault(): UnlockedVault | null;
   saveLogin(login: NewLogin): Promise<boolean | null>;
   updatePassword(id: string, password: string): Promise<boolean | null>;
+  savePasskeyNew(name: string, uri: string, passkey: NewPasskey): Promise<boolean | null>;
+  savePasskeyTo(id: string, passkey: NewPasskey): Promise<boolean | null>;
+  updatePasskeyCounter(id: string, credentialId: string, counter: number): Promise<unknown>;
 }
 
 interface PendingSave {
@@ -410,6 +414,7 @@ export class Browser {
 
       this.unloadBlocked.delete(tabId);
       this.permissions.cancelForTab(tabId);
+      this.passkeys.cancelTab(tabId);
       this.videoTabs.delete(tabId);
       this.readerAvailable.delete(tabId);
       this.readerActive.delete(tabId);
@@ -503,6 +508,7 @@ export class Browser {
       }
       this.tabByWebContents.delete(wcId);
       this.views.delete(tabId);
+      this.passkeys.cancelTab(tabId);
       this.loading.delete(tabId);
       this.playing.delete(tabId);
       this.push();
@@ -2211,6 +2217,8 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'passkey:use': { const t = this.activeTab(); if (t) this.passkeys.useConditional(t.id, cmd.optionId); break; }
+      case 'passkey:answer': void this.passkeys.answer(cmd.promptId, cmd.choice, cmd.fallback === true); break;
       case 'zoom:set': this.zoomActive(cmd.dir); break;
       case 'view:fullscreen': this.toggleFullscreen(); break;
       case 'tab:pip': { const t = this.activeTab(); this.withActiveWc((wc) => void this.togglePip(wc, t?.id ?? null)); break; }
@@ -2493,6 +2501,23 @@ export class Browser {
     this.vaultProvider = p;
   }
 
+  /** Passkeys pelo Bitwarden: pedidos das abas à espera da escolha. */
+  readonly passkeys = new PasskeyBroker({
+    status: () => this.vaultProvider?.status() ?? 'disconnected',
+    vault: () => this.vaultProvider?.vault() ?? null,
+    loginsFor: (url) => { const v = this.vaultProvider?.vault(); return v ? loginsFor(v.logins, url, this.vaultMatch()) : []; },
+    saveNew: (name, uri, pk) => this.vaultProvider?.savePasskeyNew(name, uri, pk) ?? Promise.resolve(null),
+    saveTo: (id, pk) => this.vaultProvider?.savePasskeyTo(id, pk) ?? Promise.resolve(null),
+    updateCounter: (id, cred, n) => this.vaultProvider?.updatePasskeyCounter(id, cred, n) ?? Promise.resolve(null),
+    onChange: () => this.push(),
+    canFallback: process.platform === 'win32',
+  });
+
+  /** Pedido de passkey de uma aba (origem do frame principal, conferida por quem chama). */
+  passkeyRequest(tabId: string, origin: string, raw: unknown) {
+    return this.passkeys.request(tabId, origin, raw);
+  }
+
   /** URL atual REAL do frame principal (não a salva: a página pode ter navegado). */
   private liveUrl(): string | null {
     const tab = this.activeTab();
@@ -2516,7 +2541,8 @@ export class Browser {
     const url = this.liveUrl() ?? this.activeTab()?.url ?? '';
     const v = this.vaultProvider?.vault();
     const site = siteOf(url) ?? url;
-    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url, this.vaultMatch()) : [], site)), x, y);
+    this.popup(this.toTemplate(vaultMenu(this.vaultProvider?.status() ?? 'disconnected', v ? loginsFor(v.logins, url, this.vaultMatch()) : [], site,
+      this.passkeys.conditionalOptions(this.activeTab()?.id ?? null))), x, y);
   }
 
   /** Preenche só se a página ATUAL ainda casa com o login (e só no frame principal). */
@@ -2687,6 +2713,7 @@ export class Browser {
       modules: MODULES.map((m) => ({ ...m, enabled: this.isModuleOn(m.id) })),
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
+      passkeyPrompt: this.passkeys.promptFor(this.activeTab()?.id ?? null),
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
       importSources: this.importScanned ? this.importSources.map((x) => ({ id: x.id, label: x.label, count: this.importCounts.get(x.id) ?? 0 })) : null,
       importResult: this.importResult,

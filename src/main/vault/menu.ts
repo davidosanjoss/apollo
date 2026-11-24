@@ -9,13 +9,21 @@ const GENERATE: MenuModelItem[] = [
   { kind: 'action', label: 'Gerar senha e copiar', enabled: true, command: { type: 'vault:generate', fill: false } },
 ];
 
-export function vaultMenu(status: 'disconnected' | 'locked' | 'unlocked', matches: VaultLogin[], site: string): MenuModelItem[] {
+/** O site está esperando um login com passkey ("condicional"): as passkeys dele, no topo. */
+export type PasskeyOption = { id: string; label: string };
+
+export function vaultMenu(status: 'disconnected' | 'locked' | 'unlocked', matches: VaultLogin[], site: string, passkeys: PasskeyOption[] = []): MenuModelItem[] {
+  const pk: MenuModelItem[] = passkeys.length ? [
+    ...passkeys.map((p): MenuModelItem => ({ kind: 'action', label: `Entrar com passkey — ${p.label}`, enabled: true, command: { type: 'passkey:use', optionId: p.id } })),
+    { kind: 'separator' },
+  ] : [];
   if (status === 'disconnected') return [{ kind: 'action', label: 'Conectar o Bitwarden…', enabled: true, command: { type: 'vault:open' } }, ...GENERATE];
   if (status === 'locked') {
     return [{ kind: 'info', label: 'Cofre bloqueado' }, { kind: 'action', label: 'Desbloquear…', enabled: true, command: { type: 'vault:open' } }, ...GENERATE];
   }
-  if (!matches.length) return [{ kind: 'info', label: `Nenhum login salvo para ${site}` }, ...GENERATE];
+  if (!matches.length) return [...pk, { kind: 'info', label: `Nenhum login salvo para ${site}` }, ...GENERATE];
   return [
+    ...pk,
     { kind: 'info', label: `Logins para ${site}` },
     { kind: 'separator' },
     ...matches.map((l): MenuModelItem => ({

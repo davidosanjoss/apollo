@@ -4,7 +4,7 @@
 import type { VaultStatusInfo } from '../../shared/types';
 import { BitwardenError, type BitwardenApi, type ServerChoice } from './api';
 import { makeMasterKey, VaultCryptoError, wipe, type Kdf } from './crypto';
-import { UnlockedVault, type NewLogin } from './vault';
+import { UnlockedVault, type NewLogin, type NewPasskey } from './vault';
 
 export type { SecretBox } from '../secret-box';
 import type { SecretBox } from '../secret-box';
@@ -149,6 +149,29 @@ export class VaultService {
   updatePassword(id: string, password: string): Promise<boolean | null> {
     return this.write(async (api, token, vault) => {
       const body = vault.passwordUpdateRequest(id, password);
+      if (!body) throw new BitwardenError('unexpected', 'login não encontrado no cofre');
+      return api.updateCipher(token, id, body);
+    });
+  }
+
+  /** Login novo só com a passkey (criada agora pelo site). */
+  savePasskeyNew(name: string, uri: string, passkey: NewPasskey): Promise<boolean | null> {
+    return this.write((api, token, vault) => api.createCipher(token, vault.newPasskeyLoginRequest(name, uri, passkey)));
+  }
+
+  /** Põe a passkey num login existente (substitui a que ele tiver, como o Bitwarden). */
+  savePasskeyTo(id: string, passkey: NewPasskey): Promise<boolean | null> {
+    return this.write(async (api, token, vault) => {
+      const body = vault.passkeyUpdateRequest(id, passkey);
+      if (!body) throw new BitwardenError('unexpected', 'login não encontrado no cofre');
+      return api.updateCipher(token, id, body);
+    });
+  }
+
+  /** Contador de uso da passkey (só das que contam). */
+  updatePasskeyCounter(id: string, credentialId: string, counter: number): Promise<boolean | null> {
+    return this.write(async (api, token, vault) => {
+      const body = vault.passkeyCounterRequest(id, credentialId, counter);
       if (!body) throw new BitwardenError('unexpected', 'login não encontrado no cofre');
       return api.updateCipher(token, id, body);
     });

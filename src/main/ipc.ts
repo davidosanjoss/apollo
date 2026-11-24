@@ -191,6 +191,9 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return id(c.bookmarkId) && (c.newTab === undefined || typeof c.newTab === 'boolean') ? (c as UiCommand) : null;
     case 'screen:pick':
       return id(c.requestId) && (c.sourceId === null || str(c.sourceId, 256)) && typeof c.audio === 'boolean' ? (c as UiCommand) : null;
+    case 'passkey:answer':
+      return id(c.promptId) && (c.choice === null || id(c.choice)) && (c.fallback === undefined || typeof c.fallback === 'boolean') ? (c as UiCommand) : null;
+    case 'passkey:use': return id(c.optionId) ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

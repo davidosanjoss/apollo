@@ -4,6 +4,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+### Adicionado
+- Passkeys pelo Bitwarden: sites que pedem "entrar com passkey" ou "criar passkey" agora funcionam no Apollo (antes, no Linux, o pedido ficava travado). O Apollo mostra uma janela para escolher a passkey (ou onde salvar a nova, num login existente ou novo) e usa as passkeys guardadas no seu Bitwarden, as mesmas da extensão e do celular. Quando o site oferece a passkey no campo de login, ela aparece no menu da chave da barra de endereço. No Windows, dá para usar o Windows Hello ou uma chave de segurança no lugar.
+
 ### Corrigido
 - Gerenciador de favoritos: o ícone de cada site não tinha tamanho fixo. Ícones grandes apareciam no tamanho original, e quando um ícone falhava e virava a inicial, a linha mudava de largura sob o mouse.
 

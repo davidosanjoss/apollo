@@ -473,6 +473,23 @@
     </form>
   </dialog>
 
+  <dialog id="passkey-dialog">
+    <form method="dialog" id="passkey-form">
+      <h2 id="passkey-title">Passkey</h2>
+      <p class="hint" id="passkey-hint"></p>
+      <p class="passkey-message" id="passkey-message" hidden></p>
+      <ul id="passkey-options" role="listbox"></ul>
+      <p class="passkey-error" id="passkey-error" hidden></p>
+      <div class="dialog-actions">
+        <button type="button" id="passkey-fallback" hidden>Usar outro método</button>
+        <span class="spacer"></span>
+        <button type="button" id="passkey-cancel">Cancelar</button>
+        <button type="button" id="passkey-unlock" class="primary" hidden>Desbloquear o Bitwarden</button>
+        <button type="submit" id="passkey-ok" class="primary" disabled>Continuar</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="palette">
     <input id="palette-input" autocomplete="off" spellcheck="false" placeholder="Buscar abas, workspaces, ações — ou digitar um endereço">
     <ul id="palette-list" role="listbox"></ul>

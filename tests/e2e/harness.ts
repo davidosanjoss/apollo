@@ -168,6 +168,18 @@ export async function startSite(): Promise<TestSite> {
           <p><a id="link" href="/page?title=Destino">Ir ao destino</a></p>
           <p><img id="img" src="/pixel" width="60" height="60" style="background:#c33"></p>
           <p><input id="campo" spellcheck="true" value="xyzzyq" style="width:300px"></p>`, 'Contexto');
+      case '/passkeys':
+        // Como um site com passkeys: recebe as opções do servidor (JSON) e devolve a resposta (JSON).
+        return html(`<script>
+          window.resultado = null;
+          const fim = (p, criar) => p.then((c) => { window.resultado = JSON.stringify({ ok: c.toJSON(),
+              instancia: c instanceof PublicKeyCredential && c.response instanceof (criar ? AuthenticatorAttestationResponse : AuthenticatorAssertionResponse) }); })
+            .catch((e) => { window.resultado = JSON.stringify({ erro: e.name }); });
+          window.criar = (o) => { window.resultado = null; fim(navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(o) }), true); return true; };
+          window.entrar = (o, condicional) => { window.resultado = null; window.ctl = new AbortController();
+            fim(navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(o), signal: window.ctl.signal,
+              ...(condicional ? { mediation: 'conditional' } : {}) }), false); return true; };
+        </script>ok`, 'Passkeys');
       case '/iconpage':
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); // o ícone precisa estar no <head>
         return res.end(`<!doctype html><head><title>${u.searchParams.get('title') ?? 'Com ícone'}</title><link rel="icon" href="/icon.png"></head><body>ok</body>`);
