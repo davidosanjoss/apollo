@@ -22,6 +22,7 @@ import { parseSpellcheck, spellcheckLanguages } from './spellcheck';
 const USER_SCRIPT_WORLD = 1001;
 import { loginsFor, uriMatches } from './vault/match';
 import { parseTotp, totp } from './vault/totp';
+import { bgraToRgba, describeOtpauth, normalizeSecret, otpauthFromImage } from './vault/totp-setup';
 import type { NewLogin, NewPasskey, UnlockedVault } from './vault/vault';
 import { PasskeyBroker } from './vault/passkey-broker';
 import { MATCH } from './vault/match';
@@ -37,6 +38,7 @@ export interface VaultProvider {
   savePasskeyNew(name: string, uri: string, passkey: NewPasskey): Promise<boolean | null>;
   savePasskeyTo(id: string, passkey: NewPasskey): Promise<boolean | null>;
   updatePasskeyCounter(id: string, credentialId: string, counter: number): Promise<unknown>;
+  saveTotpTo(id: string, secret: string): Promise<boolean | null>;
 }
 
 interface PendingSave {
@@ -76,7 +78,7 @@ import { buildContextMenu, type ContextAction, type ContextInfo, type ContextIte
 import type { NetworkPipeline } from './network';
 import { PermissionManager, originOf } from './permissions';
 import { PAGE_FIRST, shortcutFor, type ShortcutAction } from './shortcuts';
-import type { MemoryReport, ModuleId, PermissionDecision, PermissionKind, ScreenPickerInfo, ScreenSource, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
+import type { MemoryReport, ModuleId, PermissionDecision, PermissionKind, ScreenPickerInfo, ScreenSource, TotpCodeInfo, TotpSetupInfo, SpellcheckMode, PanelInfo, PrivacyFeature, SettingsInfo, SitePrivacy, TabInfo, UiCommand, UiEvent, UiState, UpdateStatus, VaultStatusInfo } from '../shared/types';
 import { GROUP_COLORS, PANEL_DEFAULT_WIDTH, PANEL_HIBERNATE_OPTIONS_MIN, PERMISSION_LABELS } from '../shared/types';
 import { APOLLO_HOME, isHomeUrl } from '../shared/types';
 import { FaviconCache } from './favicon-image';
@@ -2217,6 +2219,10 @@ export class Browser {
       case 'module:set': this.setModule(cmd.moduleId, cmd.enabled); break;
       case 'settings:spellcheck': this.setSpellcheck(cmd.mode); break;
       case 'screen:pick': this.pickScreen(cmd.requestId, cmd.sourceId, cmd.audio); break;
+      case 'vault:fill-totp': this.fillTotp(cmd.itemId); break;
+      case 'vault:totp-codes': this.sendTotpCodes(cmd.open === true); break;
+      case 'totp:scan': void this.scanAuthenticator(); break;
+      case 'totp:setup-answer': void this.answerTotpSetup(cmd.setupId, cmd.target, cmd.secret); break;
       case 'passkey:use': { const t = this.activeTab(); if (t) this.passkeys.useConditional(t.id, cmd.optionId); break; }
       case 'passkey:answer': void this.passkeys.answer(cmd.promptId, cmd.choice, cmd.fallback === true); break;
       case 'zoom:set': this.zoomActive(cmd.dir); break;
@@ -2555,6 +2561,122 @@ export class Browser {
     const login = v.logins.find((l) => l.id === itemId);
     if (!login || !login.uris.some((u) => uriMatches(u, url, this.vaultMatch()))) return;
     wc.mainFrame.send('apollo:fill', { username: login.username, password: v.password(itemId) });
+    // Próxima tela pede o código (2 etapas): o Apollo lembra qual login foi, e o código já vai
+    // para a área de transferência (como o Bitwarden).
+    this.lastFilled.set(tab.id, { itemId, at: Date.now() });
+    if (login.hasTotp) {
+      const code = this.totpCodeOf(itemId);
+      if (code) this.copySecret(code);
+    }
+  }
+
+  /** Login preenchido em cada aba (para preencher o código da etapa seguinte), por 5 min. */
+  private readonly lastFilled = new Map<string, { itemId: string; at: number }>();
+
+  private totpCodeOf(itemId: string): string | null {
+    const secret = this.vaultProvider?.vault()?.totpSecret(itemId);
+    try { return secret ? totp(parseTotp(secret)).code : null; } catch { return null; }
+  }
+
+  /** Preenche o código de verificação, se a página da aba ainda casa com o login. */
+  fillTotp(itemId: string, tabId = this.activeTab()?.id): boolean {
+    const v = this.vaultProvider?.vault();
+    const wc = tabId ? this.views.get(tabId)?.webContents : undefined;
+    if (!v || !wc || wc.isDestroyed()) return false;
+    const login = v.logins.find((l) => l.id === itemId);
+    if (!login?.hasTotp || !login.uris.some((u) => uriMatches(u, wc.mainFrame.url, this.vaultMatch()))) return false;
+    const code = this.totpCodeOf(itemId);
+    if (!code) return false;
+    wc.mainFrame.send('apollo:fill-otp', code);
+    return true;
+  }
+
+  /** O preload viu um campo de código: se a aba acabou de preencher um login com TOTP, preenche. */
+  onOtpField(tabId: string): void {
+    const last = this.lastFilled.get(tabId);
+    if (!last || Date.now() - last.at > 5 * 60_000) return;
+    if (this.fillTotp(last.itemId, tabId)) this.lastFilled.delete(tabId);
+  }
+
+  /** Lista de códigos (todos os logins com TOTP), para a janela "Códigos de verificação". */
+  private sendTotpCodes(open: boolean): void {
+    const v = this.vaultProvider?.vault();
+    if (!v) { if (open) this.emit({ type: 'open-vault' }); return; }
+    const now = Date.now();
+    const items: TotpCodeInfo[] = [];
+    for (const l of v.logins) {
+      if (!l.hasTotp) continue;
+      try {
+        const params = parseTotp(v.totpSecret(l.id) ?? '');
+        const t = totp(params, now);
+        items.push({ id: l.id, name: l.name, username: l.username, code: t.code, period: params.period, remaining: t.remaining });
+      } catch { /* segredo inválido: fica fora da lista */ }
+    }
+    items.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+    if (open) this.emit({ type: 'open-totp-list' });
+    this.emit({ type: 'totp-codes', items });
+  }
+
+  // ------------------------------------------------------------ cadastrar o autenticador do site
+
+  private totpSetupState: (TotpSetupInfo & { tabId: string; url: string; secret: string | null }) | null = null;
+
+  /** Lê o QR code de autenticador da página (captura da aba) e abre a janela para salvar. */
+  async scanAuthenticator(): Promise<void> {
+    const v = this.vaultProvider?.vault();
+    if (!v) { this.emit({ type: 'open-vault' }); return; }
+    const tab = this.activeTab();
+    const wc = tab && this.views.get(tab.id)?.webContents;
+    if (!tab || !wc || wc.isDestroyed()) return;
+    const url = wc.mainFrame.url;
+    if (!/^https?:/.test(url)) return;
+    // Só o que está visível na aba. A página pode ainda estar desenhando o QR: tenta algumas vezes.
+    let secret: string | null = null;
+    for (let attempt = 0; attempt < 3 && !secret; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 400));
+      if (wc.isDestroyed()) return;
+      try {
+        const img = await wc.capturePage();
+        const { width, height } = img.getSize();
+        if (width && height) secret = otpauthFromImage(bgraToRgba(img.toBitmap()), width, height);
+      } catch { secret = null; }
+    }
+    const found = secret ? describeOtpauth(secret) : null;
+    const logins = loginsFor(v.logins, url, this.vaultMatch());
+    const last = this.lastFilled.get(tab.id);
+    const byAccount = found?.account ? logins.find((l) => (l.username ?? '').toLowerCase() === found.account!.toLowerCase()) : undefined;
+    const suggested = (last && logins.some((l) => l.id === last.itemId) ? last.itemId : byAccount?.id ?? logins[0]?.id) ?? 'new';
+    this.totpSetupState = {
+      id: newId(), tabId: tab.id, url, secret, site: siteOf(url) ?? url, found, suggested, busy: false, error: null,
+      targets: [...logins.map((l) => ({ id: l.id, label: l.username ? `${l.name} — ${l.username}` : l.name, hasTotp: l.hasTotp })),
+        { id: 'new', label: 'Login novo', hasTotp: false }],
+    };
+    this.push();
+  }
+
+  /** Resposta da janela: salvar no login escolhido (com a chave do QR ou a colada) ou cancelar. */
+  async answerTotpSetup(setupId: string, target: string | null, pasted?: string): Promise<void> {
+    const st = this.totpSetupState;
+    if (!st || st.id !== setupId || st.busy) return;
+    if (target === null) { this.totpSetupState = null; this.push(); return; }
+    const secret = pasted ? normalizeSecret(pasted) : st.secret;
+    if (!secret) { st.error = 'Chave inválida. Cole a chave do autenticador que o site mostra (letras e números) ou leia o QR code.'; this.push(); return; }
+    if (!st.targets.some((t) => t.id === target)) return;
+    st.busy = true;
+    st.error = null;
+    this.push();
+    const p = this.vaultProvider;
+    const account = describeOtpauth(secret).account;
+    const ok = target === 'new'
+      ? await p?.saveLogin({ name: st.site, username: account, password: '', uri: st.url, totp: secret })
+      : await p?.saveTotpTo(target, secret);
+    if (this.totpSetupState !== st) return;
+    if (!ok) { st.busy = false; st.error = 'Não foi possível salvar no Bitwarden. Tente de novo.'; this.push(); return; }
+    this.totpSetupState = null;
+    this.push();
+    // O site costuma pedir o código atual para confirmar: preenche na hora.
+    const saved = this.vaultProvider?.vault()?.logins.find((l) => (target === 'new' ? l.name === st.site && l.hasTotp : l.id === target));
+    if (saved) this.fillTotp(saved.id, st.tabId);
   }
 
   /** Ctrl+Shift+L: preenche o primeiro login do site; cofre bloqueado → abre o diálogo. */
@@ -2714,6 +2836,8 @@ export class Browser {
       customizations: this.store.listCustomizations(),
       screenPicker: this.screenRequest?.info ?? null,
       passkeyPrompt: this.passkeys.promptFor(this.activeTab()?.id ?? null),
+      totpSetup: this.totpSetupState && this.totpSetupState.tabId === this.activeTab()?.id
+        ? (({ tabId: _t, url: _u, secret: _s, ...info }) => info)(this.totpSetupState) : null,
       bookmarks: this.store.listBookmarks(ws.id).map(({ id, title, url, favicon, parentId, folder }) => ({ id, title, url, favicon, parentId, folder })),
       importSources: this.importScanned ? this.importSources.map((x) => ({ id: x.id, label: x.label, count: this.importCounts.get(x.id) ?? 0 })) : null,
       importResult: this.importResult,

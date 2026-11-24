@@ -53,7 +53,7 @@ interface StoredCipher {
   raw: unknown;
 }
 
-export interface NewLogin { name: string; username: string | null; password: string; uri: string; match?: number | null }
+export interface NewLogin { name: string; username: string | null; password: string; uri: string; match?: number | null; totp?: string | null }
 
 const PASSWORD_HISTORY_MAX = 5;
 
@@ -227,6 +227,16 @@ export class UnlockedVault {
     return body;
   }
 
+  /** Corpo para pôr (ou trocar) o segredo do app autenticador num login (PUT /ciphers/{id}). */
+  totpUpdateRequest(itemId: string, secret: string): object | null {
+    const s = this.secrets.get(itemId);
+    if (!s) return null;
+    const body = this.keptFields(s);
+    const login = { ...(field<Record<string, unknown>>(s.raw, 'login') ?? {}) };
+    body.login = { ...login, totp: encrypt(secret, s.key) };
+    return body;
+  }
+
   /** Contador de uma passkey (só as que contam: contador 0 fica 0, como no Bitwarden). */
   passkeyCounterRequest(itemId: string, credentialId: string, counter: number): object | null {
     const s = this.secrets.get(itemId);
@@ -273,7 +283,7 @@ export class UnlockedVault {
         encryptedFor: this.userId,
         key: encrypt(raw, userKey),
         name: encrypt(login.name, key),
-        login: { username: enc(login.username), password: enc(login.password), totp: null,
+        login: { username: enc(login.username), password: enc(login.password), totp: enc(login.totp ?? null),
           uris: [{ uri: encrypt(login.uri, key), uriChecksum: encrypt(uriChecksum(login.uri), key), match: login.match ?? null }] },
       };
     } finally {

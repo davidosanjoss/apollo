@@ -255,6 +255,7 @@ export interface UiState {
   screenPicker: ScreenPickerInfo | null;
   /** Pedido de passkey (entrar ou criar) da aba ativa, à espera da escolha. */
   passkeyPrompt: PasskeyPromptInfo | null;
+  totpSetup: TotpSetupInfo | null;
   /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
   /** Importar favoritos: navegadores encontrados (null = ainda não procurou) e o último resultado. */
@@ -516,6 +517,10 @@ export type UiCommand =
   | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
   | { type: 'passkey:answer'; promptId: string; choice: string | null; fallback?: boolean }
   | { type: 'passkey:use'; optionId: string }
+  | { type: 'vault:fill-totp'; itemId: string }
+  | { type: 'vault:totp-codes'; open?: boolean }
+  | { type: 'totp:scan' }
+  | { type: 'totp:setup-answer'; setupId: string; target: string | null; secret?: string }
   /** Cria (sem id) ou edita uma personalização. */
   | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
   | { type: 'custom:delete'; id: string }
@@ -568,7 +573,35 @@ export type UiEvent =
   /** Pedir o nome de uma pasta nova (no menu do botão direito da barra). */
   | { type: 'new-bookmark-folder'; parentId: string | null }
   | { type: 'manage-bookmarks' }
-  | { type: 'open-history' };
+  | { type: 'open-history' }
+  /** Abrir a lista de códigos de verificação (TOTP) do cofre. */
+  | { type: 'open-totp-list' }
+  /** Códigos de verificação atuais (resposta a vault:totp-codes). */
+  | { type: 'totp-codes'; items: TotpCodeInfo[] };
+
+export interface TotpCodeInfo {
+  id: string;
+  name: string;
+  username: string | null;
+  code: string;
+  period: number;
+  /** Segundos até o código trocar. */
+  remaining: number;
+}
+
+/** Cadastrar o app autenticador de um site no Bitwarden (QR code lido da página ou chave colada). */
+export interface TotpSetupInfo {
+  id: string;
+  site: string;
+  /** O que o QR code da página diz (null: não achou; o usuário pode colar a chave). */
+  found: { issuer: string | null; account: string | null } | null;
+  /** Onde salvar: logins do site ou 'new'. */
+  targets: { id: string; label: string; hasTotp: boolean }[];
+  /** Sugestão de onde salvar (o login preenchido há pouco ou o da conta do QR). */
+  suggested: string;
+  busy: boolean;
+  error: string | null;
+}
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

@@ -490,6 +490,39 @@
     </form>
   </dialog>
 
+  <dialog id="totp-dialog">
+    <form method="dialog" id="totp-form">
+      <h2>Códigos de verificação</h2>
+      <input id="totp-q" type="search" placeholder="Buscar" autocomplete="off" spellcheck="false">
+      <ul id="totp-list"></ul>
+      <p class="hint" id="totp-empty" hidden>Nenhum login do Bitwarden tem app autenticador. Para cadastrar, abra a página do site que mostra o QR code e use "Configurar app autenticador desta página…" no menu da chave.</p>
+      <div class="dialog-actions">
+        <span class="hint" id="totp-copied" hidden>Copiado (some da área de transferência em 30 s)</span>
+        <span class="spacer"></span>
+        <button type="submit" class="primary">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="totp-setup-dialog">
+    <form method="dialog" id="totp-setup-form" autocomplete="off">
+      <h2>Configurar app autenticador</h2>
+      <p class="hint" id="totp-setup-hint"></p>
+      <label id="totp-setup-secret-row">Chave do autenticador
+        <input id="totp-setup-secret" type="text" spellcheck="false" placeholder="ex.: JBSW Y3DP EHPK 3PXP">
+      </label>
+      <label>Salvar no login
+        <select id="totp-setup-target"></select>
+      </label>
+      <p class="passkey-error" id="totp-setup-error" hidden></p>
+      <div class="dialog-actions">
+        <span class="spacer"></span>
+        <button type="button" id="totp-setup-cancel">Cancelar</button>
+        <button type="submit" id="totp-setup-save" class="primary">Salvar no Bitwarden</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="palette">
     <input id="palette-input" autocomplete="off" spellcheck="false" placeholder="Buscar abas, workspaces, ações — ou digitar um endereço">
     <ul id="palette-list" role="listbox"></ul>

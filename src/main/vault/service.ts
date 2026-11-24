@@ -154,6 +154,15 @@ export class VaultService {
     });
   }
 
+  /** Guarda o segredo do app autenticador num login existente. */
+  saveTotpTo(id: string, secret: string): Promise<boolean | null> {
+    return this.write(async (api, token, vault) => {
+      const body = vault.totpUpdateRequest(id, secret);
+      if (!body) throw new BitwardenError('unexpected', 'login não encontrado no cofre');
+      return api.updateCipher(token, id, body);
+    });
+  }
+
   /** Login novo só com a passkey (criada agora pelo site). */
   savePasskeyNew(name: string, uri: string, passkey: NewPasskey): Promise<boolean | null> {
     return this.write((api, token, vault) => api.createCipher(token, vault.newPasskeyLoginRequest(name, uri, passkey)));

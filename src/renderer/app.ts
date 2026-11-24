@@ -1,7 +1,7 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, TotpCodeInfo, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
@@ -11,6 +11,7 @@ import { clampRatio, SPLIT_GAP } from '../main/split';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
+import { fold } from '../shared/text';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 import { buildItems, readableUrl, type PaletteItem } from './palette';
 
@@ -119,6 +120,7 @@ function render(): void {
   renderModules(s);
   renderScreenPicker(s);
   renderPasskey(s);
+  renderTotpSetup(s);
   renderPalette();
 }
 
@@ -1713,6 +1715,112 @@ passkeyDialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!state
 // Fechou o desbloqueio: a janela da passkey volta (com as passkeys, se desbloqueou).
 vaultDialog.addEventListener('close', () => { passkeyKey = ''; if (state) renderPasskey(state); });
 
+// ------------------------------------------------------------ códigos de verificação (TOTP)
+
+const totpDialog = $<HTMLDialogElement>('#totp-dialog');
+let totpItems: TotpCodeInfo[] = [];
+let totpTimer: ReturnType<typeof setInterval> | null = null;
+
+const groupCode = (c: string) => (c.length === 6 ? `${c.slice(0, 3)} ${c.slice(3)}` : c);
+
+let totpKey = '';
+/** Redesenha só quando a lista muda; a cada segundo troca apenas código e segundos (senão o clique se perde). */
+function renderTotpList(): void {
+  const q = fold($<HTMLInputElement>('#totp-q').value.trim());
+  const items = totpItems.filter((i) => !q || fold(`${i.name} ${i.username ?? ''}`).includes(q));
+  $('#totp-empty').hidden = totpItems.length > 0;
+  const key = items.map((i) => i.id).join(',');
+  const list = $('#totp-list');
+  if (key === totpKey) {
+    for (const i of items) {
+      const b = list.querySelector<HTMLElement>(`.totp-item[data-item-id="${CSS.escape(i.id)}"]`);
+      if (!b) continue;
+      b.querySelector('.c')!.textContent = groupCode(i.code);
+      const sec = b.querySelector('.s')!;
+      sec.textContent = `${i.remaining}s`;
+      sec.classList.toggle('low', i.remaining <= 5);
+    }
+    return;
+  }
+  totpKey = key;
+  list.replaceChildren(...items.map((i) => {
+    const b = el('button', { type: 'button', className: 'totp-item', title: 'Clique para copiar' });
+    b.dataset.itemId = i.id;
+    b.append(el('span', { className: 'n', textContent: i.name }), el('span', { className: 'c', textContent: groupCode(i.code) }),
+      el('span', { className: `s${i.remaining <= 5 ? ' low' : ''}`, textContent: `${i.remaining}s` }),
+      el('span', { className: 'u', textContent: i.username ?? '' }));
+    b.onclick = () => {
+      send({ type: 'vault:copy', itemId: i.id, what: 'totp' });
+      $('#totp-copied').hidden = false;
+    };
+    const li = el('li');
+    li.append(b);
+    return li;
+  }));
+}
+
+function openTotpList(): void {
+  if (!totpDialog.open) totpDialog.showModal();
+  $<HTMLInputElement>('#totp-q').value = '';
+  $('#totp-copied').hidden = true;
+  $('#totp-q').focus();
+  // Os códigos trocam a cada 30 s: pede de novo a cada segundo enquanto a janela está aberta.
+  totpTimer ??= setInterval(() => send({ type: 'vault:totp-codes' }), 1000);
+}
+totpDialog.addEventListener('close', () => {
+  if (totpTimer) clearInterval(totpTimer);
+  totpTimer = null;
+  totpItems = [];
+  totpKey = '';
+});
+$('#totp-q').addEventListener('input', renderTotpList);
+
+// ------------------------------------------------------------ cadastrar o autenticador do site
+
+const totpSetupDialog = $<HTMLDialogElement>('#totp-setup-dialog');
+let totpSetupShown: string | null = null;
+
+function renderTotpSetup(s: UiState): void {
+  const t = s.totpSetup;
+  if (!t) {
+    if (totpSetupDialog.open) { totpSetupShown = null; totpSetupDialog.close(); }
+    totpSetupShown = null;
+    return;
+  }
+  if (totpSetupShown !== t.id) {
+    totpSetupShown = t.id;
+    const f = t.found;
+    $('#totp-setup-hint').textContent = f
+      ? `Encontrei o QR code do autenticador${f.issuer ? ` de ${f.issuer}` : ''}${f.account ? ` (${f.account})` : ''} nesta página. Escolha em qual login do Bitwarden guardar.`
+      : `Não encontrei um QR code de autenticador visível nesta página de ${t.site}. Cole a chave que o site mostra (geralmente em "não consegue ler o código?").`;
+    $('#totp-setup-secret-row').hidden = Boolean(f);
+    $<HTMLInputElement>('#totp-setup-secret').value = '';
+    $('#totp-setup-target').replaceChildren(...t.targets.map((o) => el('option', { value: o.id,
+      textContent: o.hasTotp ? `${o.label} (troca o autenticador atual)` : o.label })));
+    $<HTMLSelectElement>('#totp-setup-target').value = t.suggested;
+  }
+  $('#totp-setup-error').hidden = !t.error;
+  $('#totp-setup-error').textContent = t.error ?? '';
+  const save = $<HTMLButtonElement>('#totp-setup-save');
+  save.disabled = t.busy;
+  save.textContent = t.busy ? 'Salvando…' : 'Salvar no Bitwarden';
+  $<HTMLButtonElement>('#totp-setup-cancel').disabled = t.busy;
+  if (!totpSetupDialog.open) {
+    totpSetupDialog.showModal();
+    if (!t.found) $('#totp-setup-secret').focus();
+  }
+}
+
+const answerTotpSetup = (target: string | null) => {
+  const t = state?.totpSetup;
+  if (!t) return;
+  const secret = $<HTMLInputElement>('#totp-setup-secret').value.trim();
+  send({ type: 'totp:setup-answer', setupId: t.id, target, ...(target && !t.found ? { secret } : {}) });
+};
+$('#totp-setup-form').addEventListener('submit', (e) => { e.preventDefault(); answerTotpSetup($<HTMLSelectElement>('#totp-setup-target').value); });
+$('#totp-setup-cancel').onclick = () => answerTotpSetup(null);
+totpSetupDialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!state?.totpSetup?.busy) answerTotpSetup(null); });
+
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 
 const palette = $<HTMLDialogElement>('#palette');
@@ -1967,6 +2075,10 @@ window.apollo.onState((next) => {
 window.apollo.onEvent((event) => {
   if (event.type === 'open-palette') {
     openPalette();
+  } else if (event.type === 'open-totp-list') {
+    openTotpList();
+  } else if (event.type === 'totp-codes') {
+    if (totpDialog.open) { totpItems = event.items; renderTotpList(); }
   } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
   } else if (event.type === 'open-find') {

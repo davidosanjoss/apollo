@@ -277,6 +277,7 @@ app.whenReady().then(async () => {
     savePasskeyNew: (name, uri, pk) => vault.savePasskeyNew(name, uri, pk),
     savePasskeyTo: (id, pk) => vault.savePasskeyTo(id, pk),
     updatePasskeyCounter: (id, cred, n) => vault.updatePasskeyCounter(id, cred, n),
+    saveTotpTo: (id, secret) => vault.saveTotpTo(id, secret),
   });
   // Logins enviados nas abas (preload): só do frame principal de uma aba; URL do próprio frame.
   const fromTabFrame = (event: Electron.IpcMainEvent) => {
@@ -294,6 +295,11 @@ app.whenReady().then(async () => {
     const src = fromTabFrame(event);
     const u = text(username);
     if (src && u) browser.onUsernameStep(src.tabId, src.url, u);
+  });
+  // Campo de código de verificação apareceu na aba (preload): o Apollo decide se preenche.
+  ipcMain.on('apollo:otp-field', (event) => {
+    const src = fromTabFrame(event);
+    if (src) browser.onOtpField(src.tabId);
   });
   // Passkeys (navigator.credentials da página, pelo preload): só do frame principal de uma
   // aba, e a origem é a do próprio frame (não o que a página diz).

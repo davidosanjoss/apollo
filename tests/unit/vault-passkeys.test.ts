@@ -96,3 +96,25 @@ describe('passkeys no cofre do Bitwarden', () => {
     expect(v2.logins[0].passkeys[0].counter).toBe(5);
   });
 });
+
+describe('app autenticador no cofre', () => {
+  it('põe o segredo TOTP num login existente sem mexer no resto', async () => {
+    const { sync, masterKey } = await setup();
+    const v = UnlockedVault.open(sync, masterKey);
+    const body = v.totpUpdateRequest('sem-passkey', 'JBSWY3DPEHPK3PXP') as any;
+    const raw = sync.ciphers[1] as any;
+    expect(body.login.password).toBe(raw.login.password);
+    const v2 = UnlockedVault.open({ ...sync, ciphers: [{ ...raw, ...body, id: 'sem-passkey' }] }, masterKey);
+    expect(v2.logins[0].hasTotp).toBe(true);
+    expect(v2.totpSecret('sem-passkey')).toBe('JBSWY3DPEHPK3PXP');
+    expect(v2.password('sem-passkey')).toBe('senha-antiga');
+  });
+
+  it('login novo com o autenticador', async () => {
+    const { sync, masterKey } = await setup();
+    const v = UnlockedVault.open(sync, masterKey);
+    const body = v.newLoginRequest({ name: 'n', username: 'u', password: '', uri: 'https://n.com', totp: 'JBSWY3DPEHPK3PXP' }) as any;
+    const v2 = UnlockedVault.open({ ...sync, ciphers: [{ ...body, id: 'x' }] }, masterKey);
+    expect(v2.totpSecret('x')).toBe('JBSWY3DPEHPK3PXP');
+  });
+});

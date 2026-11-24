@@ -3,6 +3,7 @@
 import { ipcRenderer, webFrame } from 'electron';
 import { DOMMonitor } from '@ghostery/adblocker-content';
 import { fillLogin, fillNewPassword } from './fill';
+import { fillOtp, watchOtpField } from './otp';
 import { watchLogins } from './capture';
 import { NOTIFICATION_CLICK_EVENT, notificationShim } from './notifications';
 import { WEBAUTHN_CANCEL, WEBAUTHN_REQUEST, WEBAUTHN_RESPONSE, webauthnShim } from './webauthn';
@@ -32,6 +33,15 @@ if (window === window.top) {
   ipcRenderer.on('apollo:fill-new-password', (_e, password: string) => {
     if (typeof password === 'string') fillNewPassword(document, password);
   });
+  // Código de verificação (TOTP do Bitwarden): o main confere o login com a URL antes de mandar.
+  ipcRenderer.on('apollo:fill-otp', (_e, code: string) => {
+    if (typeof code === 'string') fillOtp(document, code);
+  });
+  if (/^https?:/.test(location.href)) {
+    window.addEventListener('DOMContentLoaded', () => {
+      watchOtpField(document, () => ipcRenderer.send('apollo:otp-field'));
+    }, { once: true });
+  }
   // Oferecer salvar no Bitwarden: avisa o main quando um login é enviado.
   if (/^https?:/.test(location.href)) {
     watchLogins(document,
