@@ -3,8 +3,10 @@
 import { ipcRenderer, webFrame } from 'electron';
 import { DOMMonitor } from '@ghostery/adblocker-content';
 import { fillLogin, fillNewPassword } from './fill';
+import { fillOtp, watchOtpField } from './otp';
 import { watchLogins } from './capture';
 import { NOTIFICATION_CLICK_EVENT, notificationShim } from './notifications';
+import { WEBAUTHN_CANCEL, WEBAUTHN_REQUEST, WEBAUTHN_RESPONSE, webauthnShim } from './webauthn';
 import { PAGE_FIRST, shortcutFor } from '../main/shortcuts';
 
 // Atalhos que a página recebe primeiro (Ctrl+R, Ctrl+F, Ctrl+K…): se ela não usou a tecla,
@@ -31,6 +33,15 @@ if (window === window.top) {
   ipcRenderer.on('apollo:fill-new-password', (_e, password: string) => {
     if (typeof password === 'string') fillNewPassword(document, password);
   });
+  // Código de verificação (TOTP do Bitwarden): o main confere o login com a URL antes de mandar.
+  ipcRenderer.on('apollo:fill-otp', (_e, code: string) => {
+    if (typeof code === 'string') fillOtp(document, code);
+  });
+  if (/^https?:/.test(location.href)) {
+    window.addEventListener('DOMContentLoaded', () => {
+      watchOtpField(document, () => ipcRenderer.send('apollo:otp-field'));
+    }, { once: true });
+  }
   // Oferecer salvar no Bitwarden: avisa o main quando um login é enviado.
   if (/^https?:/.test(location.href)) {
     watchLogins(document,
@@ -55,6 +66,24 @@ if (window === window.top && /^https?:/.test(location.href) && typeof Notificati
   // Só um clique de verdade (ativação do usuário) leva o Apollo para esta aba.
   document.addEventListener(NOTIFICATION_CLICK_EVENT, () => {
     if (navigator.userActivation?.isActive) ipcRenderer.send('apollo:notification-click');
+  });
+}
+
+// Passkeys pelo Bitwarden: navigator.credentials vira um pedido ao Apollo (ver ./webauthn).
+// Só no frame principal; o processo principal confere de novo de onde veio.
+if (window === window.top && /^https?:/.test(location.href) && window.isSecureContext) {
+  void webFrame.executeJavaScript(webauthnShim()).catch(() => {});
+  document.addEventListener(WEBAUTHN_REQUEST, (e) => {
+    const detail = (e as CustomEvent).detail;
+    if (typeof detail !== 'string') return;
+    let id: unknown;
+    try { id = (JSON.parse(detail) as { id?: unknown }).id; } catch { return; }
+    void ipcRenderer.invoke('apollo:webauthn', detail)
+      .catch(() => ({ error: 'NotAllowedError', message: 'A operação não é permitida.' }))
+      .then((res: object) => document.dispatchEvent(new CustomEvent(WEBAUTHN_RESPONSE, { detail: JSON.stringify({ ...res, id }) })));
+  });
+  document.addEventListener(WEBAUTHN_CANCEL, (e) => {
+    try { ipcRenderer.send('apollo:webauthn-cancel', (JSON.parse((e as CustomEvent).detail) as { id?: unknown }).id); } catch { /* ignorado */ }
   });
 }
 

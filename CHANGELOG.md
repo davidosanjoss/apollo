@@ -4,6 +4,18 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
 
 ## [Não lançado]
 
+## [0.12.0] - 2026-11-25
+
+### Adicionado
+- Passkeys pelo Bitwarden: sites que pedem "entrar com passkey" ou "criar passkey" agora funcionam no Apollo (antes, no Linux, o pedido ficava travado). O Apollo mostra uma janela para escolher a passkey (ou onde salvar a nova, num login existente ou novo) e usa as passkeys guardadas no seu Bitwarden, as mesmas da extensão e do celular. Quando o site oferece a passkey no campo de login, ela aparece no menu da chave da barra de endereço. No Windows, dá para usar o Windows Hello ou uma chave de segurança no lugar.
+- App autenticador pelo Bitwarden (códigos de verificação de 6 dígitos):
+  - Ao preencher usuário e senha de um login com autenticador, o código vai para a área de transferência e, quando a tela seguinte pede o código, o Apollo preenche sozinho (campo único ou uma caixinha por dígito).
+  - No menu da chave: "Preencher código de verificação" em cada login, "Códigos de verificação…" (lista com todos os códigos e o tempo restante; clicar copia) e "Configurar app autenticador desta página…", que lê o QR code que o site mostra (ou a chave colada), guarda no login do Bitwarden e já preenche o código de confirmação.
+
+### Corrigido
+- Gerenciador de favoritos: cliques nos botões (＋, ✎, 🗑) às vezes não faziam nada enquanto uma aba carregava, porque a lista era redesenhada a cada atualização. Agora só é redesenhada quando os favoritos mudam.
+- Gerenciador de favoritos: o ícone de cada site não tinha tamanho fixo. Ícones grandes apareciam no tamanho original, e quando um ícone falhava e virava a inicial, a linha mudava de largura sob o mouse.
+
 ## [0.11.0] - 2026-11-23
 
 ### Adicionado

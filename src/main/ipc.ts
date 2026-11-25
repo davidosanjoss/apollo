@@ -191,6 +191,14 @@ export function parseCommand(raw: unknown): UiCommand | null {
       return id(c.bookmarkId) && (c.newTab === undefined || typeof c.newTab === 'boolean') ? (c as UiCommand) : null;
     case 'screen:pick':
       return id(c.requestId) && (c.sourceId === null || str(c.sourceId, 256)) && typeof c.audio === 'boolean' ? (c as UiCommand) : null;
+    case 'passkey:answer':
+      return id(c.promptId) && (c.choice === null || id(c.choice)) && (c.fallback === undefined || typeof c.fallback === 'boolean') ? (c as UiCommand) : null;
+    case 'passkey:use': return id(c.optionId) ? (c as UiCommand) : null;
+    case 'vault:fill-totp': return id(c.itemId) ? (c as UiCommand) : null;
+    case 'vault:totp-codes': return c.open === undefined || typeof c.open === 'boolean' ? ({ type: c.type, open: c.open === true } as UiCommand) : null;
+    case 'totp:scan': return { type: c.type } as UiCommand;
+    case 'totp:setup-answer':
+      return id(c.setupId) && (c.target === null || id(c.target)) && (c.secret === undefined || str(c.secret, 2048)) ? (c as UiCommand) : null;
     case 'vault:save-answer':
       return id(c.promptId) && ['save', 'dismiss', 'never'].includes(c.action as string) ? (c as UiCommand) : null;
     case 'vault:generate': return typeof c.fill === 'boolean' ? (c as UiCommand) : null;

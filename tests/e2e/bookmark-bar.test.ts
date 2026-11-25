@@ -77,8 +77,19 @@ describe('barra de favoritos', () => {
     await app.send({ type: 'bookmark:context', bookmarkId: null, x: 100, y: 100 });
     await clickMenu(['Gerenciar favoritos…']);
     await waitFor(() => dialogOpen('bookmarks-manager'), 'gerenciador');
+    // Regressão (CI do release v0.11.0): o ícone sem tamanho fixo mudava a linha de largura
+    // quando o favicon falhava e virava a inicial, e o clique no "＋" errava o botão.
+    expect(await ui<string[]>(`[...document.querySelectorAll('#bm-tree .row .i')].map((i) => {
+      const r = i.getBoundingClientRect(); return r.width + 'x' + r.height; })`)).toSatisfy((a: string[]) => a.length > 0 && a.every((x) => x === '16x16'));
     const fac = await id('Faculdade');
-    await app.ui.mouseClick(`#bm-tree li[data-bookmark-id="${fac}"] > .row button[title="Nova subpasta"]`);
+    // Regressão (CI do release v0.12.0): a árvore era refeita a cada estado (aba carregando…) e
+    // o clique se perdia quando os botões eram trocados entre apertar e soltar o mouse.
+    const plus = `#bm-tree li[data-bookmark-id="${fac}"] > .row button[title="Nova subpasta"]`;
+    await ui(`(document.querySelector(${JSON.stringify(plus)}).dataset.marca = '1', true)`);
+    await app.send({ type: 'tab:navigate', url: `${site.url}/page?title=Outra` });
+    await app.until((x) => app.activeTab(x).title === 'Outra' && !app.activeTab(x).loading, 'outra página');
+    expect(await ui<string | undefined>(`document.querySelector(${JSON.stringify(plus)}).dataset.marca`)).toBe('1');
+    await app.ui.mouseClick(plus);
     await dialogSubmit('Cálculo');
     const s = await app.until((x) => x.bookmarks.some((b) => b.title === 'Cálculo'), 'subpasta');
     expect(s.bookmarks.find((b) => b.title === 'Cálculo')!.parentId).toBe(fac);

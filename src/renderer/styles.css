@@ -106,6 +106,9 @@ body { display: flex; }
 #bm-tree .row .u { color: var(--muted); font-size: 11px; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 #bm-tree .row.drop-before { box-shadow: 0 -2px 0 var(--accent); }
 #bm-tree .row.drop-after { box-shadow: 0 2px 0 var(--accent); }
+/* Ícone em caixa fixa: favicon que falha vira a inicial sem mudar a linha de tamanho. */
+#bm-tree .row .i { width: 16px; height: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }
+#bm-tree .row .i img { width: 16px; height: 16px; }
 #bm-tree .toggle { width: 16px; border: 0; background: none; color: var(--muted); cursor: pointer; padding: 0; }
 #bm-tree li.collapsed > ul { display: none; }
 #bm-tree .empty { color: var(--muted); padding: 6px; }
@@ -151,6 +154,28 @@ body { display: flex; }
 
 /* ---------- compartilhar tela ---------- */
 #screen-dialog { width: 720px; max-width: calc(100vw - 32px); }
+#passkey-dialog { width: 440px; max-width: calc(100vw - 32px); }
+#totp-dialog { width: 460px; max-width: calc(100vw - 32px); }
+#totp-q { width: 100%; margin-bottom: 10px; }
+#totp-list { list-style: none; margin: 0 0 12px; padding: 0; max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.totp-item { display: grid; grid-template-columns: 1fr auto auto; gap: 2px 12px; align-items: center; width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: 8px; border: 0; background: var(--panel-2); color: inherit; cursor: pointer; }
+.totp-item .n { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.totp-item .u { grid-column: 1; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.totp-item .c { grid-row: 1 / 3; grid-column: 2; font: 600 20px/1 ui-monospace, monospace; letter-spacing: 1px; }
+.totp-item .s { grid-row: 1 / 3; grid-column: 3; color: var(--muted); font-size: 12px; min-width: 2.5em; text-align: right; }
+.totp-item .s.low { color: #ff6b6b; }
+#totp-setup-dialog { width: 460px; max-width: calc(100vw - 32px); }
+#totp-setup-dialog label { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+#passkey-options { list-style: none; margin: 0 0 12px; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 45vh; overflow-y: auto; }
+#passkey-options:empty { display: none; }
+.passkey-opt { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 8px 10px; border-radius: 8px;
+  border: 2px solid var(--border, transparent); background: var(--panel-2); color: inherit; cursor: pointer; }
+.passkey-opt.selected { border-color: var(--accent); }
+.passkey-opt .d { color: var(--muted); font-size: 12px; }
+.passkey-opt.replaces .d { color: #e0a030; }
+.passkey-message { margin: 0 0 12px; }
+.passkey-error { color: #ff6b6b; margin: 0 0 12px; }
 #screen-sources { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; margin-bottom: 12px; }
 #screen-sources .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .screen-src { display: flex; flex-direction: column; gap: 4px; padding: 6px; border-radius: 8px; border: 2px solid transparent;

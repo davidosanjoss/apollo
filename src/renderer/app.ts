@@ -1,7 +1,7 @@
 // UI do navegador: sem privilégios. Desenha o estado que o processo principal
 // envia e devolve comandos. Toda decisão (abas, sessões, permissões) é do main.
 import type { ApolloApi } from '../preload/ui';
-import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
+import type { BookmarkInfo, DnsMode, DownloadAction, ScreenSource, SpellcheckMode, TotpCodeInfo, GroupInfo, PermissionDecision, PrivacyFeature, UiCommand, UiState, WorkspaceInfo } from '../shared/types';
 import { GENERATOR_LENGTHS, GROUP_COLORS, HIDDEN_HIBERNATE_OPTIONS_MIN, PANEL_DEFAULT_WIDTH, PANEL_MAX_WIDTH, PANEL_MIN_WIDTH, PANEL_SUGGESTIONS, HIBERNATE_OPTIONS_MIN, MEMORY_LIMIT_OPTIONS_MB, PERMISSION_LABELS, PRIVACY_LABELS, isHomeUrl } from '../shared/types';
 import { normalizeUrl, SEARCH_URL } from '../shared/url';
 import { dayLabel, downloadFraction, downloadStatus } from '../shared/format';
@@ -11,6 +11,7 @@ import { clampRatio, SPLIT_GAP } from '../main/split';
 import { childrenOf, dropPlace, dropTarget, folderOptions } from './bookmark-tree';
 import { hasCustomPermissions, shieldState } from '../shared/shield';
 import { reconcile } from './reconcile';
+import { fold } from '../shared/text';
 import { buildStrip, computeDrop, type DropTarget, type StripItem } from './tab-strip';
 import { buildItems, readableUrl, type PaletteItem } from './palette';
 
@@ -118,6 +119,8 @@ function render(): void {
   renderPanels(s);
   renderModules(s);
   renderScreenPicker(s);
+  renderPasskey(s);
+  renderTotpSetup(s);
   renderPalette();
 }
 
@@ -710,19 +713,27 @@ const collapsedFolders = new Set<string>();
 function openBookmarkManager(): void {
   if (!state) return;
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
-  renderBookmarkManager(state);
+  renderBookmarkManager(state, true);
   managerDialog.showModal();
 }
 
-function renderBookmarkManager(s: UiState): void {
+let managerKey = '';
+/**
+ * Só redesenha a árvore quando os favoritos mudam: o estado chega a toda hora (aba carregando…)
+ * e trocar os botões entre apertar e soltar o mouse perdia o clique.
+ */
+function renderBookmarkManager(s: UiState, force = false): void {
   $<HTMLInputElement>('#bm-show-bar').checked = s.settings.bookmarkBar;
+  const key = JSON.stringify(s.bookmarks);
+  if (!force && key === managerKey) return;
+  managerKey = key;
   const build = (parentId: string | null): HTMLElement[] => childrenOf(s.bookmarks, parentId).map((b) => {
     const li = el('li', { className: collapsedFolders.has(b.id) ? 'collapsed' : '' });
     li.setAttribute('role', 'treeitem');
     li.dataset.bookmarkId = b.id;
     const row = el('div', { className: 'row' });
     const toggle = el('button', { type: 'button', className: 'toggle', textContent: b.folder ? (collapsedFolders.has(b.id) ? '▸' : '▾') : '' });
-    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(s); };
+    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(state!, true); };
     const title = el('span', { className: 't', textContent: b.title || readableUrl(b.url) });
     if (!b.folder) title.ondblclick = () => openBm(b, new MouseEvent('click'));
     const act = (label: string, t: string, fn: () => void) => { const x = el('button', { type: 'button', className: 'icon-btn', textContent: label, title: t }); x.onclick = fn; return x; };
@@ -1644,6 +1655,180 @@ $('#screen-cancel').onclick = () => screenDialog.close();
 // Fechar de qualquer jeito (Esc, Cancelar) sem escolher = negar.
 screenDialog.addEventListener('close', () => { if (screenRequestId) answerScreen(null); });
 
+// ------------------------------------------------------------ passkeys (Bitwarden)
+
+const passkeyDialog = $<HTMLDialogElement>('#passkey-dialog');
+let passkeyShown: string | null = null;
+let passkeyKey = '';
+let passkeyChoice: string | null = null;
+
+function renderPasskey(s: UiState): void {
+  const p = s.passkeyPrompt;
+  if (!p) {
+    if (passkeyDialog.open) { passkeyShown = null; passkeyDialog.close(); }
+    passkeyShown = null;
+    return;
+  }
+  // Outro diálogo aberto (ex.: desbloqueando o Bitwarden): espera ele fechar.
+  const other = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].some((d) => d !== passkeyDialog);
+  if (other) return;
+  if (passkeyShown !== p.id) { passkeyShown = p.id; passkeyChoice = p.selected; passkeyKey = ''; }
+  const key = JSON.stringify(p);
+  if (key !== passkeyKey) {
+    passkeyKey = key;
+    const create = p.kind === 'create';
+    $('#passkey-title').textContent = create ? 'Salvar passkey no Bitwarden' : 'Entrar com passkey';
+    $('#passkey-hint').textContent = create
+      ? `${p.site} quer criar uma passkey${p.userName ? ` para ${p.userName}` : ''}. Ela fica guardada no seu Bitwarden.`
+      : `${p.site} pede uma passkey. Escolha qual usar (guardadas no seu Bitwarden).`;
+    const msg = p.vault === 'disconnected' ? 'Conecte o Bitwarden para usar passkeys no Apollo.'
+      : p.vault === 'locked' ? 'Desbloqueie o Bitwarden para continuar.' : p.message;
+    $('#passkey-message').hidden = !msg;
+    $('#passkey-message').textContent = msg ?? '';
+    $('#passkey-error').hidden = !p.error;
+    $('#passkey-error').textContent = p.error ?? '';
+    // Escolha que sumiu (ou nenhuma ainda, ex.: acabou de desbloquear): volta para a sugerida.
+    if (!passkeyChoice || !p.options.some((o) => o.id === passkeyChoice)) passkeyChoice = p.selected;
+    $('#passkey-options').replaceChildren(...p.options.map((o) => {
+      const b = el('button', { type: 'button', className: `passkey-opt${o.id === passkeyChoice ? ' selected' : ''}${o.replaces ? ' replaces' : ''}` });
+      b.dataset.option = o.id;
+      b.append(el('span', { className: 't', textContent: o.label }), ...(o.detail ? [el('span', { className: 'd', textContent: o.detail })] : []));
+      b.onclick = () => { passkeyChoice = o.id; passkeyKey = ''; renderPasskey(state!); };
+      b.ondblclick = () => { passkeyChoice = o.id; answerPasskey(o.id); };
+      return b;
+    }));
+    const needsVault = p.vault !== 'unlocked';
+    $('#passkey-unlock').hidden = !needsVault;
+    $('#passkey-unlock').textContent = p.vault === 'disconnected' ? 'Conectar o Bitwarden' : 'Desbloquear o Bitwarden';
+    const ok = $<HTMLButtonElement>('#passkey-ok');
+    ok.hidden = needsVault || !p.options.length;
+    ok.disabled = p.busy || !passkeyChoice;
+    ok.textContent = p.busy ? 'Salvando…' : create ? 'Salvar passkey' : 'Entrar';
+    $('#passkey-fallback').hidden = !p.canFallback;
+    $<HTMLButtonElement>('#passkey-cancel').disabled = p.busy;
+  }
+  if (!passkeyDialog.open) passkeyDialog.showModal();
+}
+
+const answerPasskey = (choice: string | null, fallback = false) => {
+  const p = state?.passkeyPrompt;
+  if (p) send({ type: 'passkey:answer', promptId: p.id, choice, ...(fallback ? { fallback: true } : {}) });
+};
+$('#passkey-form').addEventListener('submit', (e) => { e.preventDefault(); if (passkeyChoice) answerPasskey(passkeyChoice); });
+$('#passkey-cancel').onclick = () => answerPasskey(null);
+$('#passkey-fallback').onclick = () => answerPasskey(null, true);
+$('#passkey-unlock').onclick = () => { passkeyDialog.close(); openVault(); };
+// Esc: cancela (o site recebe "cancelado"), a não ser que a janela tenha sido fechada para desbloquear.
+passkeyDialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!state?.passkeyPrompt?.busy) answerPasskey(null); });
+// Fechou o desbloqueio: a janela da passkey volta (com as passkeys, se desbloqueou).
+vaultDialog.addEventListener('close', () => { passkeyKey = ''; if (state) renderPasskey(state); });
+
+// ------------------------------------------------------------ códigos de verificação (TOTP)
+
+const totpDialog = $<HTMLDialogElement>('#totp-dialog');
+let totpItems: TotpCodeInfo[] = [];
+let totpTimer: ReturnType<typeof setInterval> | null = null;
+
+const groupCode = (c: string) => (c.length === 6 ? `${c.slice(0, 3)} ${c.slice(3)}` : c);
+
+let totpKey = '';
+/** Redesenha só quando a lista muda; a cada segundo troca apenas código e segundos (senão o clique se perde). */
+function renderTotpList(): void {
+  const q = fold($<HTMLInputElement>('#totp-q').value.trim());
+  const items = totpItems.filter((i) => !q || fold(`${i.name} ${i.username ?? ''}`).includes(q));
+  $('#totp-empty').hidden = totpItems.length > 0;
+  const key = items.map((i) => i.id).join(',');
+  const list = $('#totp-list');
+  if (key === totpKey) {
+    for (const i of items) {
+      const b = list.querySelector<HTMLElement>(`.totp-item[data-item-id="${CSS.escape(i.id)}"]`);
+      if (!b) continue;
+      b.querySelector('.c')!.textContent = groupCode(i.code);
+      const sec = b.querySelector('.s')!;
+      sec.textContent = `${i.remaining}s`;
+      sec.classList.toggle('low', i.remaining <= 5);
+    }
+    return;
+  }
+  totpKey = key;
+  list.replaceChildren(...items.map((i) => {
+    const b = el('button', { type: 'button', className: 'totp-item', title: 'Clique para copiar' });
+    b.dataset.itemId = i.id;
+    b.append(el('span', { className: 'n', textContent: i.name }), el('span', { className: 'c', textContent: groupCode(i.code) }),
+      el('span', { className: `s${i.remaining <= 5 ? ' low' : ''}`, textContent: `${i.remaining}s` }),
+      el('span', { className: 'u', textContent: i.username ?? '' }));
+    b.onclick = () => {
+      send({ type: 'vault:copy', itemId: i.id, what: 'totp' });
+      $('#totp-copied').hidden = false;
+    };
+    const li = el('li');
+    li.append(b);
+    return li;
+  }));
+}
+
+function openTotpList(): void {
+  if (!totpDialog.open) totpDialog.showModal();
+  $<HTMLInputElement>('#totp-q').value = '';
+  $('#totp-copied').hidden = true;
+  $('#totp-q').focus();
+  // Os códigos trocam a cada 30 s: pede de novo a cada segundo enquanto a janela está aberta.
+  totpTimer ??= setInterval(() => send({ type: 'vault:totp-codes' }), 1000);
+}
+totpDialog.addEventListener('close', () => {
+  if (totpTimer) clearInterval(totpTimer);
+  totpTimer = null;
+  totpItems = [];
+  totpKey = '';
+});
+$('#totp-q').addEventListener('input', renderTotpList);
+
+// ------------------------------------------------------------ cadastrar o autenticador do site
+
+const totpSetupDialog = $<HTMLDialogElement>('#totp-setup-dialog');
+let totpSetupShown: string | null = null;
+
+function renderTotpSetup(s: UiState): void {
+  const t = s.totpSetup;
+  if (!t) {
+    if (totpSetupDialog.open) { totpSetupShown = null; totpSetupDialog.close(); }
+    totpSetupShown = null;
+    return;
+  }
+  if (totpSetupShown !== t.id) {
+    totpSetupShown = t.id;
+    const f = t.found;
+    $('#totp-setup-hint').textContent = f
+      ? `Encontrei o QR code do autenticador${f.issuer ? ` de ${f.issuer}` : ''}${f.account ? ` (${f.account})` : ''} nesta página. Escolha em qual login do Bitwarden guardar.`
+      : `Não encontrei um QR code de autenticador visível nesta página de ${t.site}. Cole a chave que o site mostra (geralmente em "não consegue ler o código?").`;
+    $('#totp-setup-secret-row').hidden = Boolean(f);
+    $<HTMLInputElement>('#totp-setup-secret').value = '';
+    $('#totp-setup-target').replaceChildren(...t.targets.map((o) => el('option', { value: o.id,
+      textContent: o.hasTotp ? `${o.label} (troca o autenticador atual)` : o.label })));
+    $<HTMLSelectElement>('#totp-setup-target').value = t.suggested;
+  }
+  $('#totp-setup-error').hidden = !t.error;
+  $('#totp-setup-error').textContent = t.error ?? '';
+  const save = $<HTMLButtonElement>('#totp-setup-save');
+  save.disabled = t.busy;
+  save.textContent = t.busy ? 'Salvando…' : 'Salvar no Bitwarden';
+  $<HTMLButtonElement>('#totp-setup-cancel').disabled = t.busy;
+  if (!totpSetupDialog.open) {
+    totpSetupDialog.showModal();
+    if (!t.found) $('#totp-setup-secret').focus();
+  }
+}
+
+const answerTotpSetup = (target: string | null) => {
+  const t = state?.totpSetup;
+  if (!t) return;
+  const secret = $<HTMLInputElement>('#totp-setup-secret').value.trim();
+  send({ type: 'totp:setup-answer', setupId: t.id, target, ...(target && !t.found ? { secret } : {}) });
+};
+$('#totp-setup-form').addEventListener('submit', (e) => { e.preventDefault(); answerTotpSetup($<HTMLSelectElement>('#totp-setup-target').value); });
+$('#totp-setup-cancel').onclick = () => answerTotpSetup(null);
+totpSetupDialog.addEventListener('cancel', (e) => { e.preventDefault(); if (!state?.totpSetup?.busy) answerTotpSetup(null); });
+
 // ------------------------------------------------------------ paleta de comandos (Ctrl+K)
 
 const palette = $<HTMLDialogElement>('#palette');
@@ -1898,6 +2083,10 @@ window.apollo.onState((next) => {
 window.apollo.onEvent((event) => {
   if (event.type === 'open-palette') {
     openPalette();
+  } else if (event.type === 'open-totp-list') {
+    openTotpList();
+  } else if (event.type === 'totp-codes') {
+    if (totpDialog.open) { totpItems = event.items; renderTotpList(); }
   } else if (event.type === 'open-vault') {
     if (!vaultDialog.open) openVault();
   } else if (event.type === 'open-find') {

@@ -3,7 +3,7 @@ import { decideSave, itemName } from '../../src/main/vault/save';
 import type { VaultLogin } from '../../src/main/vault/vault';
 
 const login = (id: string, username: string | null, uri = 'https://site.com'): VaultLogin =>
-  ({ id, name: id, username, uris: [{ uri, match: null }], hasTotp: false, organizationId: null });
+  ({ id, name: id, username, uris: [{ uri, match: null }], hasTotp: false, organizationId: null, passkeys: [] });
 const pw: Record<string, string> = { a: 'senha-a', b: 'senha-b', outro: 'x' };
 const passwordOf = (id: string) => pw[id] ?? null;
 const URL_ = 'https://www.site.com/login';

@@ -253,6 +253,9 @@ export interface UiState {
   customizations: CustomizationInfo[];
   /** Pedido de compartilhar tela aguardando a escolha do usuário. */
   screenPicker: ScreenPickerInfo | null;
+  /** Pedido de passkey (entrar ou criar) da aba ativa, à espera da escolha. */
+  passkeyPrompt: PasskeyPromptInfo | null;
+  totpSetup: TotpSetupInfo | null;
   /** Favoritos e pastas do workspace ativo, em ordem (cada nível pela posição). */
   bookmarks: BookmarkInfo[];
   /** Importar favoritos: navegadores encontrados (null = ainda não procurou) e o último resultado. */
@@ -318,6 +321,27 @@ export interface ScreenSource {
   kind: 'screen' | 'window' | 'tab' | 'system';
   /** Miniatura (data: URL) ou null. */
   thumbnail: string | null;
+}
+
+/** Passkey: o site pediu para entrar com uma, ou para criar uma (salva no Bitwarden). */
+export interface PasskeyPromptInfo {
+  id: string;
+  kind: 'get' | 'create';
+  /** Site (rpId) da passkey. */
+  site: string;
+  vault: 'disconnected' | 'locked' | 'unlocked';
+  /** get: as passkeys do site; create: onde salvar ('new' = login novo). */
+  options: { id: string; label: string; detail: string | null; replaces: boolean }[];
+  /** Opção que a janela já abre marcada (o botão de confirmar nunca começa desativado à toa). */
+  selected: string | null;
+  /** create: usuário que o site informou. */
+  userName: string | null;
+  /** Windows: dá para usar o Windows Hello / chave de segurança no lugar. */
+  canFallback: boolean;
+  /** Aviso no lugar da escolha (ex.: nenhuma passkey para o site). */
+  message: string | null;
+  busy: boolean;
+  error: string | null;
 }
 
 export interface ScreenPickerInfo {
@@ -493,6 +517,12 @@ export type UiCommand =
   | { type: 'bookmark:open'; bookmarkId: string; newTab?: boolean }
   /** Escolha no seletor de compartilhar tela (sourceId null = cancelar). */
   | { type: 'screen:pick'; requestId: string; sourceId: string | null; audio: boolean }
+  | { type: 'passkey:answer'; promptId: string; choice: string | null; fallback?: boolean }
+  | { type: 'passkey:use'; optionId: string }
+  | { type: 'vault:fill-totp'; itemId: string }
+  | { type: 'vault:totp-codes'; open?: boolean }
+  | { type: 'totp:scan' }
+  | { type: 'totp:setup-answer'; setupId: string; target: string | null; secret?: string }
   /** Cria (sem id) ou edita uma personalização. */
   | { type: 'custom:save'; id?: string; name: string; sites: string; css: string; js: string; enabled: boolean }
   | { type: 'custom:delete'; id: string }
@@ -545,7 +575,35 @@ export type UiEvent =
   /** Pedir o nome de uma pasta nova (no menu do botão direito da barra). */
   | { type: 'new-bookmark-folder'; parentId: string | null }
   | { type: 'manage-bookmarks' }
-  | { type: 'open-history' };
+  | { type: 'open-history' }
+  /** Abrir a lista de códigos de verificação (TOTP) do cofre. */
+  | { type: 'open-totp-list' }
+  /** Códigos de verificação atuais (resposta a vault:totp-codes). */
+  | { type: 'totp-codes'; items: TotpCodeInfo[] };
+
+export interface TotpCodeInfo {
+  id: string;
+  name: string;
+  username: string | null;
+  code: string;
+  period: number;
+  /** Segundos até o código trocar. */
+  remaining: number;
+}
+
+/** Cadastrar o app autenticador de um site no Bitwarden (QR code lido da página ou chave colada). */
+export interface TotpSetupInfo {
+  id: string;
+  site: string;
+  /** O que o QR code da página diz (null: não achou; o usuário pode colar a chave). */
+  found: { issuer: string | null; account: string | null } | null;
+  /** Onde salvar: logins do site ou 'new'. */
+  targets: { id: string; label: string; hasTotp: boolean }[];
+  /** Sugestão de onde salvar (o login preenchido há pouco ou o da conta do QR). */
+  suggested: string;
+  busy: boolean;
+  error: string | null;
+}
 
 export const PERMISSION_LABELS: Record<PermissionKind, string> = {
   'media-video': 'Câmera',

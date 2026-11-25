@@ -43,7 +43,7 @@ describe('uriMatches (regras do Bitwarden)', () => {
 
 describe('loginsFor', () => {
   const login = (name: string, username: string, ...uris: string[]): VaultLogin =>
-    ({ id: name + username, name, username, uris: uris.map((x) => u(x)), hasTotp: false, organizationId: null });
+    ({ id: name + username, name, username, uris: uris.map((x) => u(x)), hasTotp: false, organizationId: null, passkeys: [] });
 
   it('só os do site, em ordem alfabética', () => {
     const list = [login('Outlook pessoal', 'eu@outlook.com', 'https://outlook.live.com'),
