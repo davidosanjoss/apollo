@@ -713,19 +713,27 @@ const collapsedFolders = new Set<string>();
 function openBookmarkManager(): void {
   if (!state) return;
   for (const d of document.querySelectorAll<HTMLDialogElement>('dialog[open]')) d.close();
-  renderBookmarkManager(state);
+  renderBookmarkManager(state, true);
   managerDialog.showModal();
 }
 
-function renderBookmarkManager(s: UiState): void {
+let managerKey = '';
+/**
+ * Só redesenha a árvore quando os favoritos mudam: o estado chega a toda hora (aba carregando…)
+ * e trocar os botões entre apertar e soltar o mouse perdia o clique.
+ */
+function renderBookmarkManager(s: UiState, force = false): void {
   $<HTMLInputElement>('#bm-show-bar').checked = s.settings.bookmarkBar;
+  const key = JSON.stringify(s.bookmarks);
+  if (!force && key === managerKey) return;
+  managerKey = key;
   const build = (parentId: string | null): HTMLElement[] => childrenOf(s.bookmarks, parentId).map((b) => {
     const li = el('li', { className: collapsedFolders.has(b.id) ? 'collapsed' : '' });
     li.setAttribute('role', 'treeitem');
     li.dataset.bookmarkId = b.id;
     const row = el('div', { className: 'row' });
     const toggle = el('button', { type: 'button', className: 'toggle', textContent: b.folder ? (collapsedFolders.has(b.id) ? '▸' : '▾') : '' });
-    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(s); };
+    if (b.folder) toggle.onclick = () => { if (collapsedFolders.has(b.id)) collapsedFolders.delete(b.id); else collapsedFolders.add(b.id); renderBookmarkManager(state!, true); };
     const title = el('span', { className: 't', textContent: b.title || readableUrl(b.url) });
     if (!b.folder) title.ondblclick = () => openBm(b, new MouseEvent('click'));
     const act = (label: string, t: string, fn: () => void) => { const x = el('button', { type: 'button', className: 'icon-btn', textContent: label, title: t }); x.onclick = fn; return x; };

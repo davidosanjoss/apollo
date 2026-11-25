@@ -13,6 +13,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/). 
   - No menu da chave: "Preencher código de verificação" em cada login, "Códigos de verificação…" (lista com todos os códigos e o tempo restante; clicar copia) e "Configurar app autenticador desta página…", que lê o QR code que o site mostra (ou a chave colada), guarda no login do Bitwarden e já preenche o código de confirmação.
 
 ### Corrigido
+- Gerenciador de favoritos: cliques nos botões (＋, ✎, 🗑) às vezes não faziam nada enquanto uma aba carregava, porque a lista era redesenhada a cada atualização. Agora só é redesenhada quando os favoritos mudam.
 - Gerenciador de favoritos: o ícone de cada site não tinha tamanho fixo. Ícones grandes apareciam no tamanho original, e quando um ícone falhava e virava a inicial, a linha mudava de largura sob o mouse.
 
 ## [0.11.0] - 2026-11-23
