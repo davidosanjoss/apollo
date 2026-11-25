@@ -42,6 +42,16 @@ const PROMPT_TIMEOUT_MS = 5 * 60_000;
 const optionId = (itemId: string, credentialId: string) =>
   crypto.createHash('sha256').update(`${itemId}\n${credentialId}`).digest('hex').slice(0, 24);
 
+/**
+ * Onde salvar, já marcado na janela: o login do site com o mesmo usuário (sem passkey), ou o
+ * único login do site sem passkey; senão, um login novo. Nada é trocado sem o usuário escolher.
+ */
+function defaultTarget(targets: VaultLogin[], userName: string | null): string {
+  const free = targets.filter((l) => !l.passkeys.length);
+  const same = userName ? free.find((l) => l.username?.toLowerCase() === userName.toLowerCase()) : undefined;
+  return same?.id ?? (free.length === 1 ? free[0].id : 'new');
+}
+
 export class PasskeyBroker {
   private readonly prompts = new Map<string, Pending>();
   private readonly conditional = new Map<string, Pending>();
@@ -109,7 +119,7 @@ export class PasskeyBroker {
       const options = this.candidates(p).map((c) => ({ id: optionId(c.itemId, c.passkey.credentialId),
         label: c.passkey.userName || c.passkey.userDisplayName || c.itemName, detail: c.itemName, replaces: false }));
       const message = vault === 'unlocked' && !options.length ? `Nenhuma passkey de ${p.rpId} no Bitwarden.` : null;
-      return { ...base, options, userName: null, message };
+      return { ...base, options, selected: options[0]?.id ?? null, userName: null, message };
     }
     const v = this.deps.vault();
     const exists = v ? alreadyRegistered(v.logins, p.rpId, p.req.exclude) : false;
@@ -118,8 +128,9 @@ export class PasskeyBroker {
       { id: 'new', label: 'Login novo', detail: p.rpId, replaces: false },
       ...targets.map((l) => ({ id: l.id, label: l.username ? `${l.name} — ${l.username}` : l.name, detail: l.passkeys.length ? 'já tem uma passkey (será trocada)' : null, replaces: l.passkeys.length > 0 })),
     ];
-    return { ...base, options: vault === 'unlocked' && !exists ? options : [], userName: p.req.userName || p.req.userDisplayName,
-      message: exists ? `Você já tem uma passkey de ${p.rpId} no Bitwarden.` : null };
+    const shown = vault === 'unlocked' && !exists ? options : [];
+    return { ...base, options: shown, selected: shown.length ? defaultTarget(targets, p.req.userName) : null,
+      userName: p.req.userName || p.req.userDisplayName, message: exists ? `Você já tem uma passkey de ${p.rpId} no Bitwarden.` : null };
   }
 
   /** Escolha na janela: opção (passkey ou onde salvar), cancelar (null) ou outro método. */

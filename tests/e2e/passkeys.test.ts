@@ -49,8 +49,10 @@ describe('passkeys pelo Bitwarden', () => {
     expect(s.passkeyPrompt).toMatchObject({ kind: 'create', site: 'localhost', userName: 'eu@teste.com', vault: 'unlocked' });
     expect(s.passkeyPrompt!.options.map((o) => o.label)).toEqual(['Login novo', 'Site com senha — eu@teste.com']);
     await waitFor(dialogOpen, 'janela aberta');
-    // Salvar no login que já existe (com a senha): clique de verdade na opção e em "Salvar passkey".
-    await app.ui.mouseClick(`#passkey-options .passkey-opt[data-option="item-0"]`);
+    // Regressão: com duas opções nenhuma vinha marcada e "Salvar passkey" não respondia. O login
+    // do site com o mesmo usuário (e sem passkey) já vem marcado: basta clicar em salvar.
+    expect(s.passkeyPrompt!.selected).toBe('item-0');
+    expect(await app.ui.eval<boolean>(`document.getElementById('passkey-ok').disabled`)).toBe(false);
     await app.ui.mouseClick('#passkey-ok');
     const r = await result();
     expect(r.erro).toBeUndefined();

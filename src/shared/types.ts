@@ -332,6 +332,8 @@ export interface PasskeyPromptInfo {
   vault: 'disconnected' | 'locked' | 'unlocked';
   /** get: as passkeys do site; create: onde salvar ('new' = login novo). */
   options: { id: string; label: string; detail: string | null; replaces: boolean }[];
+  /** Opção que a janela já abre marcada (o botão de confirmar nunca começa desativado à toa). */
+  selected: string | null;
   /** create: usuário que o site informou. */
   userName: string | null;
   /** Windows: dá para usar o Windows Hello / chave de segurança no lugar. */

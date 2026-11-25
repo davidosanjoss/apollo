@@ -85,6 +85,19 @@ describe('pedidos de passkey da página', () => {
     broker.cancelTab('aba-1');
   });
 
+  // Regressão: com mais de uma opção (login novo + login do site) nenhuma vinha marcada e o
+  // botão "Salvar passkey" ficava desativado, parecendo quebrado (cadastro de MFA na AWS).
+  it('criar: a janela já abre com onde salvar marcado', async () => {
+    const { broker } = await setup();
+    void broker.request('aba-1', 'https://exemplo.com', createReq());
+    // O único login do site já tem passkey: não troca sem o usuário pedir, sugere um novo.
+    expect(broker.promptFor('aba-1')!.selected).toBe('new');
+    broker.cancelTab('aba-1');
+    void broker.request('aba-1', 'https://exemplo.com', getReq());
+    expect(broker.promptFor('aba-1')!.selected).toBe(broker.promptFor('aba-1')!.options[0].id);
+    broker.cancelTab('aba-1');
+  });
+
   it('criar: salva no Bitwarden (login novo ou existente) e devolve o atestado', async () => {
     const { broker, saved } = await setup();
     const pending = broker.request('aba-1', 'https://exemplo.com', createReq());

@@ -1664,7 +1664,7 @@ function renderPasskey(s: UiState): void {
   // Outro diálogo aberto (ex.: desbloqueando o Bitwarden): espera ele fechar.
   const other = [...document.querySelectorAll<HTMLDialogElement>('dialog[open]')].some((d) => d !== passkeyDialog);
   if (other) return;
-  if (passkeyShown !== p.id) { passkeyShown = p.id; passkeyChoice = null; passkeyKey = ''; }
+  if (passkeyShown !== p.id) { passkeyShown = p.id; passkeyChoice = p.selected; passkeyKey = ''; }
   const key = JSON.stringify(p);
   if (key !== passkeyKey) {
     passkeyKey = key;
@@ -1679,8 +1679,8 @@ function renderPasskey(s: UiState): void {
     $('#passkey-message').textContent = msg ?? '';
     $('#passkey-error').hidden = !p.error;
     $('#passkey-error').textContent = p.error ?? '';
-    if (p.options.length === 1) passkeyChoice = p.options[0].id;
-    if (passkeyChoice && !p.options.some((o) => o.id === passkeyChoice)) passkeyChoice = null;
+    // Escolha que sumiu (ou nenhuma ainda, ex.: acabou de desbloquear): volta para a sugerida.
+    if (!passkeyChoice || !p.options.some((o) => o.id === passkeyChoice)) passkeyChoice = p.selected;
     $('#passkey-options').replaceChildren(...p.options.map((o) => {
       const b = el('button', { type: 'button', className: `passkey-opt${o.id === passkeyChoice ? ' selected' : ''}${o.replaces ? ' replaces' : ''}` });
       b.dataset.option = o.id;
